@@ -2,6 +2,17 @@
 @tailwind components;
 @tailwind utilities;
 
+@keyframes twinkle {
+  0%, 100% {
+    opacity: var(--base-opacity, 0.4);
+    transform: scale(1);
+  }
+  50% {
+    opacity: calc(var(--base-opacity, 0.4) * 0.08);
+    transform: scale(0.3);
+  }
+}
+
 @layer base {
   body {
     @apply bg-space-900 text-slate-200;

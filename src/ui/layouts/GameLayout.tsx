@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useGameStore } from '@/stores/gameStore';
+import { StarField } from '@/ui/effects/StarField';
 import { ResourceBar } from '@/ui/panels/ResourceBar';
 import { MiningPanel } from '@/ui/panels/MiningPanel';
 import { EnergyPanel } from '@/ui/panels/EnergyPanel';
@@ -44,7 +45,8 @@ export function GameLayout() {
   const visibleNav = NAV.filter(n => unlocks[n.unlockKey]);
 
   return (
-    <div className="flex flex-col h-screen overflow-hidden">
+    <div className="flex flex-col h-screen overflow-hidden relative" style={{ zIndex: 1 }}>
+      <StarField />
       {/* Top bar */}
       <div className="bg-space-800 border-b border-slate-700/60 px-4 py-2 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3">
