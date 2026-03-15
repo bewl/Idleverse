@@ -17,6 +17,7 @@ import { upgradeCost } from '@/game/balance/constants';
 import { saveGame, loadGame } from '@/game/persistence/saveLoad';
 import { processOfflineProgress } from '@/game/offline/offlineCalc';
 import { calculateSellValue } from '@/game/systems/market/market.logic';
+import type { TradeRoute } from '@/types/game.types';
 import { BATCH_SIZE_BASE } from '@/game/systems/reprocessing/reprocessing.config';
 import { getSystemById, getSystemBeltIds, generateGalaxy, systemDistance } from '@/game/galaxy/galaxy.gen';
 import { calcWarpDuration } from '@/game/galaxy/travel.logic';
@@ -32,7 +33,15 @@ import {
   addShipToFleet,
   removeShipFromFleet,
   renamePlayerFleet,
+  setShipRoleInState,
+  setFleetDoctrineInState,
+  repairShipInState,
 } from '@/game/systems/fleet/fleet.logic';
+import {
+  issuePatrolOrderInState,
+  issueCombatRaidOrderInState,
+  cancelCombatOrderInState,
+} from '@/game/systems/combat/combat.logic';
 import {
   issueFleetOrder,
   cancelFleetOrder,
@@ -90,6 +99,7 @@ interface GameStore {
   recallShip: (shipId: string) => boolean;
   assignPilotToShip: (pilotId: string, shipId: string | null) => boolean;
   setShipActivity: (shipId: string, activity: FleetActivity, assignedBeltId?: string) => boolean;
+  repairShip: (shipId: string) => boolean;
   fitModule: (shipId: string, slotType: 'high' | 'mid' | 'low', moduleId: string) => boolean;
   removeModule: (shipId: string, slotType: 'high' | 'mid' | 'low', index: number) => boolean;
   addPilotSkillToQueue: (pilotId: string, skillId: string, targetLevel: 1 | 2 | 3 | 4 | 5) => boolean;
@@ -105,8 +115,26 @@ interface GameStore {
   addShipToFleet: (fleetId: string, shipId: string) => boolean;
   removeShipFromFleet: (fleetId: string, shipId: string) => boolean;
   renamePlayerFleet: (fleetId: string, name: string) => boolean;
+  movePlayerFleet: (fleetId: string, direction: 'up' | 'down') => void;
   issueFleetGroupOrder: (fleetId: string, destinationId: string, securityFilter?: RouteSecurityFilter, pauseOnArrival?: boolean) => boolean;
   cancelFleetGroupOrder: (fleetId: string) => boolean;
+  setShipRole: (shipId: string, role: import('@/types/game.types').ShipRole) => boolean;
+  setFleetDoctrine: (fleetId: string, doctrine: import('@/types/game.types').FleetDoctrine) => boolean;
+  issuePatrolOrder: (fleetId: string) => boolean;
+  issueCombatRaidOrder: (fleetId: string, npcGroupId: string) => boolean;
+  cancelCombatOrder: (fleetId: string) => boolean;
+
+  // Trade routes
+  createTradeRoute: (params: {
+    name: string;
+    fleetId: string;
+    fromSystemId: string;
+    toSystemId: string;
+    resourceId: string;
+    amountPerRun: number;
+  }) => boolean;
+  deleteTradeRoute: (routeId: string) => void;
+  toggleTradeRoute:  (routeId: string) => void;
 
   // Factions
   adjustReputation: (factionId: FactionId, delta: number) => void;
@@ -582,6 +610,13 @@ export const useGameStore = create<GameStore>((set, get) => ({
     return true;
   },
 
+  repairShip: (shipId) => {
+    const newState = repairShipInState(get().state, shipId);
+    if (!newState) return false;
+    set({ state: newState });
+    return true;
+  },
+
   fitModule: (shipId, slotType, moduleId) => {
     const newState = fitModule(get().state, shipId, slotType, moduleId);
     if (!newState) return false;
@@ -774,6 +809,19 @@ export const useGameStore = create<GameStore>((set, get) => ({
     return true;
   },
 
+  movePlayerFleet: (fleetId, direction) => {
+    const state = get().state;
+    const ids = Object.keys(state.systems.fleet.fleets);
+    const idx = ids.indexOf(fleetId);
+    if (idx === -1) return;
+    const newIdx = direction === 'up' ? idx - 1 : idx + 1;
+    if (newIdx < 0 || newIdx >= ids.length) return;
+    [ids[idx], ids[newIdx]] = [ids[newIdx], ids[idx]];
+    const reordered: Record<string, import('@/types/game.types').PlayerFleet> = {};
+    for (const id of ids) reordered[id] = state.systems.fleet.fleets[id];
+    set({ state: { ...state, systems: { ...state.systems, fleet: { ...state.systems.fleet, fleets: reordered } } } });
+  },
+
   issueFleetGroupOrder: (fleetId, destinationId, securityFilter = 'shortest', pauseOnArrival = false) => {
     const newState = issueFleetGroupOrder(get().state, fleetId, destinationId, securityFilter, pauseOnArrival);
     if (!newState) return false;
@@ -786,6 +834,114 @@ export const useGameStore = create<GameStore>((set, get) => ({
     if (!newState) return false;
     set({ state: newState });
     return true;
+  },
+
+  setShipRole: (shipId, role) => {
+    const newState = setShipRoleInState(get().state, shipId, role);
+    if (!newState) return false;
+    set({ state: newState });
+    return true;
+  },
+
+  setFleetDoctrine: (fleetId, doctrine) => {
+    const newState = setFleetDoctrineInState(get().state, fleetId, doctrine);
+    if (!newState) return false;
+    set({ state: newState });
+    return true;
+  },
+
+  issuePatrolOrder: (fleetId) => {
+    const newState = issuePatrolOrderInState(get().state, fleetId);
+    if (!newState) return false;
+    set({ state: newState });
+    return true;
+  },
+
+  issueCombatRaidOrder: (fleetId, npcGroupId) => {
+    const newState = issueCombatRaidOrderInState(get().state, fleetId, npcGroupId);
+    if (!newState) return false;
+    set({ state: newState });
+    return true;
+  },
+
+  cancelCombatOrder: (fleetId) => {
+    const newState = cancelCombatOrderInState(get().state, fleetId);
+    if (!newState) return false;
+    set({ state: newState });
+    return true;
+  },
+
+  // ── Trade routes ─────────────────────────────────────────────────────────
+
+  createTradeRoute: (params) => {
+    const state = get().state;
+    const tradeLevel  = state.systems.skills.levels['trade'] ?? 0;
+    if (tradeLevel < 3) return false;
+
+    const existing  = state.systems.fleet.tradeRoutes ?? [];
+    const maxRoutes = Math.max(1, tradeLevel - 2); // III=1, IV=2, V=3
+    if (existing.length >= maxRoutes) return false;
+
+    // Verify the fleet exists
+    if (!state.systems.fleet.fleets[params.fleetId]) return false;
+
+    const newRoute: TradeRoute = {
+      id:               `route-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+      name:             params.name || `Route ${existing.length + 1}`,
+      fleetId:          params.fleetId,
+      fromSystemId:     params.fromSystemId,
+      toSystemId:       params.toSystemId,
+      resourceId:       params.resourceId,
+      amountPerRun:     Math.max(1, params.amountPerRun),
+      enabled:          true,
+      inTransit:        0,
+      buyCostForTransit: 0,
+      lastRunProfit:    null,
+      totalRunsCompleted: 0,
+    };
+
+    set(s => ({
+      state: {
+        ...s.state,
+        systems: {
+          ...s.state.systems,
+          fleet: { ...s.state.systems.fleet, tradeRoutes: [...existing, newRoute] },
+        },
+      },
+    }));
+    return true;
+  },
+
+  deleteTradeRoute: (routeId) => {
+    set(s => ({
+      state: {
+        ...s.state,
+        systems: {
+          ...s.state.systems,
+          fleet: {
+            ...s.state.systems.fleet,
+            tradeRoutes: (s.state.systems.fleet.tradeRoutes ?? []).filter(r => r.id !== routeId),
+          },
+        },
+      },
+    }));
+  },
+
+  toggleTradeRoute: (routeId) => {
+    set(s => ({
+      state: {
+        ...s.state,
+        systems: {
+          ...s.state.systems,
+          fleet: {
+            ...s.state.systems.fleet,
+            tradeRoutes: (s.state.systems.fleet.tradeRoutes ?? []).map(r =>
+              r.id === routeId ? { ...r, enabled: !r.enabled } : r,
+            ),
+          },
+        },
+      },
+    }));
   },
 
   // ── Factions ──────────────────────────────────────────────
@@ -937,12 +1093,25 @@ export const useGameStore = create<GameStore>((set, get) => ({
     if (patchedSystems.fleet.maxFleets === undefined) {
       patchedSystems.fleet = { ...patchedSystems.fleet, maxFleets: defaults.systems.fleet.maxFleets };
     }
-    // Patch existing ships — add fleetId field if missing
+    // Patch existing ships — add fleetId field if missing; migrate stale activity values
+    const VALID_ACTIVITIES = new Set(['idle', 'mining', 'hauling', 'transport']);
     const patchedShips: typeof patchedSystems.fleet.ships = {};
     for (const [id, ship] of Object.entries(patchedSystems.fleet.ships)) {
-      patchedShips[id] = ship.fleetId === undefined ? { ...ship, fleetId: null } : ship;
+      const shipWithFleet = ship.fleetId === undefined ? { ...ship, fleetId: null } : ship;
+      const activity = VALID_ACTIVITIES.has(shipWithFleet.activity) ? shipWithFleet.activity : 'idle' as const;
+      patchedShips[id] = activity !== shipWithFleet.activity ? { ...shipWithFleet, activity } : shipWithFleet;
     }
     patchedSystems.fleet = { ...patchedSystems.fleet, ships: patchedShips };
+    // Patch combatLog — added in Phase 2
+    if (!patchedSystems.fleet.combatLog) {
+      patchedSystems.fleet = { ...patchedSystems.fleet, combatLog: [] };
+    }
+    // Patch fleet combatOrder — added in Phase 2
+    const patchedFleets: typeof patchedSystems.fleet.fleets = {};
+    for (const [id, fleet] of Object.entries(patchedSystems.fleet.fleets)) {
+      patchedFleets[id] = fleet.combatOrder === undefined ? { ...fleet, combatOrder: null } : fleet;
+    }
+    patchedSystems.fleet = { ...patchedSystems.fleet, fleets: patchedFleets };
 
     // Patch factions — added in v3; default to fresh faction state for older saves
     if (!patchedSystems.factions) {
@@ -960,7 +1129,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       modifiers: { ...save.state.modifiers, ...recomputedModifiers },
       // Patch galaxy if it was added after this save was written
       galaxy:    save.state.galaxy
-        ? { ...save.state.galaxy, galacticSliceZ: save.state.galaxy.galacticSliceZ ?? 0.5 }
+        ? { ...save.state.galaxy, galacticSliceZ: save.state.galaxy.galacticSliceZ ?? 0.5, npcGroupStates: save.state.galaxy.npcGroupStates ?? {} }
         : defaults.galaxy,
     };
 

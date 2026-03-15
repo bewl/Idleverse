@@ -68,17 +68,25 @@ Systems represent major gameplay pillars.
 
 System names should be **clear and technological**.
 
-Examples:
+Actual implemented systems:
 
 - Asteroid Mining
-- Energy Grid
-- Research Laboratory
-- Terraforming Operations
-- Logistics Network
-- Colony Administration
-- Manufacturing Complex
-- Expedition Command
-- Anomaly Research
+- Ore Reprocessing
+- Manufacturing
+- Skills
+- Market
+- Fleet Management
+- Fleet Combat
+- Galaxy Navigation
+- Factions
+- Pilots
+
+Planned systems (see Design Plan):
+
+- Dynamic Economy & Trade Routes
+- Blueprint Research
+- Exploration & Anomaly Scanning
+- Stations & Mission Boards
 
 Avoid vague names like:
 
@@ -90,54 +98,44 @@ Avoid vague names like:
 
 ## Resources
 
-Resources should follow a **tiered progression model**.
+Resources follow the **actual tiered production chain** defined in `Idleverse_RESOURCE_REGISTRY.md`.
 
-### Tier 1 – Raw Materials
-
-Examples:
-
-- Raw Ore
-- Ice Deposits
-- Carbon Materials
-- Metallic Dust
-
-### Tier 2 – Processed Materials
+### Tier 1 – Raw Ores
 
 Examples:
 
-- Refined Metals
-- Structural Alloys
-- Processed Carbon
-- Industrial Components
+- Ferrock, Corite, Silisite, Platonite (highsec)
+- Darkstone, Hematite, Voidite (lowsec)
+- Arkonite, Crokitite (nullsec)
 
-### Tier 3 – Advanced Components
-
-Examples:
-
-- Energy Cells
-- Quantum Circuits
-- Nano Assemblies
-- Plasma Cores
-
-### Tier 4 – Exotic Materials
+### Tier 2 – Minerals
 
 Examples:
 
-- Exotic Matter
-- Stellar Fragments
-- Neutronium Plates
-- Dark Energy Samples
+- Ferrite, Silite, Vexirite (common)
+- Isorium, Noxium, Zyridium (mid-tier)
+- Megacite, Voidsteel (rare/nullsec)
 
-### Tier 5 – Cosmic Materials
+### Tier 3 – Manufactured Components
 
 Examples:
 
-- Singularity Crystals
-- Temporal Particles
-- Cosmic Lattice
-- Reality Shards
+- Hull Plate, Thruster Node, Condenser Coil
+- Sensor Cluster, Mining Laser, Shield Emitter
 
-Higher tier resources should be **rarer and system‑dependent**.
+### Tier 4 – Ships
+
+Examples:
+
+- Shuttle, Frigate, Mining Frigate
+- Hauler, Destroyer, Exhumer
+
+### Future Tiers (Phase 3+)
+
+Examples:
+
+- Morphite, Zydrine (T2 ore/mineral)
+- Datacores (blueprint research inputs)
 
 ---
 
@@ -196,134 +194,52 @@ Quantum Smelting
 
 # Research Design
 
-Research should represent **scientific progress**.
+Blueprint Research (Phase 3) represents scientific progress.
 
-Research trees may branch into different philosophies.
+Research converts **datacores** (dropped from NPC loot) + time + Science skill levels into
+Tier 2 blueprint originals (BPOs). T2 ships and modules are 40-60% stronger per stat.
 
-Example research paths:
+Research paths align with production:
 
-### Industrial Research
+### Industrial Research (Science skill)
 
-Focus on production efficiency.
-
-Examples:
-
-- Advanced Metallurgy
-- High‑Yield Extraction
-- Automated Manufacturing
-
-### Energy Research
-
-Focus on power systems.
+Focus on manufacturing upgrades and T2 blueprints.
 
 Examples:
+- Hull Plate T2 blueprint research
+- Mining Frigate T2 BPO
 
-- Fusion Reactors
-- Stellar Energy Capture
-- Dark Matter Reactors
+### Electronics Research (Electronics skill)
 
-### Exploration Research
-
-Focus on discovering new space phenomena.
+Focus on advanced modules.
 
 Examples:
+- Sensor Cluster T2
+- Shield Emitter T2
 
-- Deep Space Scanning
-- Wormhole Stabilization
-- Interstellar Navigation
+### Exploration Research (planned Phase 4)
 
-### AI Research
-
-Focus on automation and intelligence.
+Unlocks anomaly scanning and wormhole traversal.
 
 Examples:
-
-- Neural Optimization
-- Autonomous Logistics
-- Predictive Systems
+- Astrometrics training
+- Archaeology + Hacking skills
 
 ---
 
-# Colony Design
+# Exploration & Anomaly Design (Phase 4)
 
-Colonies represent planetary infrastructure.
+Anomalies are hidden phenomena in non-highsec systems revealed by scanning fleets.
 
-Each colony should specialize in one of several roles.
+| Type | Reward |
+|---|---|
+| `ore-pocket` | Bonus mining yield stream for 2–6 hours |
+| `data-site` | Datacores, skillbooks, schematics |
+| `relic-site` | Exotic minerals, salvage components |
+| `combat-site` | Hidden pirate base (enhanced loot) |
+| `wormhole` | Temporary jump edge on galaxy map (12–48h) |
 
-Examples:
-
-### Mining Colony
-
-High raw material production.
-
-### Industrial Colony
-
-Manufacturing hub.
-
-### Research Colony
-
-Scientific output.
-
-### Energy Colony
-
-Power generation.
-
-### Trade Colony
-
-Resource logistics and economic influence.
-
-Colonies should provide **bonuses based on specialization**.
-
----
-
-# Expedition Design
-
-Expeditions allow players to explore unknown areas of space.
-
-Possible targets:
-
-- derelict stations
-- asteroid fields
-- alien ruins
-- black hole perimeters
-- unstable wormholes
-- ancient megastructures
-
-Expeditions should have:
-
-- duration
-- risk level
-- reward potential
-
-Rewards may include:
-
-- rare resources
-- relic technologies
-- unique upgrades
-- anomaly discoveries
-
----
-
-# Anomaly Design
-
-Anomalies represent strange cosmic phenomena.
-
-Examples:
-
-- temporal distortions
-- gravitational anomalies
-- alien artifacts
-- abandoned AI networks
-- spatial fractures
-
-Anomalies should create **unexpected gameplay opportunities**.
-
-Examples:
-
-- new technologies
-- temporary buffs
-- rare resources
-- permanent discoveries
+Anomalies should create **unexpected gameplay opportunities** while rewarding active engagement.
 
 ---
 

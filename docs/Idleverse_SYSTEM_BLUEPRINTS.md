@@ -1,13 +1,12 @@
-
-# Idleverse – Core System Blueprints
+﻿# Idleverse – Core System Blueprints
 
 ## Purpose
 
-This document defines the **first core gameplay systems of Idleverse** in enough detail that AI tools or developers can implement the MVP of the game consistently.
+This document defines the **implemented gameplay systems** of Idleverse.
+It is the reference for how each system behaves, what it depends on, and how it integrates with
+the rest of the game.
 
-These blueprints are **not final content numbers** but structural definitions for how each system should behave and interact with the economy.
-
-The goal is to create a **deep but modular idle simulation architecture**.
+For the forward-looking feature pipeline (upcoming phases), see `Idleverse_DESIGN_PLAN.md`.
 
 ---
 
@@ -15,418 +14,329 @@ The goal is to create a **deep but modular idle simulation architecture**.
 
 ## Role
 
-Asteroid Mining is the **primary starting system** and the foundation of the resource economy.
+The starting system and foundation of the resource economy. Players activate ore belts to
+continuously produce raw ore that accumulates in an ore hold, then gets hauled to inventory.
 
-It produces the earliest materials used across most other systems.
+## State
 
-## Core Resources
+`src/game/systems/mining/`
 
-Primary outputs:
+```ts
+MiningState {
+  targets: Record<beltId, boolean>     // which belts are active
+  oreHold: Record<resourceId, number>  // ore collected, not yet hauled
+  beltPool: Record<beltId, number>     // remaining ore before depletion
+  beltRespawnAt: Record<beltId, ms>    // when a depleted belt respawns
+  lastHaulAt: number                   // unix-ms of last auto/manual haul
+}
+```
 
-- Raw Ore
-- Metallic Dust
-- Carbon Materials
-- Ice Deposits
+## Mechanics
 
-## Core Mechanics
-
-Players choose mining targets:
-
-- asteroid clusters
-- ice bodies
-- metallic asteroids
-
-Each target has:
-
-- yield rate
-- depletion rate
-- rarity modifier
-
-## Upgrade Categories
-
-Efficiency upgrades
-→ increase mining speed
-
-Extraction upgrades
-→ increase resource yield
-
-Drone upgrades
-→ allow automated mining
-
-Deep mining upgrades
-→ unlock rare resources
+- **9 ore belts** across 3 security tiers (highsec ×4, lowsec ×3, nullsec ×2)
+- Lowsec requires Advanced Mining I; nullsec requires Advanced Mining III
+- Each belt has a `poolSize` — it depletes as ore is extracted, then respawns
+- Ore accumulates in `oreHold`; the hold has a capacity (`BASE_ORE_HOLD_CAPACITY = 5,000`)
+- Auto-haul timer: base 120 s, reduced by `haul-speed` modifier and hauling-assigned ships
+- Hauling-role ships reduce the haul interval by `0.05 × hull.baseCargoMultiplier` each, capped at 70% total reduction
 
 ## Dependencies
 
-Mining depends on:
-
-- Energy Grid (power)
-- Research (efficiency improvements)
+- Skills: Mining, Astrogeology, Advanced Mining, Ice Harvesting, Drone Interfacing, Mining Barge
+- Fleet: ships with `activity: 'hauling'` reduce haul timer
 
 ---
 
-# System 2 – Energy Grid
+# System 2 – Reprocessing
 
 ## Role
 
-Energy is required for most advanced operations.
+Converts raw ores into refined minerals — the input material for all manufacturing.
 
-The Energy Grid acts as a **global resource limiter**.
+## State
 
-## Core Resources
-
-- Energy Units
-
-## Energy Sources
-
-Examples:
-
-- Solar Arrays
-- Fusion Reactors
-- Stellar Harvesters
-- Dark Matter Reactors
+`src/game/systems/reprocessing/`
 
 ## Mechanics
 
-Systems consume energy to operate.
-
-Example:
-
-Mining operation = 5 energy/sec
-
-If power supply is insufficient:
-
-- production slows
-- automation pauses
-- systems enter low power mode
-
-## Upgrade Paths
-
-- energy efficiency
-- reactor output
-- grid stability
-- storage capacity
+- Works as a job queue (up to 3 simultaneous jobs)
+- Each job processes a batch of ore into minerals over time
+- **Efficiency** skill-scaled: Reprocessing, Reprocessing Efficiency, Metallurgy skills apply
+- Auto-reprocessing: per-ore toggle + configurable minimum-keep threshold
+- Yield improved by `reprocessing-efficiency` modifier
 
 ---
 
-# System 3 – Research Laboratory
+# System 3 – Manufacturing
 
 ## Role
 
-Research unlocks new systems, upgrades, and technologies.
+Converts minerals into manufactured components and ships via a recipe queue.
 
-It is the **primary long-term progression driver**.
+## State
 
-## Research Types
+`src/game/systems/manufacturing/`
 
-Industrial Research
-→ production improvements
+## Recipes (12 total)
 
-Energy Research
-→ new power generation
+**Components (Tier 3):** Hull Plate, Thruster Node, Condenser Coil, Sensor Cluster, Mining Laser, Shield Emitter
 
-AI Research
-→ automation unlocks
-
-Exploration Research
-→ expedition upgrades
+**Ships (Tier 4):** Shuttle, Frigate, Mining Frigate, Hauler, Destroyer, Exhumer
 
 ## Mechanics
 
-Research consumes:
-
-- time
-- energy
-- scientific resources
-
-Research nodes form a **branching tree**.
-
-Completing nodes unlocks:
-
-- new systems
-- upgrades
-- automation tiers
+- Recipe queue with up to 5 parallel jobs
+- Manufacturing speed scaled by Industry + Advanced Industry skills
+- Ship recipes produce a `ShipInstance` (not a stackable resource)
+- Some recipes gated by skill level (e.g. Sensor Cluster requires Electronics II)
 
 ---
 
-# System 4 – Manufacturing Complex
+# System 4 – Skills
 
 ## Role
 
-Manufacturing converts raw resources into advanced components.
+The core progression system. Corp-wide skills apply global modifiers. Pilots have individual skill
+queues for combat/mining specialisation.
 
-## Input Resources
+## State
 
-Examples:
+`src/game/systems/skills/`
 
-- Refined Metals
-- Carbon Materials
-- Energy
+## Skill Categories (34 skills total)
 
-## Output Resources
-
-Examples:
-
-- Structural Alloys
-- Machine Parts
-- Drone Components
-- Quantum Circuits
+| Category | Skills |
+|---|---|
+| Mining | Mining, Astrogeology, Advanced Mining, Ice Harvesting, Drone Interfacing, Mining Barge |
+| Spaceship | Spaceship Command, Frigate, Mining Frigate, Industrial, Destroyer, Cruiser, Gunnery, Military Operations |
+| Industry | Industry, Advanced Industry, Reprocessing, Reprocessing Efficiency |
+| Science | Science, Metallurgy, Survey |
+| Electronics | Electronics, CPU Management, Ladar Sensing |
+| Trade | Trade, Broker Relations |
 
 ## Mechanics
 
-Manufacturing uses **production queues**.
-
-Players choose recipes to produce specific components.
-
-Automation upgrades allow queues to self-maintain.
+- Training one level at a time; queue holds up to 50 entries
+- Time per level: `SKILL_LEVEL_SECONDS[level-1] × rank` (level 1 = 60s × rank, level 5 = 64,800s × rank)
+- Skills apply effects via `modifiers` dictionary in GameState
+- Pilot skills (individual) trained through the Pilots tab in the Fleet panel
 
 ---
 
-# System 5 – Logistics Network
+# System 5 – Market
 
 ## Role
 
-The logistics system manages **transport and distribution** of resources between systems and colonies.
+NPC buy/sell orders for all resources and ships. Provides the primary ISK income loop.
+Prices are dynamic per system, driven by seeded demand and a live pressure model.
+
+## State
+
+`src/game/systems/market/`
+
+`galaxy.systemPressure: Record<systemId, Record<resourceId, number>>` — live price pressure per system
 
 ## Mechanics
 
-Resources may require transportation between:
+### Static Prices & Sell Bonuses
+- Base NPC buy prices per resource defined in `market.config.ts`
+- Auto-sell: per-resource toggle with configurable keep-threshold
+- Trade skill improves effective sell price via `market-sell-price` modifier
+- Lifetime ISK tracking per resource
 
-- asteroid fields
-- manufacturing hubs
-- colonies
+### Dynamic Per-System Pricing (Phase 1)
 
-Throughput is limited by logistics capacity.
+```
+localPrice(resource, system) = basePrice × demandMultiplier × systemPressure
+```
 
-Example upgrades:
+- **`demandMultiplier`** — seeded [0.5, 2.0] from `galaxySeed + systemId + resourceId`; static per galaxy
+- **`systemPressure`** — starts at 1.0; trade buys raise it, trade sells depress it; decays to 1.0 at **5%/hr**
+- **Price clamp:** `[base × 0.6, base × 1.4]` — absolute ±40% floor/ceiling
+- **`systemDemandVolume`** = `max(5, round(500_000 / basePrice))` — ~500k ISK saturates any market
 
-- cargo drones
-- transport ships
-- quantum relay systems
+Functions: `getDemandMultiplier`, `getSystemPressure`, `getLocalPrice`, `tickPricePressure`
+
+### Trade Routes (Phase 1)
+
+Automated fleet buy/haul/sell loops registered as `TradeRoute` records in `fleet.tradeRoutes`.
+
+```ts
+TradeRoute { id, name, fleetId, fromSystemId, toSystemId, resourceId, amountPerRun,
+             enabled, inTransit, buyCostForTransit, lastRunProfit, totalRunsCompleted }
+```
+
+**Loop:**
+1. Fleet idle at `fromSystemId` → buys `amountPerRun` at local price, dispatches to `toSystemId`
+2. Fleet arrives at `toSystemId` → sells cargo, records profit, dispatches back
+3. Repeat while `enabled`
+
+**Unlock:** Trade III required; max routes = `tradeLevel − 2` (1 at III, 2 at IV, 3 at V)
+
+Function: `tickTradeRoutes` (called in tick step 8b)
+
+**Store actions:** `createTradeRoute`, `deleteTradeRoute`, `toggleTradeRoute`
+
+## UI
+
+- **MarketPanel** — tab bar: "Market Listings" (original view) | "Trade Routes"
+- **Trade Routes tab** — quota display, route cards (status/profit/run count), create-route form
+- **StarMapPanel Intel panel** — "Trade Opportunity" block showing top-3 minerals by buy-here/sell-there ratio (only if ratio > 1.05)
 
 ---
 
-# System 6 – Terraforming Operations
+# System 6 – Galaxy & Fleet Navigation
 
 ## Role
 
-Terraforming allows planets to become habitable colonies.
+A 400-system procedurally generated galaxy with jump lanes. Player fleets travel between
+systems via BFS shortest-path or Dijkstra least-cost routing.
 
-## Terraforming Stages
+## State
 
-Stage 1 – Atmospheric Stabilization  
-Stage 2 – Water Cycle Formation  
-Stage 3 – Biosphere Seeding  
-Stage 4 – Colony Preparation
-
-Each stage requires:
-
-- energy
-- advanced materials
-- time
-
-Once complete, a planet becomes a **colony system**.
-
----
-
-# System 7 – Colony Administration
-
-## Role
-
-Colonies provide large-scale production and strategic bonuses.
-
-## Colony Specializations
-
-Mining Colony
-→ boosts raw material production
-
-Industrial Colony
-→ boosts manufacturing output
-
-Research Colony
-→ boosts scientific progress
-
-Energy Colony
-→ boosts power generation
-
-Trade Colony
-→ boosts logistics throughput
+`src/game/galaxy/`, `src/types/galaxy.types.ts`
 
 ## Mechanics
 
-Each colony:
-
-- consumes resources
-- produces specialized output
-- unlocks colony upgrades
-
-Colony size may scale through:
-
-- population
-- infrastructure
-- technological level
+- 400 systems procedurally generated from a seed; 3 security tiers (highsec, lowsec, nullsec)
+- Jump lanes form a connected graph; fleets advance one hop per tick
+- Fleet `fleetOrder` drives movement; `maxJumpRangeLY` constrains which hops are valid
+- RoutePlanner in StarMapPanel: calculates and dispatches multi-hop routes
+- StarMapPanel right panel: Intel tab (system info, threats) | Route tab (route planning)
 
 ---
 
-# System 8 – Expedition Command
+# System 7 – Fleet Management
 
 ## Role
 
-Expeditions explore unknown sectors of space.
+The player's ships, pilots, and named fleets. All fleet operations (mining assignment, hauling,
+combat) flow through this system.
 
-They provide rare resources, discoveries, and anomalies.
+## State
 
-## Expedition Targets
+`src/game/systems/fleet/`
 
-Examples:
+## Key Types
 
-- derelict stations
-- alien ruins
-- asteroid anomalies
-- black hole boundaries
-- deep space voids
+```ts
+ShipInstance {
+  activity: 'idle' | 'mining' | 'hauling' | 'transport'
+  role: 'tank' | 'dps' | 'support' | 'scout' | 'unassigned'
+  hullDamage: number   // 0–100%; >80% = offline
+  assignedPilotId, fleetId, fittedModules, systemId, ...
+}
+
+PlayerFleet {
+  shipIds, currentSystemId, fleetOrder, doctrine, combatOrder, ...
+}
+```
 
 ## Mechanics
 
-Expeditions require:
-
-- ships
-- crew or drones
-- fuel
-- time
-
-Risk vs reward should be balanced.
+- Ships have activity assignments and combat roles
+- Named fleets group ships for travel and combat orders
+- **Fleet Doctrines** (Balanced, Brawl, Sniper, Shield Wall, Stealth Raid) adjust combat multipliers
+- Hull damage accumulates in combat; passive idle repair at ~1.5% hull integrity/min
+- Instant repair costs 1× Hull Plate resource
+- Ships with `activity: 'hauling'` reduce the mining haul interval
+- Pilot morale tracked; morale affects combat effectiveness + training speed
 
 ---
 
-# System 9 – Anomaly Research
+# System 8 – Fleet Combat
 
 ## Role
 
-Anomalies represent mysterious cosmic events.
+Fleets earn ISK bounties and resource loot by engaging NPC pirate groups. Resolution is automatic.
 
-Studying them may unlock powerful benefits.
+## State
 
-## Examples
+`src/game/systems/combat/`, `src/types/combat.types.ts`
 
-- temporal distortions
-- alien technology remnants
-- gravitational anomalies
-- abandoned AI networks
+## NPC Groups
 
-## Rewards
+- Spawned deterministically per system from `seed + systemId`
+- Lowsec: 1–3 groups, strength 50–200; Nullsec: 2–5 groups, strength 100–500
+- Respawn timer: 4–12 hours after destruction
 
-Possible rewards:
+## Combat Resolution
 
-- permanent bonuses
-- rare resources
-- research unlocks
-- unique upgrades
+```
+powerRatio = fleetCombatRating / npcGroup.strength
+variance   = seededRandom × 0.4 − 0.2         (±20%, reduced by scout ships)
+adjusted   = powerRatio × (1 + variance) × doctrineMultipliers
+
+VICTORY (adjusted ≥ 1.0):
+  loot        = rollLootTable(npcGroup.lootTable)
+  bounty      = npcGroup.bounty
+  fleetDamage = 5%  + 15%  × (1 − adjusted)
+
+DEFEAT (adjusted < 1.0):
+  no loot, no bounty
+  fleetDamage = 20% + 30% × (1 − adjusted)
+```
+
+## Orders
+
+- **Patrol** — fleet continuously engages weakest alive NPC group (requires Spaceship Command II)
+- **Raid** — single engagement with a specific NPC group (requires Military Operations I)
+
+## Combat Log
+
+Last 20 engagements tracked in `combat.log` with outcome, bounty, and damage taken.
 
 ---
 
-# System 10 – Timeline Prestige
+# System 9 – Factions
 
 ## Role
 
-Prestige allows players to reset progress in exchange for permanent bonuses.
+Four galactic factions with reputation tracking. Standing consequences planned for Phase 5.
 
-This system represents **major cosmic resets**.
+## Factions
 
-## Reset Concept
+| ID | Name | Territory |
+|---|---|---|
+| `concordat` | The Concordat | Highsec core systems |
+| `veldris` | Veldris Corporation | Highsec industrial systems |
+| `free-covenant` | Free Covenant | Lowsec border systems |
+| `null-syndicate` | Null Syndicate | Nullsec deep space |
 
-Example reset names:
+## Current State
 
-- Timeline Collapse
-- Epoch Reset
-- Singularity Reboot
-
-## Preserved Progress
-
-Prestige may retain:
-
-- permanent research bonuses
-- discovery records
-- rare relics
-- prestige currency
-
-## Reset Progress
-
-Reset may remove:
-
-- temporary resources
-- colony infrastructure
-- production systems
-
-Prestige bonuses should improve:
-
-- production efficiency
-- automation speed
-- system unlock speed
+Reputation (`standing`) tracked per faction. Effects (docking access, hostile patrols,
+mission boards) are designed for Phase 5 but not yet active.
 
 ---
 
-# System Interaction Map
+# System 10 – Pilots
 
-Example system dependency graph:
+## Role
 
-Mining
-→ feeds Manufacturing
+Individual crew members assigned to ships. Each pilot has skills, morale, a training focus,
+and specialisations that affect their ship's combat/mining/hauling effectiveness.
 
-Energy
-→ powers all systems
+## Mechanics
 
-Research
-→ unlocks upgrades
-
-Manufacturing
-→ produces infrastructure
-
-Logistics
-→ distributes resources
-
-Terraforming
-→ enables Colonies
-
-Colonies
-→ produce large-scale bonuses
-
-Expeditions
-→ discover anomalies
-
-Anomalies
-→ unlock rare technologies
-
-Prestige
-→ improves future runs
+- Pilots are generated with seeded names, stats, and skill levels
+- Assigned to ships via FleetPanel → Ships tab
+- Pilot skills trained individually on a per-pilot queue
+- Training focus (`mining`, `combat`, `hauling`, `exploration`, `balanced`) guides auto-training
+- Morale: 0–100%, affected by combat outcomes and pilot events
+- `getPilotCombatBonus()`, `getPilotMiningBonus()`, `getPilotHaulingBonus()` compute effectiveness
 
 ---
 
-# MVP Implementation Order
+# Planned Future Systems
 
-Recommended order for development:
+See `Idleverse_DESIGN_PLAN.md` for detailed specs on:
 
-1. Asteroid Mining
-2. Energy Grid
-3. Research Laboratory
-4. Manufacturing
-5. Basic Prestige System
-
-After MVP stability:
-
-6. Logistics
-7. Terraforming
-8. Colonies
-9. Expeditions
-10. Anomaly Research
-
----
-
-# Final Guideline
-
-Idleverse systems should always:
-
-- integrate with the broader economy
-- scale over long progression
-- support automation later in the game
-- remain modular for future expansion
+| System | Phase |
+|---|---|
+| Dynamic Economy & Trade Routes | Phase 1 |
+| Blueprint Research & T2 Manufacturing | Phase 3 |
+| Exploration & Anomaly Scanning | Phase 4 |
+| Factions, Stations & Mission Boards | Phase 5 |
+| Structures & Player Outposts | Phase 6 |
+| Prestige / New Game+ | Phase 7 |

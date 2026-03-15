@@ -1,5 +1,5 @@
-import type { GameState, ShipInstance, FleetActivity, PlayerFleet } from '@/types/game.types';
-import { HULL_DEFINITIONS, MODULE_DEFINITIONS } from './fleet.config';
+import type { GameState, ShipInstance, FleetActivity, PlayerFleet, ShipRole, FleetDoctrine } from '@/types/game.types';
+import { HULL_DEFINITIONS, MODULE_DEFINITIONS, DOCTRINE_DEFINITIONS } from './fleet.config';
 import { getPilotMiningBonus, getPilotCombatBonus, getPilotHaulingBonus, getPilotMoraleMultiplier, canPilotFlyShip } from './pilot.logic';
 
 // ─── Ship deployment ───────────────────────────────────────────────────────
@@ -32,6 +32,8 @@ export function deployShip(
     deployedAt: Date.now(),
     fleetOrder: null,
     fleetId: null,
+    role: 'unassigned',
+    hullDamage: 0,
   };
 
   return {
@@ -324,39 +326,27 @@ export function getFleetHaulingBonus(state: GameState): number {
   return bonus;
 }
 
-/** Aggregate combat rating for ships on patrol/combat in a given system. */
-export function getSystemDefenseRating(state: GameState, systemId: string): number {
-  let rating = 0;
-  for (const ship of Object.values(state.systems.fleet.ships)) {
-    if (ship.systemId !== systemId) continue;
-    if (ship.activity !== 'patrol' && ship.activity !== 'combat') continue;
+/**
+ * Instantly repair a ship to full hull integrity. Costs 1 hull-plate resource.
+ * Returns null if the ship doesn't exist, has no damage, or no hull-plate is available.
+ */
+export function repairShipInState(state: GameState, shipId: string): GameState | null {
+  const ship = state.systems.fleet.ships[shipId];
+  if (!ship || ship.hullDamage <= 0) return null;
+  const hullPlates = state.resources['hull-plate'] ?? 0;
+  if (hullPlates < 1) return null;
 
-    const hull = HULL_DEFINITIONS[ship.shipDefinitionId];
-    if (!hull) continue;
-
-    let combatRating = hull.baseCombatRating;
-
-    // Module bonuses
-    for (const slotType of ['high', 'mid', 'low'] as const) {
-      for (const moduleId of ship.fittedModules[slotType]) {
-        const mod = MODULE_DEFINITIONS[moduleId];
-        if (mod?.effects['combat-rating']) {
-          combatRating += mod.effects['combat-rating'];
-        }
-      }
-    }
-
-    if (ship.assignedPilotId) {
-      const pilot = state.systems.fleet.pilots[ship.assignedPilotId];
-      if (pilot) {
-        combatRating += getPilotCombatBonus(pilot);
-        combatRating *= getPilotMoraleMultiplier(pilot);
-      }
-    }
-
-    rating += combatRating;
-  }
-  return rating;
+  return {
+    ...state,
+    resources: { ...state.resources, 'hull-plate': hullPlates - 1 },
+    systems: {
+      ...state.systems,
+      fleet: {
+        ...state.systems.fleet,
+        ships: { ...state.systems.fleet.ships, [shipId]: { ...ship, hullDamage: 0 } },
+      },
+    },
+  };
 }
 
 // ─── Fleet group management ────────────────────────────────────────────────
@@ -413,6 +403,7 @@ export function createPlayerFleet(
     currentSystemId: systemId,
     fleetOrder: null,
     maxJumpRangeLY: computeFleetJumpRange(state, shipIds),
+    doctrine: 'balanced',
   };
 
   // Tag all ships with the fleet ID
@@ -571,6 +562,108 @@ export function renamePlayerFleet(
       fleet: {
         ...state.systems.fleet,
         fleets: { ...state.systems.fleet.fleets, [fleetId]: { ...fleet, name: trimmed } },
+      },
+    },
+  };
+}
+
+// ─── Fleet Roles & Doctrines ─────────────────────────────────────────────────
+
+/**
+ * Auto-suggest a doctrine based on the role composition of a fleet's ships.
+ */
+export function suggestDoctrine(fleetShips: ShipInstance[]): FleetDoctrine {
+  if (fleetShips.length === 0) return 'balanced';
+  const total = fleetShips.length;
+  const count = (role: ShipRole) => fleetShips.filter(s => s.role === role).length;
+  const scoutRatio = count('scout') / total;
+  const tankRatio  = count('tank')  / total;
+  const dpsRatio   = count('dps')   / total;
+
+  if (scoutRatio >= 0.3)                        return 'stealth-raid';
+  if (tankRatio  >= 0.4)                        return 'shield-wall';
+  if (dpsRatio   >= 0.6)                        return 'brawl';
+  if (dpsRatio   >= 0.4 && scoutRatio >= 0.2)   return 'sniper';
+  return 'balanced';
+}
+
+/**
+ * Returns whether the required role for a doctrine is present in the fleet.
+ */
+export function getDoctrineRequirementsMet(doctrine: FleetDoctrine, fleetShips: ShipInstance[]): boolean {
+  const def = DOCTRINE_DEFINITIONS[doctrine];
+  if (!def) return true; // unknown doctrine (stale persisted state) — treat as met
+  if (def.requires === null) return true;
+  return fleetShips.some(s => s.role === def.requires);
+}
+
+/**
+ * Compute role-adjusted effective combat stats for a fleet.
+ * Used by Phase 2 combat resolution.
+ */
+export function computeRoleAdjustedCombatStats(
+  fleet: PlayerFleet,
+  fleetShips: ShipInstance[],
+): {
+  effectiveDPS: number;
+  tankRating: number;
+  supportRepairRate: number;
+  varianceMultiplier: number;
+  lootQualityMult: number;
+} {
+  const doctrine = DOCTRINE_DEFINITIONS[fleet.doctrine];
+
+  // Base DPS from ship definitions scaled by hull condition
+  const baseDPS = fleetShips.reduce((sum, ship) => {
+    const hull = HULL_DEFINITIONS[ship.shipDefinitionId];
+    const condition = (100 - ship.hullDamage) / 100;
+    return sum + (hull?.baseCombatRating ?? 0.5) * condition;
+  }, 0);
+
+  // Tank ships provide extra damage absorption
+  const tankCount    = fleetShips.filter(s => s.role === 'tank').length;
+  const supportCount = fleetShips.filter(s => s.role === 'support').length;
+
+  return {
+    effectiveDPS:       baseDPS * doctrine.dpsMult,
+    tankRating:         (baseDPS * 0.5 + tankCount * 1.5) * doctrine.tankMult,
+    supportRepairRate:  supportCount * 0.8,
+    varianceMultiplier: doctrine.varianceRange,
+    lootQualityMult:    doctrine.lootMult,
+  };
+}
+
+/**
+ * Assign a combat role to a ship. Returns null if the ship doesn't exist.
+ */
+export function setShipRoleInState(state: GameState, shipId: string, role: ShipRole): GameState | null {
+  const ship = state.systems.fleet.ships[shipId];
+  if (!ship) return null;
+  return {
+    ...state,
+    systems: {
+      ...state.systems,
+      fleet: {
+        ...state.systems.fleet,
+        ships: { ...state.systems.fleet.ships, [shipId]: { ...ship, role } },
+      },
+    },
+  };
+}
+
+/**
+ * Set the doctrine for a fleet. Returns null if the fleet doesn't exist.
+ */
+export function setFleetDoctrineInState(state: GameState, fleetId: string, doctrine: FleetDoctrine): GameState | null {
+  const fleet = state.systems.fleet.fleets[fleetId];
+  if (!fleet) return null;
+  return {
+    ...state,
+    systems: {
+      ...state.systems,
+      fleet: {
+        ...state.systems.fleet,
+        fleets: { ...state.systems.fleet.fleets, [fleetId]: { ...fleet, doctrine } },
       },
     },
   };

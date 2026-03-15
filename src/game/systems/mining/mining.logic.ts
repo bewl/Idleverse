@@ -7,6 +7,7 @@ import {
   MIN_HAUL_SECONDS,
 } from '@/game/balance/constants';
 import { getSystemById, getSystemBeltIds } from '@/game/galaxy/galaxy.gen';
+import { HULL_DEFINITIONS } from '@/game/systems/fleet/fleet.config';
 
 // ─── Result type ────────────────────────────────────────────────────────────
 
@@ -79,10 +80,27 @@ export function getOreHoldUsed(state: GameState): number {
   return Object.values(state.systems.mining.oreHold ?? {}).reduce((s, v) => s + v, 0);
 }
 
-/** Effective auto-haul interval in seconds. */
+/** Effective auto-haul interval in seconds.
+ * Reduced by haul-speed modifier (skills/upgrades) and by ships with activity 'hauling'.
+ * Hauling ships each contribute their pilot's hauling skill × hull cargo multiplier.
+ * Maximum combined reduction is capped at 70%. */
 export function getHaulIntervalSeconds(state: GameState): number {
   const haulMod = state.modifiers['haul-speed'] ?? 0;
-  return Math.max(MIN_HAUL_SECONDS, Math.floor(BASE_HAUL_SECONDS * (1 - haulMod)));
+
+  let activityBonus = 0;
+  for (const ship of Object.values(state.systems.fleet.ships)) {
+    if (ship.activity !== 'hauling') continue;
+    if (!ship.assignedPilotId) continue;
+    const pilot = state.systems.fleet.pilots[ship.assignedPilotId];
+    if (!pilot) continue;
+    // Each hauling ship reduces interval proportionally based on pilot + cargo hull
+    const hull = HULL_DEFINITIONS[ship.shipDefinitionId];
+    const cargoMult = hull ? hull.baseCargoMultiplier : 1.0;
+    activityBonus += 0.05 * cargoMult;
+  }
+
+  const totalReduction = Math.min(0.70, haulMod + activityBonus);
+  return Math.max(MIN_HAUL_SECONDS, Math.floor(BASE_HAUL_SECONDS * (1 - totalReduction)));
 }
 
 /**

@@ -1,4 +1,4 @@
-import type { HullDefinition, ModuleDefinition, PilotTrainingFocus } from '@/types/game.types';
+import type { HullDefinition, ModuleDefinition, PilotTrainingFocus, ShipRole, FleetDoctrine } from '@/types/game.types';
 
 // ─── Hull definitions ──────────────────────────────────────────────────────
 
@@ -173,8 +173,31 @@ export const MODULE_DEFINITIONS: Record<string, ModuleDefinition> = {
 
 export const PILOT_SKILL_FOCUS_TREES: Record<PilotTrainingFocus, string[]> = {
   mining:      ['mining', 'astrogeology', 'mining-frigate', 'mining-barge', 'drone-interfacing', 'advanced-mining'],
-  combat:      ['spaceship-command', 'frigate', 'destroyer', 'cruiser', 'electronics', 'ladar-sensing'],
+  combat:      ['spaceship-command', 'frigate', 'destroyer', 'cruiser', 'gunnery', 'military-operations', 'electronics', 'ladar-sensing'],
   hauling:     ['spaceship-command', 'industrial', 'frigate', 'cpu-management'],
   exploration: ['survey', 'electronics', 'ladar-sensing', 'spaceship-command', 'frigate'],
   balanced:    ['spaceship-command', 'mining', 'frigate', 'survey', 'electronics'],
+};
+
+// ─── Doctrine definitions ─────────────────────────────────────────────────
+
+export interface DoctrineDefinition {
+  label: string;
+  color: string;
+  dpsMult: number;
+  tankMult: number;
+  lootMult: number;
+  /** Fractional variance range, e.g. 0.2 = ±20% randomness on combat outcome */
+  varianceRange: number;
+  /** Role that must be present in the fleet to activate this doctrine */
+  requires: ShipRole | null;
+  description: string;
+}
+
+export const DOCTRINE_DEFINITIONS: Record<FleetDoctrine, DoctrineDefinition> = {
+  'balanced':     { label: 'Balanced',     color: '#94a3b8', dpsMult: 1.00, tankMult: 1.00, lootMult: 1.0,  varianceRange: 0.20, requires: null,      description: 'No specialization. Flexible but unoptimized.' },
+  'brawl':        { label: 'Brawl',        color: '#f87171', dpsMult: 1.25, tankMult: 0.70, lootMult: 1.0,  varianceRange: 0.15, requires: 'dps',     description: 'Go in hard and fast. Heavy DPS, fragile.' },
+  'sniper':       { label: 'Sniper',       color: '#60a5fa', dpsMult: 1.15, tankMult: 0.85, lootMult: 1.0,  varianceRange: 0.10, requires: 'scout',   description: 'Precision strike backed by scout intel.' },
+  'shield-wall':  { label: 'Shield Wall',  color: '#4ade80', dpsMult: 0.85, tankMult: 1.40, lootMult: 0.9,  varianceRange: 0.25, requires: 'tank',    description: 'Heavy defense formation. Grinds down enemies.' },
+  'stealth-raid': { label: 'Stealth Raid', color: '#a78bfa', dpsMult: 0.75, tankMult: 1.00, lootMult: 1.5,  varianceRange: 0.10, requires: 'scout',   description: 'Ghost in, maximize loot recovery.' },
 };

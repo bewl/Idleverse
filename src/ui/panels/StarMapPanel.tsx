@@ -1,4 +1,4 @@
-/**
+﻿/**
  * StarMapPanel — three-tier galactic navigation system.
  *
  * Zoom levels:
@@ -10,8 +10,9 @@
  * jump-range highlighting, system intel panel.
  */
 
-import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo, forwardRef, useImperativeHandle } from 'react';
 import { useGameStore } from '@/stores/gameStore';
+import { getAliveNpcGroupsInSystem } from '@/game/systems/combat/combat.logic';
 import {
   generateGalaxy, getSystemById, systemDistance,
   SECTOR_GRID_SIZE, sectorId, systemSector, buildSectors,
@@ -21,6 +22,8 @@ import { warpEtaSeconds, formatEta, getWarpProgress } from '@/game/galaxy/travel
 import { findRoute, getReachableSystems, unitsToLy } from '@/game/galaxy/route.logic';
 import { HULL_DEFINITIONS } from '@/game/systems/fleet/fleet.config';
 import { FACTION_DEFINITIONS } from '@/game/systems/factions/faction.config';
+import { getLocalPrice } from '@/game/systems/market/market.logic';
+import { RESOURCE_REGISTRY } from '@/game/resources/resourceRegistry';
 import type { StarSystem, GalacticSector, WarpState } from '@/types/galaxy.types';
 import type { StarType, SystemSecurity } from '@/types/galaxy.types';
 import type { ShipInstance, FleetActivity, PlayerFleet } from '@/types/game.types';
@@ -90,7 +93,7 @@ function computeArchetype(
 }
 
 const ACTIVITY_ICON: Partial<Record<FleetActivity, string>> = {
-  mining: '⛏', patrol: '⚔', hauling: '▶', exploration: '◎', missions: '★', combat: '⚔',
+  mining: '⛏', hauling: '▶',
 };
 // suppress unused-variable lint for ACTIVITY_ICON (used in future tooltip)
 void ACTIVITY_ICON;
@@ -286,7 +289,30 @@ function buildCam3(
 
 // ─── 3D Galaxy Map component (Zoom Level 1) ───────────────────────────────────
 
-function GalaxyGridView({
+export interface GalaxyGridHandle {
+  focusSystem: (systemId: string) => void;
+}
+
+const GalaxyGridView = forwardRef<GalaxyGridHandle, {
+  allSystems:         StarSystem[];
+  sectors:            GalacticSector[];
+  currentSystemId:    string;
+  visitedSystems:     Record<string, boolean>;
+  zSlice:             number;
+  filters:            MapFilters;
+  searchQuery:        string;
+  onSystemClick:      (id: string) => void;
+  selectedId:         string | null;
+  reachable:          Set<string>;
+  jumpRangeLY:        number;
+  overlay:            OverlayMode;
+  fleetShips:         ShipInstance[];
+  playerFleets:       PlayerFleet[];
+  activeRoute:        ActiveRoute | null;
+  warpState:          WarpState | null;
+  warpFromSystem:     StarSystem | null;
+  warpToSystem:       StarSystem | null;
+}>(function GalaxyGridView({
   allSystems,
   sectors: _sectors,
   currentSystemId,
@@ -305,26 +331,7 @@ function GalaxyGridView({
   warpState,
   warpFromSystem,
   warpToSystem,
-}: {
-  allSystems:         StarSystem[];
-  sectors:            GalacticSector[];
-  currentSystemId:    string;
-  visitedSystems:     Record<string, boolean>;
-  zSlice:             number;
-  filters:            MapFilters;
-  searchQuery:        string;
-  onSystemClick:      (id: string) => void;
-  selectedId:         string | null;
-  reachable:          Set<string>;
-  jumpRangeLY:        number;
-  overlay:            OverlayMode;
-  fleetShips:         ShipInstance[];
-  playerFleets:       PlayerFleet[];
-  activeRoute:        ActiveRoute | null;
-  warpState:      WarpState | null;
-  warpFromSystem: StarSystem | null;
-  warpToSystem:   StarSystem | null;
-}) {
+}, ref) {
   void _sectors;
   const canvasRef  = useRef<HTMLCanvasElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -926,6 +933,22 @@ function GalaxyGridView({
     ctx.restore(); // DPR scale
   }, []);
 
+  useImperativeHandle(ref, () => ({
+    focusSystem(systemId: string) {
+      const sys = propsRef.current.allSystems.find(s => s.id === systemId);
+      if (!sys) return;
+      const [wx, wy, wz] = sysToWorld(sys);
+      const c = cam.current;
+      camAnim.current = {
+        from: { ...c },
+        to: { theta: c.theta, phi: c.phi, dist: Math.min(c.dist, 280), tx: wx, ty: wy, tz: wz },
+        startTime: performance.now(),
+        duration: 700,
+      };
+      rafId.current = requestAnimationFrame(draw);
+    },
+  }), [draw]);
+
   const scheduleRedraw = useCallback(() => {
     cancelAnimationFrame(rafId.current);
     rafId.current = requestAnimationFrame(draw);
@@ -1085,7 +1108,7 @@ function GalaxyGridView({
       />
     </div>
   );
-}
+});
 
 // ─── Filter Panel ─────────────────────────────────────────────────────────────
 
@@ -1188,6 +1211,8 @@ function SystemIntelPanel({
   const belts      = sys.bodies.filter(b => b.type === 'asteroid-belt');
   const planets    = sys.bodies.filter(b => b.type !== 'asteroid-belt' && b.type !== 'moon');
   const hasNullOres = belts.some(b => b.beltIds.some(id => id === 'belt-arkonite' || id === 'belt-crokitite'));
+  const gameState  = useGameStore(s => s.state);
+  const threats    = getAliveNpcGroupsInSystem(gameState, sys.id);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -1224,6 +1249,17 @@ function SystemIntelPanel({
                 <span style={{ fontSize: 9, color: '#22d3ee', fontFamily: 'monospace' }}>PRESENT</span>
               </div>
             )}
+            {threats.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginTop: 4, borderTop: '1px solid rgba(248,113,113,0.15)', paddingTop: 4 }}>
+                <span style={{ fontSize: 8, color: '#7f1d1d', letterSpacing: '0.08em', textTransform: 'uppercase' }}>? Active Threats ({threats.length})</span>
+                {threats.map(t => (
+                  <div key={t.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 4 }}>
+                    <span style={{ fontSize: 9, color: '#fca5a5', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.name}</span>
+                    <span style={{ fontSize: 8, color: '#6b7280', fontFamily: 'monospace', flexShrink: 0 }}>STR {t.strength}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
           {distLY !== null && (
             <div style={{ fontSize: 9, color: '#475569' }}>
@@ -1232,6 +1268,33 @@ function SystemIntelPanel({
           )}
         </>
       )}
+      {isVisited && !isCurrent && (() => {
+        const currentSysId = gameState.galaxy.currentSystemId;
+        const TRADE_MINERALS = ['ferrite','silite','vexirite','isorium','noxium','zyridium','megacite','voidsteel'];
+        const opportunities = TRADE_MINERALS
+          .map(rid => ({
+            rid,
+            buyPrice:  getLocalPrice(gameState, rid, currentSysId),
+            sellPrice: getLocalPrice(gameState, rid, sys.id),
+          }))
+          .filter(o => o.buyPrice > 0 && o.sellPrice > o.buyPrice * 1.05)
+          .sort((a, b) => (b.sellPrice / b.buyPrice) - (a.sellPrice / a.buyPrice))
+          .slice(0, 3);
+        if (opportunities.length === 0) return null;
+        return (
+          <div style={{ marginTop: 6, borderTop: '1px solid rgba(34,211,238,0.1)', paddingTop: 6, display: 'flex', flexDirection: 'column', gap: 3 }}>
+            <div style={{ fontSize: 8, color: '#334155', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Trade Opportunity</div>
+            {opportunities.map(o => (
+              <div key={o.rid} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                <span style={{ fontSize: 9, color: '#94a3b8' }}>{RESOURCE_REGISTRY[o.rid]?.name ?? o.rid}</span>
+                <span style={{ fontSize: 9, color: '#4ade80', fontFamily: 'monospace' }}>
+                  +{((o.sellPrice / o.buyPrice - 1) * 100).toFixed(0)}%
+                </span>
+              </div>
+            ))}
+          </div>
+        );
+      })()}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 4 }}>
         {!isCurrent && (
           <button onClick={onSetCourse} style={{ padding: '5px 8px', fontSize: 9, fontWeight: 600, border: '1px solid rgba(34,211,238,0.3)', borderRadius: 4, background: 'rgba(8,51,68,0.3)', color: '#22d3ee', cursor: 'pointer', textAlign: 'left' }}>
@@ -1618,10 +1681,6 @@ function StarMapPanelInner() {
   const doCancelFleetOrder     = useGameStore(s => s.cancelFleetOrder);
   const doIssueFleetGroupOrder  = useGameStore(s => s.issueFleetGroupOrder);
   const doCancelFleetGroupOrder = useGameStore(s => s.cancelFleetGroupOrder);
-  const doCreateFleet           = useGameStore(s => s.createPlayerFleet);
-  const doDisbandFleet          = useGameStore(s => s.disbandPlayerFleet);
-  const doAddShipToFleet        = useGameStore(s => s.addShipToFleet);
-  const doRemoveShipFromFleet   = useGameStore(s => s.removeShipFromFleet);
   const fleetShipsRecord  = useGameStore(s => s.state.systems.fleet.ships);
   const fleetFleetsRecord = useGameStore(s => s.state.systems.fleet.fleets);
   const maxFleets         = useGameStore(s => s.state.systems.fleet.maxFleets);
@@ -1652,8 +1711,7 @@ function StarMapPanelInner() {
   const [searchQuery,  setSearchQuery]  = useState('');
   const [showFilters,  setShowFilters]  = useState(true);
   const [showRight,    setShowRight]    = useState(true);
-  const [rightTab,    setRightTab]    = useState<'intel' | 'route' | 'orders'>('intel');
-  const [orderFilter, setOrderFilter] = useState<RouteSecurityFilter>('shortest');
+  const [rightTab,    setRightTab]    = useState<'intel' | 'route'>('intel');
   const [filters, setFilters] = useState<MapFilters>({
     highsec: true, lowsec: true, nullsec: true,
     onlyVisited: false, onlyWithBelts: false, hasNullOres: false,
@@ -1667,6 +1725,7 @@ function StarMapPanelInner() {
   const [routeComputed,  setRouteComputed]  = useState(false);
   const [routeFleetId,   setRouteFleetId]   = useState<string | null>(null);
   const [overlay,        setOverlay]        = useState<OverlayMode>('default');
+  const gridRef = useRef<GalaxyGridHandle>(null);
 
   // Warp ticker
   const warp    = galaxy.warp;
@@ -1739,6 +1798,7 @@ function StarMapPanelInner() {
     const fleet = playerFleets.find(f => f.id === routeFleetId);
     if (!fleet) { setRouteFleetId(null); return; }
     setRouteFrom(fleet.currentSystemId);
+    gridRef.current?.focusSystem(fleet.currentSystemId);
     const ships = fleetShips.filter(s => fleet.shipIds.includes(s.id));
     let maxBonus = 0;
     for (const ship of ships) {
@@ -1886,6 +1946,7 @@ function StarMapPanelInner() {
 
           <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
             <GalaxyGridView
+              ref={gridRef}
               allSystems={allSystems}
               sectors={sectors}
               currentSystemId={galaxy.currentSystemId}
@@ -1919,7 +1980,6 @@ function StarMapPanelInner() {
               {([
                 ['intel',  'Intel'],
                 ['route',  'Route'],
-                ['orders', 'Fleet'],
               ] as [typeof rightTab, string][]).map(([tab, label]) => (
                 <button key={tab} onClick={() => setRightTab(tab)} style={{
                   flex: 1, padding: '7px 4px', fontSize: 9, fontWeight: 600,
@@ -1962,7 +2022,8 @@ function StarMapPanelInner() {
                     </div>
                   )}
                 </>
-              ) : rightTab === 'route' ? (
+              ) : (
+                /* Route tab */
                 <RoutePlanner
                   allSystems={allSystems}
                   visitedSystems={galaxy.visitedSystems}
@@ -1986,24 +2047,6 @@ function StarMapPanelInner() {
                   onSetFleet={setRouteFleetId}
                   onDispatch={handleDispatchFleet}
                 />
-              ) : (
-                /* ── Fleet Groups tab ─────────────────────────────────────── */
-                <FleetGroupsPanel
-                  allSystems={allSystems}
-                  playerFleets={playerFleets}
-                  fleetShips={fleetShips}
-                  selectedDestId={selectedId && selectedId !== galaxy.currentSystemId ? selectedId : null}
-                  currentSystemId={galaxy.currentSystemId}
-                  orderFilter={orderFilter}
-                  onSetOrderFilter={setOrderFilter}
-                  maxFleets={maxFleets}
-                  onIssueOrder={doIssueFleetGroupOrder}
-                  onCancelOrder={doCancelFleetGroupOrder}
-                  onAddShip={doAddShipToFleet}
-                  onRemoveShip={doRemoveShipFromFleet}
-                  onCreateFleet={doCreateFleet}
-                  onDisbandFleet={doDisbandFleet}
-                />
               )}
             </div>
           </div>
@@ -2013,307 +2056,7 @@ function StarMapPanelInner() {
   );
 }
 
-// ─── Fleet Groups panel component ────────────────────────────────────────────
-
-const FLEET_COLOURS_UI = ['#a78bfa', '#fb923c', '#34d399', '#f472b6', '#60a5fa'];
-
-function FleetGroupsPanel({
-  allSystems,
-  playerFleets,
-  fleetShips,
-  selectedDestId,
-  currentSystemId,
-  orderFilter,
-  onSetOrderFilter,
-  maxFleets,
-  onIssueOrder,
-  onCancelOrder,
-  onAddShip,
-  onRemoveShip,
-  onCreateFleet,
-  onDisbandFleet,
-}: {
-  allSystems: StarSystem[];
-  playerFleets: PlayerFleet[];
-  fleetShips: ShipInstance[];
-  selectedDestId: string | null;
-  currentSystemId: string;
-  orderFilter: RouteSecurityFilter;
-  onSetOrderFilter: (f: RouteSecurityFilter) => void;
-  maxFleets: number;
-  onIssueOrder: (fleetId: string, destId: string, filter?: RouteSecurityFilter) => boolean;
-  onCancelOrder: (fleetId: string) => boolean;
-  onAddShip: (fleetId: string, shipId: string) => boolean;
-  onRemoveShip: (fleetId: string, shipId: string) => boolean;
-  onCreateFleet: (name: string, shipIds: string[]) => string | null;
-  onDisbandFleet: (fleetId: string) => boolean;
-}) {
-  const [expandedId, setExpandedId] = useState<string | null>(null);
-
-  const destSysName = selectedDestId
-    ? (allSystems.find(s => s.id === selectedDestId)?.name ?? selectedDestId)
-    : null;
-
-  // Standalone ships (not in any fleet, in the current system)
-  const standaloneShips = fleetShips.filter(s => s.fleetId === null && s.systemId === currentSystemId);
-
-  return (
-    <div>
-      {/* Destination card */}
-      {selectedDestId && (
-        <div style={{ marginBottom: 10, padding: '6px 8px', border: '1px solid rgba(34,211,238,0.15)', borderRadius: 4, background: 'rgba(8,51,68,0.15)' }}>
-          <div style={{ fontSize: 9, color: '#94a3b8', marginBottom: 5 }}>
-            ⊛ Destination: <span style={{ color: '#22d3ee', fontWeight: 600 }}>{destSysName}</span>
-          </div>
-          <div style={{ display: 'flex', gap: 3 }}>
-            {(['shortest', 'avoid-null', 'avoid-low'] as RouteSecurityFilter[]).map(f => (
-              <button key={f} onClick={() => onSetOrderFilter(f)} style={{
-                flex: 1, padding: '2px 2px', fontSize: 7, fontWeight: 600,
-                letterSpacing: '0.05em', textTransform: 'uppercase', cursor: 'pointer',
-                border: `1px solid ${orderFilter === f ? 'rgba(34,211,238,0.4)' : 'rgba(30,40,60,0.5)'}`,
-                borderRadius: 3,
-                background: orderFilter === f ? 'rgba(8,51,68,0.4)' : 'rgba(6,9,20,0.4)',
-                color: orderFilter === f ? '#22d3ee' : '#475569',
-              }}>
-                {f === 'shortest' ? 'SHORT' : f === 'avoid-null' ? 'NO NULL' : 'NO LOW'}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Capacity bar */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-        <span style={{ fontSize: 8, color: '#334155', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-          Fleets {playerFleets.length}/{maxFleets}
-        </span>
-        {/* Quick-create fleet from all standalone ships in current system */}
-        {standaloneShips.length > 0 && playerFleets.length < maxFleets && (
-          <button
-            onClick={() => {
-              const name = `Fleet ${playerFleets.length + 1}`;
-              onCreateFleet(name, standaloneShips.map(s => s.id));
-            }}
-            style={{
-              padding: '2px 6px', fontSize: 7, fontWeight: 600,
-              border: '1px solid rgba(34,211,238,0.3)', borderRadius: 3,
-              background: 'rgba(8,51,68,0.2)', color: '#22d3ee', cursor: 'pointer',
-            }}
-          >
-            + Form Fleet ({standaloneShips.length})
-          </button>
-        )}
-      </div>
-
-      {/* Fleet cards */}
-      {playerFleets.length === 0 ? (
-        <div style={{ fontSize: 9, color: '#334155', textAlign: 'center', padding: '14px 0' }}>
-          No active fleets.{'\n'}
-          {standaloneShips.length > 0
-            ? 'Form a fleet from the ships in your current system.'
-            : 'Deploy ships and gather them in one system to form a fleet.'}
-        </div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-          {playerFleets.map((fleet, fi) => {
-            const colour = FLEET_COLOURS_UI[fi % FLEET_COLOURS_UI.length];
-            const order = fleet.fleetOrder;
-            const destSys = order ? allSystems.find(s => s.id === order.destinationSystemId) : null;
-            const curSys  = allSystems.find(s => s.id === fleet.currentSystemId);
-            const nextSys = order && order.route[order.currentLeg + 1]
-              ? allSystems.find(s => s.id === order.route[order.currentLeg + 1])
-              : null;
-            const totalLegs = order ? order.route.length - 1 : 0;
-            const legsDone  = order ? order.currentLeg : 0;
-            const progress  = totalLegs > 0 ? legsDone / totalLegs : 0;
-            const isExpanded = expandedId === fleet.id;
-
-            // Hull composition summary
-            const shipsInFleet = fleet.shipIds
-              .map(id => fleetShips.find(s => s.id === id))
-              .filter(Boolean) as ShipInstance[];
-            const hullCounts: Record<string, number> = {};
-            for (const s of shipsInFleet) {
-              hullCounts[s.shipDefinitionId] = (hullCounts[s.shipDefinitionId] ?? 0) + 1;
-            }
-
-            return (
-              <div key={fleet.id} style={{
-                border: `1px solid ${colour}33`,
-                borderRadius: 5, background: 'rgba(3,5,16,0.7)', overflow: 'hidden',
-              }}>
-                {/* Fleet header */}
-                <div
-                  onClick={() => setExpandedId(isExpanded ? null : fleet.id)}
-                  style={{
-                    padding: '6px 8px', cursor: 'pointer',
-                    borderBottom: `1px solid ${isExpanded ? colour + '33' : 'transparent'}`,
-                    background: isExpanded ? colour + '0d' : 'transparent',
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                      <span style={{ width: 6, height: 6, borderRadius: '50%', background: colour, display: 'inline-block', flexShrink: 0 }} />
-                      <span style={{ fontSize: 10, fontWeight: 700, color: '#e2e8f0' }}>{fleet.name}</span>
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                      <span style={{ fontSize: 8, color: colour, fontWeight: 600 }}>
-                        {fleet.shipIds.length}▲
-                      </span>
-                      <span style={{ fontSize: 8, color: '#334155' }}>{isExpanded ? '▲' : '▼'}</span>
-                    </div>
-                  </div>
-
-                  {/* Status line */}
-                  <div style={{ fontSize: 8, color: '#64748b', marginTop: 2 }}>
-                    {order
-                      ? `⇒ ${curSys?.name ?? '?'} → ${nextSys?.name ?? destSys?.name ?? '?'}`
-                      : `IDLE · ${curSys?.name ?? fleet.currentSystemId}`
-                    }
-                  </div>
-
-                  {/* Progress bar if in transit */}
-                  {order && (
-                    <>
-                      <div style={{ height: 2, background: 'rgba(22,30,52,0.9)', borderRadius: 1, marginTop: 4, overflow: 'hidden' }}>
-                        <div style={{ height: '100%', borderRadius: 1, background: colour, width: `${progress * 100}%`, transition: 'width 0.25s' }} />
-                      </div>
-                      <div style={{ fontSize: 7, color: '#475569', marginTop: 2 }}>
-                        hop {legsDone}/{totalLegs} → {destSys?.name ?? '?'} · {fleet.maxJumpRangeLY} LY range
-                      </div>
-                    </>
-                  )}
-                </div>
-
-                {/* Expanded detail */}
-                {isExpanded && (
-                  <div style={{ padding: '6px 8px' }}>
-                    {/* Hull composition */}
-                    <div style={{ fontSize: 7, color: '#475569', marginBottom: 6 }}>
-                      {Object.entries(hullCounts).map(([hullId, count]) => {
-                        const hullDef = HULL_DEFINITIONS[hullId];
-                        return (
-                          <span key={hullId} style={{ marginRight: 6 }}>
-                            {count === 1 ? '' : `${count}× `}{hullDef?.name ?? hullId}
-                          </span>
-                        );
-                      })}
-                      <span style={{ color: '#334155' }}>· {fleet.maxJumpRangeLY} LY range</span>
-                    </div>
-
-                    {/* Per-ship detail rows */}
-                    {shipsInFleet.map(ship => {
-                      const hullDef = HULL_DEFINITIONS[ship.shipDefinitionId];
-                      return (
-                        <div key={ship.id} style={{
-                          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                          fontSize: 8, color: '#64748b', padding: '2px 0',
-                          borderBottom: '1px solid rgba(22,30,52,0.4)',
-                        }}>
-                          <span style={{ color: '#94a3b8' }}>{ship.customName ?? hullDef?.name ?? ship.id}</span>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                            <span style={{ color: '#475569' }}>
-                              {ship.activity === 'transport' ? '⇒ in transit' : ship.activity}
-                            </span>
-                            {!order && (
-                              <button
-                                onClick={() => onRemoveShip(fleet.id, ship.id)}
-                                style={{
-                                  fontSize: 8, lineHeight: 1, padding: '1px 4px',
-                                  border: '1px solid rgba(71,85,105,0.3)', borderRadius: 3,
-                                  background: 'transparent', color: '#475569', cursor: 'pointer',
-                                }}
-                                title="Remove from fleet"
-                              >×</button>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-
-                    {/* Add standalone ships from same system */}
-                    {!order && (() => {
-                      const addable = fleetShips.filter(
-                        s => s.fleetId === null && s.systemId === fleet.currentSystemId,
-                      );
-                      if (addable.length === 0) return null;
-                      return (
-                        <div style={{ marginTop: 6, paddingTop: 5, borderTop: '1px solid rgba(22,30,52,0.4)' }}>
-                          <div style={{ fontSize: 7, color: '#334155', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Add Ships</div>
-                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
-                            {addable.map(s => {
-                              const hDef = HULL_DEFINITIONS[s.shipDefinitionId];
-                              return (
-                                <button
-                                  key={s.id}
-                                  onClick={() => onAddShip(fleet.id, s.id)}
-                                  style={{
-                                    fontSize: 7, padding: '2px 5px',
-                                    border: `1px solid ${colour}33`, borderRadius: 3,
-                                    background: colour + '0d', color: colour, cursor: 'pointer',
-                                  }}
-                                >+ {s.customName ?? hDef?.name ?? s.id.slice(-4)}</button>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      );
-                    })()}
-
-                    {/* Action buttons */}
-                    <div style={{ display: 'flex', gap: 4, marginTop: 7 }}>
-                      {selectedDestId && !order && (
-                        <button
-                          onClick={() => onIssueOrder(fleet.id, selectedDestId, orderFilter)}
-                          style={{
-                            flex: 1, padding: '3px 4px', fontSize: 7, fontWeight: 600,
-                            border: `1px solid ${colour}55`, borderRadius: 3,
-                            background: colour + '18', color: colour, cursor: 'pointer',
-                          }}
-                        >⇒ Send Here</button>
-                      )}
-                      {selectedDestId && order && (
-                        <button
-                          onClick={() => onIssueOrder(fleet.id, selectedDestId, orderFilter)}
-                          style={{
-                            flex: 1, padding: '3px 4px', fontSize: 7, fontWeight: 600,
-                            border: `1px solid ${colour}55`, borderRadius: 3,
-                            background: colour + '18', color: colour, cursor: 'pointer',
-                          }}
-                        >↺ Reroute</button>
-                      )}
-                      {order && (
-                        <button
-                          onClick={() => onCancelOrder(fleet.id)}
-                          style={{
-                            flex: 1, padding: '3px 4px', fontSize: 7, fontWeight: 600,
-                            border: '1px solid rgba(239,68,68,0.3)', borderRadius: 3,
-                            background: 'rgba(127,29,29,0.15)', color: '#f87171', cursor: 'pointer',
-                          }}
-                        >■ Halt</button>
-                      )}
-                      <button
-                        onClick={() => onDisbandFleet(fleet.id)}
-                        style={{
-                          padding: '3px 5px', fontSize: 7,
-                          border: '1px solid rgba(71,85,105,0.3)', borderRadius: 3,
-                          background: 'rgba(6,9,20,0.5)', color: '#334155', cursor: 'pointer',
-                        }}
-                        title="Disband fleet (ships become standalone)"
-                      >Disband</button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─── Public export ────────────────────────────────────────────────────────────
+// --- Public export -----------------------------------------------------------
 
 export default function StarMapPanel() {
   const galaxy = useGameStore(s => s.state.galaxy);

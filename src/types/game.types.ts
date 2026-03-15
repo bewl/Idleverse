@@ -1,5 +1,6 @@
 ﻿import type { GalaxyState } from '@/types/galaxy.types';
 import type { FactionsState, FleetOrder } from '@/types/faction.types';
+import type { CombatOrder, CombatLogEntry } from '@/types/combat.types';
 
 // ─── Resource ──────────────────────────────────────────────────────────────
 
@@ -152,6 +153,30 @@ export interface MarketState {
   lifetimeSold: Record<string, number>;
 }
 
+// ─── Trade Routes ────────────────────────────────────────────────────────────
+
+export interface TradeRoute {
+  id: string;
+  name: string;
+  /** Fleet group assigned to run this route autonomously. */
+  fleetId: string;
+  fromSystemId: string;
+  toSystemId: string;
+  resourceId: string;
+  /** Units to buy at fromSystem and sell at toSystem per run. */
+  amountPerRun: number;
+  /** Whether the route is actively running (false = paused). */
+  enabled: boolean;
+  /** Units currently in transit (bought at fromSystem, not yet sold at toSystem). */
+  inTransit: number;
+  /** Total ISK cost paid to purchase the in-transit cargo. Used to compute run profit. */
+  buyCostForTransit: number;
+  /** ISK profit from the most recently completed run. null = no run completed yet. */
+  lastRunProfit: number | null;
+  /** Total runs completed since route creation. */
+  totalRunsCompleted: number;
+}
+
 // ─── Fleet ─────────────────────────────────────────────────────────────────
 
 export type ShipClass =
@@ -159,7 +184,10 @@ export type ShipClass =
   | 'destroyer' | 'cruiser' | 'battleship'
   | 'exhumer' | 'hauler';
 
-export type FleetActivity = 'idle' | 'mining' | 'missions' | 'hauling' | 'patrol' | 'combat' | 'exploration' | 'transport';
+export type FleetActivity = 'idle' | 'mining' | 'hauling' | 'transport';
+
+export type ShipRole = 'tank' | 'dps' | 'support' | 'scout' | 'unassigned';
+export type FleetDoctrine = 'balanced' | 'brawl' | 'sniper' | 'shield-wall' | 'stealth-raid';
 
 export interface ShipDefinition {
   id: string;
@@ -186,6 +214,10 @@ export interface ShipInstance {
   fleetOrder: FleetOrder | null;
   /** The fleet group this ship belongs to, or null if standalone. */
   fleetId: string | null;
+  /** Combat role assigned to this ship. Affects doctrine multipliers. */
+  role: ShipRole;
+  /** Hull damage percentage (0–100). Higher = reduced combat effectiveness. */
+  hullDamage: number;
 }
 
 // ─── Player Fleet (named group of ships) ───────────────────────────────────
@@ -205,6 +237,10 @@ export interface PlayerFleet {
   fleetOrder: FleetOrder | null;
   /** Maximum single-hop jump range in LY, computed from the hull composition. */
   maxJumpRangeLY: number;
+  /** Combat doctrine governing how ships fight together. */
+  doctrine: FleetDoctrine;
+  /** Active combat engagement order. null = fleet is not engaged. */
+  combatOrder: CombatOrder | null;
 }
 
 // ─── Pilot ─────────────────────────────────────────────────────────────────
@@ -297,6 +333,10 @@ export interface FleetState {
   fleets: Record<string, PlayerFleet>;
   /** Maximum number of concurrent fleet groups the player may command. */
   maxFleets: number;
+  /** Recent combat engagements across all fleets. */
+  combatLog: CombatLogEntry[];
+  /** Autonomous inter-system trade routes. */
+  tradeRoutes: TradeRoute[];
 }
 
 // ─── Structures ────────────────────────────────────────────────────────────

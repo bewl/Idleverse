@@ -151,40 +151,53 @@ Avoid excessive animation that causes visual noise.
 
 ## Core Gameplay Systems
 
-These are foundational systems for Idleverse.
+These are the **implemented** gameplay systems of Idleverse.
 
 AI should prefer expanding or supporting these systems rather than inventing unrelated mechanics.
+For detailed specs see `Idleverse_SYSTEM_BLUEPRINTS.md`. For the upcoming pipeline see `Idleverse_DESIGN_PLAN.md`.
 
-### Primary Systems
+### Implemented Systems
 
-- Asteroid Mining
-- Resource Refining
-- Energy Grid
-- Research Laboratory
-- Manufacturing
-- Logistics Network
-- Terraforming Operations
-- Colonies
-- Expeditions
-- Anomaly Research
+- Asteroid Mining (9 ore belts, 3 security tiers, pool depletion)
+- Ore Reprocessing (mineral yield, skill-scaled, auto-queue)
+- Manufacturing (12 recipes — components + ships, skill-gated)
+- Skills (34 corp-wide skills; pilot individual skills)
+- NPC Market (ISK income via sell orders, auto-sell, lifetime tracking)
+- Galaxy & Navigation (400 procedurally generated systems, BFS/Dijkstra routing)
+- Fleet Management (ships, pilots, named fleets, doctrines, ship roles)
+- Fleet Combat (NPC pirate groups, patrol/raid orders, hull damage, loot)
+- Factions (rep tracking — consequences planned for Phase 5)
+- Pilots (individual crew with skills, morale, training focus)
+
+### Planned Systems (see Design Plan)
+
+- Phase 1: Dynamic Economy & Trade Routes
+- Phase 3: Blueprint Research & T2 Manufacturing
+- Phase 4: Exploration & Anomaly Scanning
+- Phase 5: Factions, Stations & Mission Boards
+- Phase 6: Structures & Player Outposts
+- Phase 7: Prestige / New Game+
 
 ## Resource Philosophy
 
-Resources should evolve through **multiple tiers**.
+Resources evolve through **multiple production tiers**, each adding value.
 
-Example progression:
+Actual current chain:
 
 ```text
-Raw Ore
-→ Refined Metals
-→ Composite Alloys
-→ Energy Cells
-→ Quantum Components
-→ Exotic Matter
-→ Stellar Materials
+Asteroid Belts
+  → Raw Ore (Tier 1: Ferrock, Corite, Darkstone, Arkonite…)
+    → Reprocessing
+      → Minerals (Tier 2: Ferrite, Silite, Vexirite, Voidsteel…)
+        → Manufacturing
+          → Components (Tier 3: Hull Plate, Thruster Node…)
+            → Manufacturing
+              → Ships (Tier 4: Frigate, Hauler, Destroyer…)
+                → NPC Market
+                  → ISK (Currency)
 ```
 
-Higher tier systems should depend on **lower-tier infrastructure**.
+Higher tier systems depend on lower-tier infrastructure. The full resource catalog lives in `Idleverse_RESOURCE_REGISTRY.md`.
 
 ## Exploration & Discovery
 

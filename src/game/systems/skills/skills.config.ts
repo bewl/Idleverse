@@ -127,6 +127,25 @@ export const SKILL_DEFINITIONS: Record<string, SkillDefinition> = {
     pilotTrainable: true,
   },
 
+  'gunnery': {
+    id: 'gunnery', name: 'Gunnery',
+    description: 'Weapons training. Improves combat effectiveness for all ship classes.',
+    category: 'spaceship', rank: 2,
+    effects: [{ modifier: 'gunnery-bonus', valuePerLevel: 0.05 }],
+    prerequisiteSkills: { 'spaceship-command': 1 },
+    pilotTrainable: true,
+  },
+
+  'military-operations': {
+    id: 'military-operations', name: 'Military Operations',
+    description: 'Advanced tactical training. Enables targeted fleet raid orders against NPC groups.',
+    category: 'spaceship', rank: 3,
+    effects: [{ modifier: 'combat-bonus', valuePerLevel: 0.03 }],
+    prerequisiteSkills: { 'spaceship-command': 2 },
+    unlocks: ['combat-raid'],
+    pilotTrainable: true,
+  },
+
   // ═══════════════════════════════ INDUSTRY ══════════════════════════════════
 
   'industry': {
@@ -230,7 +249,7 @@ export const SKILL_DEFINITIONS: Record<string, SkillDefinition> = {
 
 export const SKILL_CATEGORIES: Record<string, string[]> = {
   mining:       ['mining', 'astrogeology', 'advanced-mining', 'ice-harvesting', 'drone-interfacing', 'mining-barge'],
-  spaceship:    ['spaceship-command', 'frigate', 'mining-frigate', 'industrial', 'destroyer', 'cruiser'],
+  spaceship:    ['spaceship-command', 'frigate', 'mining-frigate', 'industrial', 'destroyer', 'cruiser', 'gunnery', 'military-operations'],
   industry:     ['industry', 'advanced-industry', 'reprocessing', 'reprocessing-efficiency'],
   science:      ['science', 'metallurgy', 'survey'],
   electronics:  ['electronics', 'cpu-management', 'ladar-sensing'],

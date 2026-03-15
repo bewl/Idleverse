@@ -1,19 +1,20 @@
 import { useState } from 'react';
 import { useGameStore } from '@/stores/gameStore';
-import type { PilotInstance, ShipInstance, PilotTrainingFocus } from '@/types/game.types';
-import { HULL_DEFINITIONS, PILOT_SKILL_FOCUS_TREES } from '@/game/systems/fleet/fleet.config';
+import type { PilotInstance, ShipInstance, PilotTrainingFocus, ShipRole, FleetDoctrine } from '@/types/game.types';
+import { HULL_DEFINITIONS, PILOT_SKILL_FOCUS_TREES, DOCTRINE_DEFINITIONS } from '@/game/systems/fleet/fleet.config';
 import { SKILL_DEFINITIONS } from '@/game/systems/skills/skills.config';
 import {
   getPilotMiningBonus, getPilotCombatBonus, getPilotHaulingBonus,
   getPilotMoraleMultiplier, pilotTrainingEta, canPilotFlyShip, getPilotDisplayState,
 } from '@/game/systems/fleet/pilot.logic';
 import { formatTrainingEta } from '@/game/systems/skills/skills.logic';
-import { getTotalFleetPayroll } from '@/game/systems/fleet/fleet.logic';
+import { getTotalFleetPayroll, suggestDoctrine, getDoctrineRequirementsMet } from '@/game/systems/fleet/fleet.logic';
+import { getAliveNpcGroupsInSystem } from '@/game/systems/combat/combat.logic';
 import { StarfieldBackground } from '@/ui/effects/StarfieldBackground';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
-type Tab = 'pilots' | 'ships' | 'operations';
+type Tab = 'fleets' | 'pilots' | 'ships' | 'operations';
 
 const FOCUS_LABEL: Record<PilotTrainingFocus, string> = {
   mining: 'Mining', combat: 'Combat', hauling: 'Hauling',
@@ -23,6 +24,462 @@ const FOCUS_COLOR: Record<PilotTrainingFocus, string> = {
   mining: 'text-cyan-400', combat: 'text-red-400', hauling: 'text-amber-400',
   exploration: 'text-emerald-400', balanced: 'text-violet-400',
 };
+
+const FLEET_ROLE_LABELS: Record<ShipRole, string> = {
+  tank: 'T', dps: 'D', support: 'S', scout: 'SC', unassigned: '?',
+};
+const FLEET_ROLE_FULL: Record<ShipRole, string> = {
+  tank: 'Tank', dps: 'DPS', support: 'Support', scout: 'Scout', unassigned: 'Unassigned',
+};
+const FLEET_ROLE_COLOR: Record<ShipRole, string> = {
+  tank: '#4ade80', dps: '#f87171', support: '#60a5fa', scout: '#a78bfa', unassigned: '#475569',
+};
+const FLEET_COLOURS = ['#a78bfa', '#fb923c', '#34d399', '#f472b6', '#60a5fa'];
+
+// ─── Role minibar ──────────────────────────────────────────────────────────
+
+function RoleMinibar({ ships }: { ships: ShipInstance[] }) {
+  const roles: ShipRole[] = ['tank', 'dps', 'support', 'scout'];
+  return (
+    <div className="flex items-center gap-0.5">
+      {roles.map(role => {
+        const count = ships.filter(s => s.role === role).length;
+        if (count === 0) return null;
+        return (
+          <span
+            key={role}
+            className="text-[8px] font-mono px-1 rounded"
+            style={{ color: FLEET_ROLE_COLOR[role], background: FLEET_ROLE_COLOR[role] + '22' }}
+            title={`${FLEET_ROLE_FULL[role]}: ${count}`}
+          >
+            {FLEET_ROLE_LABELS[role]}{count}
+          </span>
+        );
+      })}
+      {ships.filter(s => s.role === 'unassigned').length > 0 && (
+        <span className="text-[8px] font-mono px-1 rounded text-slate-500" title="Unassigned">
+          ?{ships.filter(s => s.role === 'unassigned').length}
+        </span>
+      )}
+    </div>
+  );
+}
+
+// ─── Fleet card ────────────────────────────────────────────────────────────
+
+function FleetCard({
+  fleetId,
+  expanded,
+  isFirst,
+  isLast,
+  onToggle,
+  state,
+}: {
+  fleetId: string;
+  expanded: boolean;
+  isFirst: boolean;
+  isLast: boolean;
+  onToggle: () => void;
+  state: ReturnType<typeof useGameStore.getState>['state'];
+}) {
+  const setShipRole     = useGameStore(s => s.setShipRole);
+  const setDoctrine     = useGameStore(s => s.setFleetDoctrine);
+  const addShip         = useGameStore(s => s.addShipToFleet);
+  const removeShip      = useGameStore(s => s.removeShipFromFleet);
+  const disband         = useGameStore(s => s.disbandPlayerFleet);
+  const renameFleet     = useGameStore(s => s.renamePlayerFleet);
+  const moveFleet       = useGameStore(s => s.movePlayerFleet);
+  const issuePatrol     = useGameStore(s => s.issuePatrolOrder);
+  const issueRaid       = useGameStore(s => s.issueCombatRaidOrder);
+  const cancelCombat    = useGameStore(s => s.cancelCombatOrder);
+
+  const [editingName, setEditingName] = useState(false);
+  const [nameInput, setNameInput]     = useState('');
+
+  const fleet = state.systems.fleet.fleets[fleetId];
+  if (!fleet) return null;
+
+  const allShips   = state.systems.fleet.ships;
+  const fleetShips = fleet.shipIds.map(id => allShips[id]).filter(Boolean) as ShipInstance[];
+  const doctrine   = fleet.doctrine ?? 'balanced'; // guard stale persisted state
+  const docDef     = DOCTRINE_DEFINITIONS[doctrine] ?? DOCTRINE_DEFINITIONS['balanced'];
+  const docMet     = getDoctrineRequirementsMet(doctrine, fleetShips);
+  const suggested  = suggestDoctrine(fleetShips);
+
+  const fleetIdx   = Object.keys(state.systems.fleet.fleets).indexOf(fleetId);
+  const fleetColor = FLEET_COLOURS[fleetIdx % FLEET_COLOURS.length];
+
+  const isMoving   = fleet.fleetOrder !== null;
+  const dotColor   = isMoving ? 'bg-cyan-400 animate-pulse' : (fleet.combatOrder ? 'bg-red-400 animate-pulse' : 'bg-emerald-400');
+
+  // Ships in same system that can join
+  const joinableShips = Object.values(allShips).filter(
+    s => s.fleetId === null && s.systemId === fleet.currentSystemId,
+  );
+
+  return (
+    <div
+      className="rounded border bg-slate-900/40 overflow-hidden"
+      style={{ borderColor: fleetColor + '44' }}
+    >
+      {/* Collapsed header */}
+      <div
+        className="flex items-center gap-2.5 px-3 py-2 cursor-pointer"
+        onClick={onToggle}
+      >
+        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dotColor}`} />
+        <div className="flex-1 min-w-0">
+          {editingName ? (
+            <input
+              autoFocus
+              value={nameInput}
+              onChange={e => setNameInput(e.target.value)}
+              onBlur={() => { renameFleet(fleetId, nameInput); setEditingName(false); }}
+              onKeyDown={e => {
+                if (e.key === 'Enter') { renameFleet(fleetId, nameInput); setEditingName(false); }
+                if (e.key === 'Escape') { setEditingName(false); setNameInput(fleet.name); }
+              }}
+              onClick={e => e.stopPropagation()}
+              className="w-full text-[11px] font-semibold bg-transparent border-b border-slate-600 focus:outline-none focus:border-cyan-500"
+              style={{ color: fleetColor }}
+              maxLength={32}
+            />
+          ) : (
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span
+                className="text-[11px] font-semibold truncate hover:opacity-80"
+                style={{ color: fleetColor }}
+                onClick={e => { e.stopPropagation(); setEditingName(true); setNameInput(fleet.name); }}
+                title="Click to rename"
+              >
+                {fleet.name}
+              </span>
+              <span
+                className="text-[8px] px-1.5 py-0.5 rounded border"
+                style={{ color: docDef.color, borderColor: docDef.color + '44', background: docDef.color + '11' }}
+                title={docMet ? docDef.description : `Requires ${DOCTRINE_DEFINITIONS[fleet.doctrine].requires} ship`}
+              >
+                {docDef.label}{!docMet && ' ⚠'}
+              </span>
+              <RoleMinibar ships={fleetShips} />
+            </div>
+          )}
+          <div className="flex gap-2 mt-0.5">
+            <span className="text-[9px] text-slate-500">{fleet.currentSystemId}</span>
+            <span className="text-[9px] text-slate-600">·</span>
+            <span className="text-[9px] text-slate-500">{fleetShips.length} ship{fleetShips.length !== 1 ? 's' : ''}</span>
+            {isMoving && <span className="text-[9px] text-cyan-400/70">· In transit</span>}
+            {!isMoving && fleet.combatOrder && (
+              <span className={`text-[9px] ${fleet.combatOrder.type === 'patrol' ? 'text-amber-400/70' : 'text-red-400/70'}`}>
+                · {fleet.combatOrder.type === 'patrol' ? '⚔ Patrol' : '🎯 Raid'}
+              </span>
+            )}
+          </div>
+        </div>
+        {/* Reorder buttons */}
+        <div className="flex flex-col shrink-0" onClick={e => e.stopPropagation()}>
+          <button
+            disabled={isFirst}
+            onClick={() => moveFleet(fleetId, 'up')}
+            className="px-1 py-0.5 text-[9px] leading-none text-slate-600 hover:text-slate-300 disabled:opacity-20 disabled:cursor-default transition-colors"
+            title="Move up"
+          >▲</button>
+          <button
+            disabled={isLast}
+            onClick={() => moveFleet(fleetId, 'down')}
+            className="px-1 py-0.5 text-[9px] leading-none text-slate-600 hover:text-slate-300 disabled:opacity-20 disabled:cursor-default transition-colors"
+            title="Move down"
+          >▼</button>
+        </div>
+      </div>
+
+      {/* Expanded detail */}
+      {expanded && (
+        <div
+          className="px-3 pb-3 border-t pt-2 flex flex-col gap-3"
+          style={{ borderColor: fleetColor + '22' }}
+          onClick={e => e.stopPropagation()}
+        >
+          {/* Doctrine selector */}
+          <div className="flex flex-col gap-1">
+            <span className="text-[8px] uppercase tracking-widest text-slate-500">Doctrine</span>
+            <div className="flex flex-wrap gap-1">
+              {(Object.keys(DOCTRINE_DEFINITIONS) as FleetDoctrine[]).map(doc => {
+                const def = DOCTRINE_DEFINITIONS[doc];
+                const isCurrent = doctrine === doc;
+                const isSuggested = suggested === doc;
+                const reqMet = getDoctrineRequirementsMet(doc, fleetShips);
+                return (
+                  <button
+                    key={doc}
+                    onClick={() => setDoctrine(fleetId, doc)}
+                    disabled={isMoving}
+                    className="text-[9px] px-2 py-0.5 rounded border transition-all relative"
+                    style={isCurrent ? {
+                      color: def.color,
+                      borderColor: def.color + '88',
+                      background: def.color + '22',
+                    } : {
+                      color: reqMet ? '#64748b' : '#374151',
+                      borderColor: '#1e293b',
+                    }}
+                    title={`${def.description}${!reqMet ? ` (needs ${def.requires} ship)` : ''}`}
+                  >
+                    {def.label}
+                    {isSuggested && !isCurrent && (
+                      <span className="absolute -top-1 -right-1 text-[6px] text-amber-400">★</span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+            {!docMet && (
+              <span className="text-[9px] text-amber-400/70">
+                ⚠ Doctrine needs a {docDef.requires} ship
+              </span>
+            )}
+          </div>
+
+          {/* Ship roles */}
+          {fleetShips.length > 0 && (
+            <div className="flex flex-col gap-1.5">
+              <span className="text-[8px] uppercase tracking-widest text-slate-500">Ship Roles</span>
+              {fleetShips.map(ship => {
+                const hull = HULL_DEFINITIONS[ship.shipDefinitionId];
+                return (
+                  <div key={ship.id} className="flex items-center gap-2">
+                    <span className="text-[9px] text-slate-400 truncate flex-1 min-w-0">
+                      {ship.customName ?? hull?.name ?? ship.shipDefinitionId}
+                    </span>
+                    {/* Hull damage bar */}
+                    {ship.hullDamage > 0 && (
+                      <div className="w-12 h-1.5 bg-slate-800 rounded-full overflow-hidden shrink-0" title={`Hull damage: ${Math.round(ship.hullDamage)}%`}>
+                        <div
+                          className={`h-full rounded-full transition-all ${ship.hullDamage >= 80 ? 'bg-red-500' : ship.hullDamage >= 50 ? 'bg-amber-400' : 'bg-rose-400'}`}
+                          style={{ width: `${ship.hullDamage}%` }}
+                        />
+                      </div>
+                    )}
+                    <div className="flex gap-0.5 shrink-0">
+                      {(['tank', 'dps', 'support', 'scout', 'unassigned'] as ShipRole[]).map(role => (
+                        <button
+                          key={role}
+                          onClick={() => setShipRole(ship.id, role)}
+                          className="text-[8px] px-1 py-0.5 rounded border transition-all"
+                          style={ship.role === role ? {
+                            color: FLEET_ROLE_COLOR[role],
+                            borderColor: FLEET_ROLE_COLOR[role] + '88',
+                            background: FLEET_ROLE_COLOR[role] + '22',
+                          } : {
+                            color: '#475569',
+                            borderColor: '#1e293b',
+                          }}
+                          title={FLEET_ROLE_FULL[role]}
+                        >
+                          {FLEET_ROLE_LABELS[role]}
+                        </button>
+                      ))}
+                    </div>
+                    {fleet.fleetOrder === null && (
+                      <button
+                        onClick={() => removeShip(fleetId, ship.id)}
+                        className="text-[8px] text-slate-600 hover:text-red-400 border border-slate-800 rounded px-1 py-0.5"
+                        title="Remove from fleet"
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Combat orders */}
+          {(() => {
+            const aliveGroups = getAliveNpcGroupsInSystem(state, fleet.currentSystemId);
+            const combatOrder = fleet.combatOrder;
+            const fleetPilots = fleet.shipIds
+              .map(id => state.systems.fleet.ships[id]?.assignedPilotId)
+              .filter(Boolean)
+              .map(pid => state.systems.fleet.pilots[pid!])
+              .filter(Boolean);
+            const hasPatrolReq = fleetPilots.some(p => (p.skills.levels['spaceship-command'] ?? 0) >= 2);
+            const hasRaidReq   = fleetPilots.some(p => (p.skills.levels['military-operations'] ?? 0) >= 1);
+            const systemSecurity = (() => {
+              // Determine if current system is non-highsec
+              const gs = getAliveNpcGroupsInSystem(state, fleet.currentSystemId);
+              return gs.length > 0 || combatOrder;
+            })();
+
+            if (!systemSecurity && aliveGroups.length === 0) return null;
+
+            return (
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[8px] uppercase tracking-widest text-slate-500">Combat</span>
+                  {combatOrder && (
+                    <span className={`text-[8px] px-1.5 py-0.5 rounded ${
+                      combatOrder.type === 'patrol' ? 'bg-amber-900/40 text-amber-300' : 'bg-red-900/40 text-red-300'
+                    }`}>
+                      {combatOrder.type === 'patrol' ? '⚔ Patrolling' : '🎯 Raiding'}
+                    </span>
+                  )}
+                </div>
+
+                {/* Threat list */}
+                {aliveGroups.length > 0 ? (
+                  <div className="flex flex-col gap-1">
+                    {aliveGroups.map(group => (
+                      <div key={group.id} className="flex items-center justify-between gap-2">
+                        <div className="flex-1 min-w-0">
+                          <span className="text-[9px] text-rose-300/80 truncate block">{group.name}</span>
+                          <span className="text-[8px] text-slate-500">STR {group.strength} · {group.bounty.toLocaleString()} ISK</span>
+                        </div>
+                        {hasRaidReq && !combatOrder && !isMoving && (
+                          <button
+                            onClick={() => issueRaid(fleetId, group.id)}
+                            className="text-[8px] px-1.5 py-0.5 rounded border border-red-400/30 text-red-300/70 hover:border-red-300 hover:text-red-200 shrink-0"
+                          >
+                            Raid
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  combatOrder && <span className="text-[9px] text-slate-500">No threats in current system</span>
+                )}
+
+                {/* Patrol / cancel buttons */}
+                <div className="flex gap-1.5">
+                  {!combatOrder && !isMoving && (
+                    <button
+                      onClick={() => issuePatrol(fleetId)}
+                      disabled={!hasPatrolReq}
+                      className="text-[9px] px-2 py-0.5 rounded border border-amber-400/30 text-amber-300/70 hover:border-amber-300 hover:text-amber-200 disabled:opacity-40 disabled:cursor-not-allowed"
+                      title={hasPatrolReq ? 'Continuously engage weakest NPC group' : 'Requires Spaceship Command II'}
+                    >
+                      ⚔ Patrol
+                    </button>
+                  )}
+                  {combatOrder && (
+                    <button
+                      onClick={() => cancelCombat(fleetId)}
+                      className="text-[9px] px-2 py-0.5 rounded border border-slate-600 text-slate-400 hover:text-slate-200"
+                    >
+                      Cancel order
+                    </button>
+                  )}
+                </div>
+
+                {!hasPatrolReq && !combatOrder && (
+                  <span className="text-[8px] text-slate-600">Patrol: requires Spaceship Command II · Raid: requires Military Operations I</span>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* Add ship */}
+          {joinableShips.length > 0 && fleet.fleetOrder === null && (
+            <div className="flex flex-col gap-1">
+              <span className="text-[8px] uppercase tracking-widest text-slate-500">Add Ship</span>
+              <div className="flex flex-wrap gap-1">
+                {joinableShips.map(ship => {
+                  const hull = HULL_DEFINITIONS[ship.shipDefinitionId];
+                  return (
+                    <button
+                      key={ship.id}
+                      onClick={() => addShip(fleetId, ship.id)}
+                      className="text-[9px] px-2 py-0.5 rounded border border-slate-700/40 text-slate-400 hover:border-cyan-400/40 hover:text-cyan-300"
+                    >
+                      + {ship.customName ?? hull?.name ?? ship.shipDefinitionId}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Disband */}
+          {fleet.fleetOrder === null && (
+            <button
+              onClick={() => disband(fleetId)}
+              className="text-[9px] text-red-400/60 hover:text-red-300 border border-red-400/20 rounded px-2 py-0.5 self-start"
+            >
+              Disband fleet
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Fleets tab ─────────────────────────────────────────────────────────────
+
+function FleetsTab({ state }: { state: ReturnType<typeof useGameStore.getState>['state'] }) {
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const createFleet = useGameStore(s => s.createPlayerFleet);
+
+  const allShips  = state.systems.fleet.ships;
+  const fleetIds  = Object.keys(state.systems.fleet.fleets);
+  const maxFleets = state.systems.fleet.maxFleets;
+
+  const unassignedShips = Object.values(allShips).filter(s => s.fleetId === null);
+
+  const toggleExpand = (id: string) => setExpandedId(prev => prev === id ? null : id);
+
+  return (
+    <div className="flex flex-col gap-3">
+      {/* Fleet cards */}
+      {fleetIds.length === 0 ? (
+        <p className="text-[9px] text-slate-600">No fleets formed. Select ships below to create one.</p>
+      ) : (
+      fleetIds.map((id, idx) => (
+          <FleetCard
+            key={id}
+            fleetId={id}
+            expanded={expandedId === id}
+            isFirst={idx === 0}
+            isLast={idx === fleetIds.length - 1}
+            onToggle={() => toggleExpand(id)}
+            state={state}
+          />
+        ))
+      )}
+
+      {/* Unassigned ships pool */}
+      {unassignedShips.length > 0 && (
+        <div className="flex flex-col gap-1.5 pt-2 border-t border-slate-700/20">
+          <span className="text-[8px] uppercase tracking-widest text-slate-500">
+            Unassigned Ships ({unassignedShips.length})
+          </span>
+          <div className="flex flex-wrap gap-1">
+            {unassignedShips.map(ship => {
+              const hull = HULL_DEFINITIONS[ship.shipDefinitionId];
+              const canForm = fleetIds.length < maxFleets;
+              return (
+                <button
+                  key={ship.id}
+                  disabled={!canForm}
+                  onClick={() => canForm && createFleet(`Fleet ${fleetIds.length + 1}`, [ship.id])}
+                  className="text-[9px] px-2 py-1 rounded border border-slate-700/40 text-slate-400 hover:border-violet-400/40 hover:text-violet-300 disabled:opacity-30 disabled:cursor-not-allowed"
+                  title={canForm ? 'Form new fleet' : `Max ${maxFleets} fleets`}
+                >
+                  ⬡ {ship.customName ?? hull?.name ?? ship.shipDefinitionId}
+                </button>
+              );
+            })}
+          </div>
+          {fleetIds.length >= maxFleets && (
+            <span className="text-[9px] text-amber-400/60">Max fleet cap ({maxFleets}) reached</span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ─── Pilot portrait (seeded SVG avatar) ───────────────────────────────────
 
@@ -235,6 +692,7 @@ function ShipCard({ ship, state, expanded, onToggle }: {
   const assignPilot      = useGameStore(s => s.assignPilotToShip);
   const setActivity      = useGameStore(s => s.setShipActivity);
   const recallShipAction = useGameStore(s => s.recallShip);
+  const repairShip       = useGameStore(s => s.repairShip);
   const addToFleet       = useGameStore(s => s.addShipToFleet);
   const removeFromFleet  = useGameStore(s => s.removeShipFromFleet);
   const createFleet      = useGameStore(s => s.createPlayerFleet);
@@ -246,7 +704,6 @@ function ShipCard({ ship, state, expanded, onToggle }: {
   );
 
   // Fleet helpers
-  const FLEET_COLOURS = ['#a78bfa', '#fb923c', '#34d399', '#f472b6', '#60a5fa'];
   const allFleets = Object.values(state.systems.fleet.fleets);
   const assignedFleet = ship.fleetId ? state.systems.fleet.fleets[ship.fleetId] : null;
   const fleetColour = assignedFleet
@@ -345,7 +802,7 @@ function ShipCard({ ship, state, expanded, onToggle }: {
           <div className="flex flex-col gap-1">
             <span className="text-[8px] uppercase tracking-widest text-slate-500">Activity</span>
             <div className="flex flex-wrap gap-1">
-              {(['idle', 'mining', 'hauling', 'patrol', 'exploration'] as const).map(act => (
+              {(['idle', 'mining', 'hauling'] as const).map(act => (
                 <button
                   key={act}
                   disabled={!assignedPilot}
@@ -364,6 +821,41 @@ function ShipCard({ ship, state, expanded, onToggle }: {
               <span className="text-[9px] text-amber-400/60">Assign a pilot to activate</span>
             )}
           </div>
+
+          {/* Hull damage & repair */}
+          {ship.hullDamage > 0 && (
+            <div className="flex flex-col gap-1">
+              <div className="flex items-center justify-between">
+                <span className="text-[8px] uppercase tracking-widest text-slate-500">Hull Integrity</span>
+                <span className={`text-[9px] font-mono ${
+                  ship.hullDamage >= 80 ? 'text-red-400' : ship.hullDamage >= 50 ? 'text-amber-400' : 'text-rose-300'
+                }`}>{Math.round(100 - ship.hullDamage)}%</span>
+              </div>
+              <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all ${
+                    ship.hullDamage >= 80 ? 'bg-red-500' : ship.hullDamage >= 50 ? 'bg-amber-400' : 'bg-rose-400'
+                  }`}
+                  style={{ width: `${100 - ship.hullDamage}%` }}
+                />
+              </div>
+              {ship.hullDamage >= 80 && (
+                <span className="text-[8px] text-red-400/70">⚠ Ship offline — hull damage critical</span>
+              )}
+              <div className="flex items-center gap-2">
+                {(state.resources['hull-plate'] ?? 0) >= 1 ? (
+                  <button
+                    onClick={() => repairShip(ship.id)}
+                    className="text-[9px] px-2 py-0.5 rounded border border-emerald-400/30 text-emerald-300/80 hover:border-emerald-300 hover:text-emerald-200"
+                  >
+                    🔧 Repair (1× hull-plate)
+                  </button>
+                ) : (
+                  <span className="text-[8px] text-slate-600">No hull-plates — idle to repair slowly</span>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Pilot assignment */}
           {!assignedPilot && availablePilots.length > 0 && (
@@ -587,17 +1079,19 @@ function OperationsTab({ state }: { state: ReturnType<typeof useGameStore.getSta
 // ─── Main panel ────────────────────────────────────────────────────────────
 
 export function FleetPanel() {
-  const [activeTab, setActiveTab] = useState<Tab>('pilots');
+  const [activeTab, setActiveTab] = useState<Tab>('fleets');
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const state = useGameStore(s => s.state);
   const fleet = state.systems.fleet;
 
   const pilots = Object.values(fleet.pilots);
   const ships  = Object.values(fleet.ships);
+  const fleets = Object.values(fleet.fleets);
 
   const toggleExpand = (id: string) => setExpandedId(prev => prev === id ? null : id);
 
   const TABS: Array<{ id: Tab; label: string; count?: number }> = [
+    { id: 'fleets',     label: 'Fleets',     count: fleets.length },
     { id: 'pilots',     label: 'Pilots',     count: pilots.length },
     { id: 'ships',      label: 'Ships',      count: ships.length },
     { id: 'operations', label: 'Operations' },
@@ -638,6 +1132,8 @@ export function FleetPanel() {
 
       {/* Content */}
       <div className="relative z-10 flex-1 overflow-y-auto p-3 flex flex-col gap-2">
+        {activeTab === 'fleets' && <FleetsTab state={state} />}
+
         {activeTab === 'pilots' && (
           <>
             {pilots.length === 0 && (

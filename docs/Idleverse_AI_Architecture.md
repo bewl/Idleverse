@@ -77,32 +77,62 @@ Every major feature should be built so that future systems can plug into the sam
 
 If one system has upgrades, timers, unlock conditions, and mastery, then future systems should be able to reuse the same architecture style.
 
-## Recommended Folder Structure
+## Actual Folder Structure
+
+The following is the **real folder structure** as of the current implementation:
 
 ```text
 src/
-  app/
+  App.tsx
+  main.tsx
   game/
-    core/
-    resources/
+    balance/        — constants.ts (tick rates, upgrade growth rate, haul times)
+    core/           — tick runner, game loop
+    galaxy/         — galaxy generation, system graph, NPC group seeding
+    hooks/          — useResourceRates and other computed hooks
+    offline/        — offline progress catch-up calculation
+    persistence/    — save/load, migration, serialization
+    prestige/       — stub (Phase 7)
+    progression/    — unlock checks, milestone tracking
+    resources/      — resourceRegistry.ts, formatters
     systems/
-    progression/
-    automation/
-    prestige/
-    offline/
-    persistence/
-    balance/
-    content/
-  ui/
-    components/
-    pages/
-    layouts/
-    panels/
-    effects/
-  hooks/
+      combat/       — combat.logic.ts, combat.tick.ts
+      energy/       — stub
+      exploration/  — stub
+      factions/     — faction.config.ts, rep tracking
+      fleet/        — fleet.config.ts, fleet.logic.ts, fleet.tick.ts,
+      |               fleet.orders.ts, fleet.gen.ts, pilot.logic.ts
+      manufacturing/ — manufacturing.config.ts, manufacturing.logic.ts
+      market/       — market.config.ts, market.logic.ts
+      mining/       — mining.config.ts, mining.logic.ts, mining.tick.ts
+      project/      — stub
+      reprocessing/ — reprocessing.logic.ts
+      research/     — stub (Phase 3)
+      skills/       — skills.config.ts, skills.logic.ts
+    utils/          — seeded RNG, math helpers
   stores/
-  utils/
+    gameStore.ts    — Zustand store (all actions, selectors)
+    initialState.ts — factory defaults for a new game
   types/
+    game.types.ts   — core GameState + all system state types
+    galaxy.types.ts — GalaxyState, SystemNode, JumpLane
+    faction.types.ts — factions, FleetOrder
+    combat.types.ts  — CombatOrder, NpcGroupDef, CombatLogEntry
+  ui/
+    dev/            — DevPanel (cheat/debug panel)
+    effects/        — StarField, StarfieldBackground
+    layouts/        — GameLayout (nav + panel switcher)
+    panels/
+      FleetPanel.tsx
+      ManufacturingPanel.tsx
+      MarketPanel.tsx
+      MiningPanel.tsx
+      OverviewPanel.tsx
+      ReprocessingPanel.tsx
+      ResourceBar.tsx
+      SkillsPanel.tsx
+      StarMapPanel.tsx
+      SystemPanel.tsx
 ```
 
 ### Folder Intent
@@ -169,41 +199,29 @@ Examples:
 
 ## State Model
 
-Use a centralized state model, but keep logic modular.
+State is managed via **Zustand** with a single `GameState` object. The store lives in
+`src/stores/gameStore.ts`; initial values in `src/stores/initialState.ts`.
 
-Preferred options:
-
-- Zustand for a lighter implementation
-- Redux Toolkit if stricter organization is needed
-
-### State Design Guidance
-
-Global state should contain:
-
-- resources
-- unlocked systems
-- per-system state
-- global modifiers
-- automation settings
-- prestige state
-- mastery state
-- settings/preferences
-- timestamps for save/offline logic
-
-Example high-level shape:
+Actual top-level GameState shape (from `src/types/game.types.ts`):
 
 ```ts
 interface GameState {
-  version: number;
-  lastUpdatedAt: number;
+  version: number;       // save migration version
+  lastUpdatedAt: number; // unix-ms, used for offline catch-up
   resources: Record<string, number>;
-  systems: Record<string, unknown>;
+  modifiers: Record<string, number>;  // additive bonuses from skills/modules
   unlocks: Record<string, boolean>;
-  modifiers: Record<string, number>;
-  mastery: Record<string, SystemMasteryState>;
-  prestige: PrestigeState;
-  automation: AutomationState;
-  settings: GameSettings;
+  systems: {
+    mining: MiningState;
+    reprocessing: ReprocessingState;
+    manufacturing: ManufacturingState;
+    skills: SkillsState;
+    market: MarketState;
+    fleet: FleetState;   // ships, pilots, named fleets, combat log
+  };
+  galaxy: GalaxyState;   // systems, connections, npcGroupStates, visited
+  factions: FactionsState;
+  combat: { log: CombatLogEntry[] };
 }
 ```
 

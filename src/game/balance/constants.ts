@@ -25,6 +25,9 @@ export function upgradeCost(baseCost: number, level: number): number {
 // ─── Ore Hold & Haul ──────────────────────────────────────────────────────
 /** Base ore hold capacity in units before any skill/upgrade bonuses. */
 export const BASE_ORE_HOLD_CAPACITY = 5_000;
+
+/** Hull damage repaired per second while a ship is idle. ~1.5% per minute. */
+export const IDLE_REPAIR_RATE_PER_SEC = 1.5 / 60;
 /** Base auto-haul interval in seconds. */
 export const BASE_HAUL_SECONDS = 120;
 /** Minimum auto-haul interval in seconds regardless of upgrades. */

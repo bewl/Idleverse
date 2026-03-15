@@ -89,18 +89,18 @@ This file ensures **the economy remains balanced and scalable**.
 
 `Idleverse_SYSTEM_BLUEPRINTS.md`
 
-Defines the first major gameplay systems including:
+Documents every implemented gameplay system:
 
 - Asteroid Mining
-- Energy Grid
-- Research Laboratory
+- Reprocessing
 - Manufacturing
-- Logistics
-- Terraforming
-- Colonies
-- Expeditions
-- Anomaly Research
-- Timeline Prestige
+- Skills
+- Market
+- Galaxy & Fleet Navigation
+- Fleet Management
+- Fleet Combat
+- Factions
+- Pilots
 
 This file explains **how gameplay systems interact**.
 
@@ -121,17 +121,33 @@ This file defines **the economic backbone of Idleverse**.
 
 ---
 
+## 7. Design Plan
+
+`Idleverse_DESIGN_PLAN.md`
+
+Defines:
+
+- implementation status per feature (✅ completed, 🔲 upcoming)
+- upcoming feature phases with full specs and data structures
+- file change lists per phase
+
+This file is the **living roadmap** — check here before implementing new features.
+
+---
+
 # AI Development Rules
 
 When generating code or design content for Idleverse, AI assistants should:
 
 ### Always
 
-- follow the architecture defined in `AI_Architecture`
-- respect the economic rules in `BALANCE_FORMULAS`
-- use resources defined in `RESOURCE_REGISTRY`
-- design systems consistent with `SYSTEM_BLUEPRINTS`
-- maintain the sci‑fi theme defined in `AI_GLOBAL_CONTEXT`
+- follow the architecture defined in `Idleverse_AI_Architecture`
+- respect the economic rules in `Idleverse_BALANCE_FORMULAS`
+- use resources defined in `Idleverse_RESOURCE_REGISTRY`
+- design systems consistent with `Idleverse_SYSTEM_BLUEPRINTS`
+- maintain the sci‑fi theme defined in `Idleverse_AI_Global_Context`
+- follow the feature pipeline in `Idleverse_DESIGN_PLAN`
+- update documentation whenever code changes
 
 ### Avoid
 
@@ -148,12 +164,13 @@ These documents should be stored in the repository under:
 
 ```
 /docs
-  AI_CONTEXT.md
-  AI_ARCHITECTURE.md
-  AI_CONTENT_GUIDELINES.md
-  AI_BALANCE_FORMULAS.md
-  AI_SYSTEM_BLUEPRINTS.md
-  AI_RESOURCE_REGISTRY.md
+  Idleverse_AI_Global_Context.md
+  Idleverse_AI_Architecture.md
+  Idleverse_AI_Content_Guidelines.md
+  Idleverse_BALANCE_FORMULAS.md
+  Idleverse_SYSTEM_BLUEPRINTS.md
+  Idleverse_RESOURCE_REGISTRY.md
+  Idleverse_DESIGN_PLAN.md
   README_AI.md
 ```
 

@@ -35,47 +35,46 @@ Avoid:
 
 # Resource Production Formula
 
-Base resource production should use this structure:
+Base resource production follows this structure:
 
+```
 Production = BaseRate × Multipliers + Additive Bonuses
+```
 
 Where:
+- `BaseRate` = system base rate (defined in config)
+- `Multipliers` = skills, modules, pilot bonuses
+- `AdditiveBonuses` = flat modifiers from upgrades
 
-BaseRate = system production value  
-Multipliers = upgrades, mastery, research, prestige bonuses  
-AdditiveBonuses = flat bonuses from discoveries or anomalies
+**Actual mining formula:**
 
-Example:
-
-MiningOutput =
-BaseMiningRate
-× MiningEfficiency
-× ResearchMultiplier
-× GlobalProductionBonus
-+ FlatMiningBonus
+```
+OreYield = belt.baseRate
+         × (1 + modifiers['mining-yield'])    // from Mining, Astrogeology skills
+         × miningLaserModuleMultiplier
+         × assignedPilotMiningBonus
+```
 
 ---
 
 # Upgrade Cost Scaling
 
-Upgrade costs should scale exponentially to create long‑term progression.
+Upgrade costs scale exponentially.
 
-Standard formula:
-
+```
 Cost = BaseCost × GrowthRate^Level
+```
 
-Recommended values:
-
-BaseCost = initial upgrade cost  
-GrowthRate = 1.12 – 1.20
+**Actual value used:** `UPGRADE_GROWTH_RATE = 1.15` (from `src/game/balance/constants.ts`)
 
 Example:
 
-Mining Drill Upgrade
-
-Cost = 100 × 1.15^Level
-
-This creates increasing difficulty without immediate hard caps.
+```
+Mining upgrade, BaseCost = 500, GrowthRate = 1.15
+  Level 1 → 575
+  Level 5 → 1,006
+  Level 10 → 2,023
+```
 
 ---
 
@@ -241,18 +240,133 @@ Legendary discoveries should unlock unique gameplay features.
 
 ---
 
+# Implemented Balance Constants
+
+These values are live in the codebase (`src/game/balance/constants.ts`):
+
+| Constant | Value | Role |
+|---|---|---|
+| `UPGRADE_GROWTH_RATE` | 1.15 | Per-level upgrade cost multiplier |
+| `OFFLINE_CAP_SECONDS` | 86,400 (24 h) | Maximum offline catch-up window |
+| `SKILL_LEVEL_SECONDS` | [60, 300, 1800, 10800, 64800] | Base training time per level (×skill rank) |
+| `BASE_ORE_HOLD_CAPACITY` | 5,000 | Ore hold before auto-haul triggers |
+| `IDLE_REPAIR_RATE_PER_SEC` | 1.5/60 (~0.025) | Hull % repaired per second while idle |
+| `BASE_HAUL_SECONDS` | 120 | Default ore haul interval |
+| `MIN_HAUL_SECONDS` | 10 | Minimum possible haul interval |
+
+---
+
+# Skill Training Time Formula
+
+```
+SecondsToTrain = SKILL_LEVEL_SECONDS[targetLevel - 1] × skill.rank
+```
+
+Example — Mining (rank 2), Level 3:
+
+```
+1800 s × 2 = 3,600 s = 60 minutes
+```
+
+Example — Cruiser (rank 5), Level 5:
+
+```
+64,800 s × 5 = 324,000 s = 90 hours
+```
+
+---
+
+# Haul Interval Formula
+
+```
+totalReduction = min(0.70, modifiers['haul-speed'] + haulingShipBonus)
+haulingShipBonus = Σ (0.05 × hull.baseCargoMultiplier) per piloted hauling ship
+haulInterval = max(MIN_HAUL_SECONDS, floor(BASE_HAUL_SECONDS × (1 - totalReduction)))
+```
+
+---
+
+# Combat Rating Formula
+
+```
+fleetCombatRating = Σ (
+  hull.baseCombatRating
+  × pilotCombatModifier
+  × combatModuleMultiplier
+) × doctrineMultipliers
+
+pilotCombatModifier = 1.0 + (0.05 × gunneryLevel) + moraleBonus
+```
+
+**Doctrine multipliers** (from DOCTRINE_DEFINITIONS in fleet.config.ts):
+
+| Doctrine | DPS Mult | Tank Mult | Loot Mult | Variance |
+|---|---|---|---|---|
+| Balanced | ×1.0 | ×1.0 | ×1.0 | ±20% |
+| Brawl | ×1.25 | ×0.7 | ×1.0 | ±15% |
+| Sniper | ×1.15 | ×0.85 | ×1.0 | ±10% |
+| Shield Wall | ×0.85 | ×1.4 | ×0.9 | ±25% |
+| Stealth Raid | ×0.75 | ×1.0 | ×1.5 | ±10% |
+
+---
+
+# Hull Repair Formula
+
+```
+// Passive (idle, not in active combat fleet):
+hullDamage -= IDLE_REPAIR_RATE_PER_SEC × deltaSeconds   // ~1.5%/min
+
+// Instant (spend 1× hull-plate):
+hullDamage = 0
+```
+
+Ships go offline at `hullDamage > 80%` (no combat contribution).
+
+---
+
+# Combat Outcome Formula
+
+```
+powerRatio = fleetCombatRating / npcGroup.strength
+variance   = seededRandom × 0.4 − 0.2   (±20%, reduced by scout ships)
+adjusted   = powerRatio × (1 + variance)
+
+VICTORY (adjusted ≥ 1.0):
+  fleetDamage% = 5 + 15 × (1 − adjusted)
+  bountyEarned = npcGroup.bounty
+  loot         = rollLootTable(npcGroup.lootTable, adjusted)
+
+DEFEAT (adjusted < 1.0):
+  fleetDamage% = 20 + 30 × (1 − adjusted)
+  no loot, no bounty
+```
+
+---
+
 # Progression Pacing Targets
 
 Example player milestones:
 
-First hour:
-- unlock 2–3 systems
+First 30 minutes:
+- First ore belt active, reprocessing running
+- First mineral sell order for ISK
+
+First few hours:
+- Manufacturing queue producing components
+- First ship built and deployed
+- First fleet formed, first NPC patrol attempted
 
 First day:
-- unlock automation tier 1
+- Lowsec belts unlocked
+- Multiple pilots trained, fleet combat viable
+- Hull repair loop established
 
 First week:
-- first prestige reset
+- Nullsec access, Exhumer fleet
+- Multiple named fleets specialised by doctrine
+- Phase 1 trade routes (upcoming)
+
+---
 
 First month:
 - multiple colonies

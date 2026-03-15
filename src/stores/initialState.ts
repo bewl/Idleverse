@@ -106,6 +106,8 @@ export function createInitialState(): GameState {
         recruitmentOffers: [],
         fleets: {},
         maxFleets: 5,
+        combatLog: [],
+        tradeRoutes: [],
       },
 
       structures: {
@@ -145,6 +147,8 @@ export function createInitialState(): GameState {
       scannedSystems: { home: true },
       beltRichnessOverride: {},
       galacticSliceZ: 0.5,
+      npcGroupStates: {},
+      systemPressure: {},
     },
   };
 }

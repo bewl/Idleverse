@@ -4,11 +4,13 @@ import { tickSkills } from '@/game/systems/skills/skills.logic';
 import { tickManufacturing } from '@/game/systems/manufacturing/manufacturing.logic';
 import { tickReprocessing } from '@/game/systems/reprocessing/reprocessing.logic';
 import { tickMarket } from '@/game/systems/market/market.logic';
+import { tickPricePressure, tickTradeRoutes } from '@/game/systems/market/market.logic';
 import { processUnlocks } from '@/game/progression/unlocks';
 import { tickTravel } from '@/game/galaxy/travel.logic';
 import { getSystemById, getSystemBeltIds } from '@/game/galaxy/galaxy.gen';
 import { tickFleet } from '@/game/systems/fleet/fleet.tick';
 import { advanceFleetOrders } from '@/game/systems/fleet/fleet.orders';
+import { tickCombat } from '@/game/systems/combat/combat.logic';
 
 export interface TickResult {
   newState: GameState;
@@ -254,9 +256,22 @@ export function runTick(state: GameState, deltaSeconds: number): TickResult {
     };
     // ── 8a. Advance autonomous fleet orders (one hop per tick) ──────────
     const orderResult = advanceFleetOrders(s);
-    s = orderResult.newState;  }
+    s = orderResult.newState;
 
-  // ── 9. Advance timestamp ───────────────────────────────────────────────
+    // ── 8b. Trade route automation (buy/sell + dispatch) ────────────────
+    s = tickTradeRoutes(s);
+  }
+
+  // ── 9. Combat: resolve fleet combat engagements ─────────────────────────
+  if (s.unlocks['system-fleet']) {
+    const combatResult = tickCombat(s, deltaSeconds);
+    s = combatResult.newState;
+  }
+
+  // ── 10. Price pressure decay (all active system pressure → 1.0) ──────────
+  s = tickPricePressure(s, deltaSeconds);
+
+  // ── 11. Advance timestamp ─────────────────────────────────────────────────
   s = { ...s, lastUpdatedAt: nowMs };
 
   return { newState: s, completedManufacturing, skillsAdvanced };

@@ -118,4 +118,12 @@ export interface GalaxyState {
   beltRichnessOverride: Record<string, Record<string, number>>;
   /** Z-slice position for the galaxy sector view [0, 1]. 0.5 = galactic plane. */
   galacticSliceZ: number;
+  /** Per-NPC-group dead state. Entry present = group is dead until respawnAt (ms). */
+  npcGroupStates: Record<string, { respawnAt: number }>;
+  /**
+   * Per-system, per-resource dynamic price pressure (1.0 = neutral).
+   * Selling depresses pressure; buying raises it. Decays to 1.0 at 5%/hour.
+   * Missing entry = 1.0.
+   */
+  systemPressure: Record<string, Record<string, number>>;
 }

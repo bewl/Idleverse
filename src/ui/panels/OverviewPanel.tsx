@@ -366,6 +366,59 @@ function StatsRow() {
   );
 }
 
+// ─── Combat log card ─────────────────────────────────────────────────────────
+
+function CombatLogCard() {
+  const combatLog = useGameStore(s => s.state.systems.fleet.combatLog ?? []);
+  if (combatLog.length === 0) return null;
+
+  const recent = combatLog.slice(0, 10);
+
+  function timeAgo(ms: number): string {
+    const s = Math.floor((Date.now() - ms) / 1000);
+    if (s < 60) return `${s}s ago`;
+    if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+    return `${Math.floor(s / 3600)}h ago`;
+  }
+
+  return (
+    <div className="panel-card">
+      <h3 className="text-[10px] uppercase tracking-widest text-slate-500 mb-2">⚔ Recent Combat</h3>
+      <div className="flex flex-col gap-1.5">
+        {recent.map(entry => (
+          <div key={entry.id} className="flex items-start gap-2 py-1 border-b border-slate-800/50 last:border-0">
+            <span className={`text-[9px] px-1.5 py-0.5 rounded shrink-0 font-semibold ${
+              entry.victory ? 'bg-emerald-900/40 text-emerald-300' : 'bg-red-900/40 text-red-300'
+            }`}>
+              {entry.victory ? 'WIN' : 'LOSS'}
+            </span>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-baseline justify-between gap-1">
+                <span className="text-[9px] text-slate-300 truncate">{entry.npcName}</span>
+                <span className="text-[8px] text-slate-600 shrink-0">{timeAgo(entry.timestamp)}</span>
+              </div>
+              <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
+                <span className="text-[8px] text-slate-500">{entry.systemName}</span>
+                {entry.victory && entry.bountyEarned > 0 && (
+                  <span className="text-[8px] text-amber-300/80">+{entry.bountyEarned.toLocaleString()} ISK</span>
+                )}
+                {entry.victory && Object.keys(entry.lootGained).length > 0 && (
+                  <span className="text-[8px] text-cyan-300/70" title={Object.entries(entry.lootGained).map(([r, q]) => `${r}: ${q}`).join(', ')}>
+                    +{Object.keys(entry.lootGained).length} loot
+                  </span>
+                )}
+                <span className={`text-[8px] ${entry.avgHullDamage > 30 ? 'text-rose-400/70' : 'text-slate-600'}`}>
+                  {Math.round(entry.avgHullDamage)}% hull dmg
+                </span>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ─── Main panel ───────────────────────────────────────────────────────────────
 
 export function OverviewPanel() {
@@ -382,6 +435,7 @@ export function OverviewPanel() {
       </div>
 
       <StatsRow />
+      <CombatLogCard />
     </div>
   );
 }

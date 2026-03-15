@@ -1,6 +1,7 @@
 import type { GameState, PilotInstance, FleetState } from '@/types/game.types';
 import { HULL_DEFINITIONS, MODULE_DEFINITIONS } from './fleet.config';
 import { tickPilotSkillTraining, tickMorale, getPilotMoraleMultiplier, getPilotMiningBonus } from './pilot.logic';
+import { IDLE_REPAIR_RATE_PER_SEC } from '@/game/balance/constants';
 
 // ─── Tick result ───────────────────────────────────────────────────────────
 
@@ -103,10 +104,29 @@ export function tickFleet(state: GameState, deltaSeconds: number): FleetTickResu
     oreDeltas[key] = (oreDeltas[key] ?? 0) + yieldPerSecond;
   }
 
+  // ── Passive idle repair — ships on idle slowly recover hull damage ────────
+  // Ships whose fleet has an active combatOrder are excluded (can't repair mid-fight).
+  const combatActiveShipIds = new Set<string>();
+  for (const f of Object.values(fleet.fleets)) {
+    if (f.combatOrder) {
+      for (const sid of f.shipIds) combatActiveShipIds.add(sid);
+    }
+  }
+
+  const repairedShips = { ...fleet.ships };
+  for (const [shipId, ship] of Object.entries(repairedShips)) {
+    if (ship.hullDamage <= 0) continue;
+    if (ship.activity !== 'idle') continue;
+    if (combatActiveShipIds.has(shipId)) continue;
+    const repaired = Math.min(ship.hullDamage, IDLE_REPAIR_RATE_PER_SEC * deltaSeconds);
+    repairedShips[shipId] = { ...ship, hullDamage: Math.max(0, ship.hullDamage - repaired) };
+  }
+
   return {
     oreDeltas,
     newFleetState: {
       ...fleet,
+      ships: repairedShips,
       pilots: newPilots,
     },
   };
