@@ -3,7 +3,8 @@ import type { GameState, OfflineSummary, ManufacturingJob, SkillQueueEntry, Repr
 import type { FactionId, RouteSecurityFilter } from '@/types/faction.types';
 import { createInitialState } from './initialState';
 import { runTick } from '@/game/core/tickRunner';
-import { MANUFACTURING_RECIPES } from '@/game/systems/manufacturing/manufacturing.config';
+import { MANUFACTURING_RECIPES, BLUEPRINT_DEFINITIONS } from '@/game/systems/manufacturing/manufacturing.config';
+import { getResearchTimeForLevel, getCopyTime, getMaxResearchSlots } from '@/game/systems/manufacturing/manufacturing.logic';
 import { ORE_BELTS, MINING_UPGRADES } from '@/game/systems/mining/mining.config';
 import { SKILL_DEFINITIONS } from '@/game/systems/skills/skills.config';
 import {
@@ -76,8 +77,15 @@ interface GameStore {
 
   // Manufacturing
   queueManufacturing: (recipeId: string, quantity: number) => boolean;
+  queueManufacturingWithBpc: (recipeId: string, quantity: number, blueprintId: string) => boolean;
   cancelManufacturingJob: (index: number) => void;
   prioritizeManufacturingJob: (index: number) => void;
+
+  // Blueprint Research & Copy
+  researchBlueprint: (blueprintId: string) => boolean;
+  cancelResearchJob: (jobId: string) => void;
+  copyBlueprint: (blueprintId: string, runs: number) => boolean;
+  cancelCopyJob: (jobId: string) => void;
 
   // Reprocessing
   queueReprocessing: (oreId: string, amount: number) => boolean;
@@ -398,6 +406,174 @@ export const useGameStore = create<GameStore>((set, get) => ({
         systems: {
           ...state.systems,
           manufacturing: { ...state.systems.manufacturing, queue: newQueue },
+        },
+      },
+    });
+  },
+
+  queueManufacturingWithBpc: (recipeId, quantity, blueprintId) => {
+    const { state } = get();
+    if (!state.unlocks['system-manufacturing']) return false;
+
+    const recipe = MANUFACTURING_RECIPES[recipeId];
+    if (!recipe || !recipe.isTech2) return false;
+
+    // Validate the BPC
+    const bpc = state.systems.manufacturing.blueprints.find(b => b.id === blueprintId);
+    if (!bpc || bpc.type !== 'copy' || bpc.tier !== 2 || bpc.itemId !== recipeId) return false;
+    if (bpc.isLocked) return false;
+    if (bpc.copiesRemaining !== null && bpc.copiesRemaining < 1) return false;
+
+    if (recipe.requiredSkill) {
+      const lvl = state.systems.skills.levels[recipe.requiredSkill.skillId] ?? 0;
+      if (lvl < recipe.requiredSkill.minLevel) return false;
+    }
+
+    const newResources = { ...state.resources };
+    for (const [resourceId, amount] of Object.entries(recipe.inputs)) {
+      const total = amount * quantity;
+      if ((newResources[resourceId] ?? 0) < total) return false;
+      newResources[resourceId] = (newResources[resourceId] ?? 0) - total;
+    }
+
+    const newJob: ManufacturingJob = { recipeId, progress: 0, quantity, blueprintId };
+    set({
+      state: {
+        ...state,
+        resources: newResources,
+        systems: {
+          ...state.systems,
+          manufacturing: {
+            ...state.systems.manufacturing,
+            queue: [...state.systems.manufacturing.queue, newJob],
+          },
+        },
+      },
+    });
+    return true;
+  },
+
+  researchBlueprint: (blueprintId) => {
+    const { state } = get();
+    const mfg = state.systems.manufacturing;
+
+    const bp = mfg.blueprints.find(b => b.id === blueprintId);
+    if (!bp || bp.type !== 'original' || bp.isLocked) return false;
+    if (bp.researchLevel >= 10) return false;
+
+    // Science L1 required
+    const scienceLevel = state.systems.skills.levels['science'] ?? 0;
+    if (scienceLevel < 1) return false;
+
+    // Check slot availability
+    const usedSlots = mfg.researchJobs.length + mfg.copyJobs.length;
+    const maxSlots  = getMaxResearchSlots(state);
+    if (usedSlots >= maxSlots) return false;
+
+    // Check datacore cost
+    const def = BLUEPRINT_DEFINITIONS[bp.itemId];
+    if (!def) return false;
+    if ((state.resources[def.datacoreId] ?? 0) < 1) return false;
+
+    const totalTime = getResearchTimeForLevel(bp.researchLevel);
+    const jobId = `research-${blueprintId}-${Date.now()}`;
+
+    set({
+      state: {
+        ...state,
+        resources: { ...state.resources, [def.datacoreId]: (state.resources[def.datacoreId] ?? 0) - 1 },
+        systems: {
+          ...state.systems,
+          manufacturing: {
+            ...mfg,
+            blueprints: mfg.blueprints.map(b => b.id === blueprintId ? { ...b, isLocked: true } : b),
+            researchJobs: [
+              ...mfg.researchJobs,
+              { id: jobId, blueprintId, targetLevel: bp.researchLevel + 1, progress: 0, totalTime },
+            ],
+          },
+        },
+      },
+    });
+    return true;
+  },
+
+  cancelResearchJob: (jobId) => {
+    const { state } = get();
+    const mfg = state.systems.manufacturing;
+    const job = mfg.researchJobs.find(j => j.id === jobId);
+    if (!job) return;
+
+    set({
+      state: {
+        ...state,
+        systems: {
+          ...state.systems,
+          manufacturing: {
+            ...mfg,
+            blueprints: mfg.blueprints.map(b => b.id === job.blueprintId ? { ...b, isLocked: false } : b),
+            researchJobs: mfg.researchJobs.filter(j => j.id !== jobId),
+          },
+        },
+      },
+    });
+  },
+
+  copyBlueprint: (blueprintId, runs) => {
+    const { state } = get();
+    const mfg = state.systems.manufacturing;
+
+    const bp = mfg.blueprints.find(b => b.id === blueprintId);
+    if (!bp || !bp || bp.type !== 'original' || bp.isLocked) return false;
+    if (runs < 1 || runs > 10) return false;
+
+    // Science L1 required
+    const scienceLevel = state.systems.skills.levels['science'] ?? 0;
+    if (scienceLevel < 1) return false;
+
+    // Check slot availability
+    const usedSlots = mfg.researchJobs.length + mfg.copyJobs.length;
+    const maxSlots  = getMaxResearchSlots(state);
+    if (usedSlots >= maxSlots) return false;
+
+    const totalTime = getCopyTime(runs);
+    const jobId = `copy-${blueprintId}-${Date.now()}`;
+
+    set({
+      state: {
+        ...state,
+        systems: {
+          ...state.systems,
+          manufacturing: {
+            ...mfg,
+            blueprints: mfg.blueprints.map(b => b.id === blueprintId ? { ...b, isLocked: true } : b),
+            copyJobs: [
+              ...mfg.copyJobs,
+              { id: jobId, blueprintId, runs, progress: 0, totalTime },
+            ],
+          },
+        },
+      },
+    });
+    return true;
+  },
+
+  cancelCopyJob: (jobId) => {
+    const { state } = get();
+    const mfg = state.systems.manufacturing;
+    const job = mfg.copyJobs.find(j => j.id === jobId);
+    if (!job) return;
+
+    set({
+      state: {
+        ...state,
+        systems: {
+          ...state.systems,
+          manufacturing: {
+            ...mfg,
+            blueprints: mfg.blueprints.map(b => b.id === job.blueprintId ? { ...b, isLocked: false } : b),
+            copyJobs: mfg.copyJobs.filter(j => j.id !== jobId),
+          },
         },
       },
     });

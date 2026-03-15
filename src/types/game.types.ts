@@ -128,17 +128,59 @@ export interface ManufacturingRecipeDefinition {
   timeCost: number;
   category: 'component' | 'ship' | 'module' | 'ammo';
   requiredSkill?: { skillId: string; minLevel: number };
+  /** True for T2 recipes — requires a corresponding T2 BPC to queue the job. */
+  isTech2?: boolean;
 }
 
 export interface ManufacturingJob {
   recipeId: string;
   progress: number;
   quantity: number;
+  /** If set, this BPC is consumed (runs decremented) on job completion. */
+  blueprintId?: string;
+}
+
+// ─── Blueprints & Research ─────────────────────────────────────────────────
+
+export interface Blueprint {
+  id: string;
+  /** Recipe ID this blueprint corresponds to (e.g. 'recipe-ship-frigate'). */
+  itemId: string;
+  tier: 1 | 2;
+  type: 'original' | 'copy';
+  /** 0–10; applies to originals only. Level 5 grants a corresponding T2 BPO. */
+  researchLevel: number;
+  /** null = unlimited (originals); number = remaining runs (copies). */
+  copiesRemaining: number | null;
+  /** True while being researched or copied — prevents concurrent operations. */
+  isLocked: boolean;
+}
+
+export interface ResearchJob {
+  id: string;
+  blueprintId: string;
+  targetLevel: number;
+  /** Seconds elapsed since job started. */
+  progress: number;
+  /** Pre-computed total time in seconds for this level. */
+  totalTime: number;
+}
+
+export interface CopyJob {
+  id: string;
+  blueprintId: string;
+  /** How many runs the resulting BPC will have. */
+  runs: number;
+  progress: number;
+  totalTime: number;
 }
 
 export interface ManufacturingState {
   queue: ManufacturingJob[];
   completedCount: Record<string, number>;
+  blueprints: Blueprint[];
+  researchJobs: ResearchJob[];
+  copyJobs: CopyJob[];
 }
 
 // ─── Market ────────────────────────────────────────────────────────────────

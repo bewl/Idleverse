@@ -61,7 +61,29 @@ const RESOURCES: ResourceDefinition[] = [
   { id: 'shield-emitter',  name: 'Shield Emitter',  category: 'component', tier: 3, precision: 0,
     description: 'Defensive shield projector for combat-capable vessels.' },
 
-  // ── Ships (Tier 4 — manufactured items) ──────────────────────────────────
+  // ── Advanced Minerals (Tier 2 — nullsec sources) ─────────────────────────
+  { id: 'morphite',  name: 'Morphite',  category: 'mineral', tier: 2, precision: 0,
+    description: 'Exotic metamorphic mineral from deep null-security belts. Required for all T2 manufacturing.' },
+  { id: 'zydrine',   name: 'Zydrine',   category: 'mineral', tier: 2, precision: 0,
+    description: 'Green crystalline mineral extracted from compressed null-sec ore. Essential for advanced alloys.' },
+
+  // ── Datacores (Tier 3 — combat loot, used in T2 unlocking) ───────────────
+  { id: 'datacore-mechanical',  name: 'Mechanical Engineering Core',  category: 'loot', tier: 3, precision: 0,
+    description: 'Encrypted assembly data recovered from lowsec pirates. Used to research industrial ship blueprints.' },
+  { id: 'datacore-electronic',  name: 'Electronic Systems Core',      category: 'loot', tier: 3, precision: 0,
+    description: 'Nullsec pirate tactical cores containing advanced electronics schematics.' },
+  { id: 'datacore-starship',    name: 'Starship Engineering Core',    category: 'loot', tier: 3, precision: 0,
+    description: 'Faction raid loot encoding advanced hull construction protocols.' },
+
+  // ── T2 Components (Tier 3 — advanced manufactured parts) ─────────────────
+  { id: 'advanced-hull-plate',    name: 'Advanced Hull Plate',    category: 'component', tier: 3, precision: 0,
+    description: 'High-grade structural plating reinforced with Morphite lattices.' },
+  { id: 'advanced-thruster-node', name: 'Advanced Thruster Node', category: 'component', tier: 3, precision: 0,
+    description: 'Overclocked propulsion assembly with Zydrine-cooled plasma chambers.' },
+  { id: 'advanced-condenser-coil',name: 'Advanced Condenser Coil',category: 'component', tier: 3, precision: 0,
+    description: 'High-capacity power storage coil using Morphite superconductors.' },
+
+  // ── Ships (Tier 4 — T1 manufactured items) ────────────────────────────────
   { id: 'ship-shuttle',        name: 'Shuttle',        category: 'ship', tier: 4, precision: 0,
     description: 'Entry-level vessel with minimal systems. Fast to produce and replace.' },
   { id: 'ship-frigate',        name: 'Frigate',        category: 'ship', tier: 4, precision: 0,
@@ -74,6 +96,14 @@ const RESOURCES: ResourceDefinition[] = [
     description: 'Combat-focused multi-launcher hull bridging frigates and cruisers.' },
   { id: 'ship-exhumer',        name: 'Exhumer',        category: 'ship', tier: 4, precision: 0,
     description: 'Advanced mining barge with the highest ore yield per cycle in its class.' },
+
+  // ── T2 Ships (Tier 5 — require T2 BPC + advanced minerals) ───────────────
+  { id: 'ship-assault-frigate',   name: 'Assault Frigate',   category: 'ship', tier: 5, precision: 0,
+    description: 'Tech 2 combat frigate with hardened systems and boosted weapons output.' },
+  { id: 'ship-covert-ops',        name: 'Covert Ops',        category: 'ship', tier: 5, precision: 0,
+    description: 'Tech 2 stealth frigate specialised for deep-space scanning and infiltration.' },
+  { id: 'ship-command-destroyer', name: 'Command Destroyer', category: 'ship', tier: 5, precision: 0,
+    description: 'Tech 2 destroyer with fleet coordination systems and enhanced combat modules.' },
 ];
 
 export const RESOURCE_REGISTRY: Record<string, ResourceDefinition> = Object.fromEntries(
@@ -97,11 +127,17 @@ export const ORE_IDS = [
 export const MINERAL_IDS = [
   'ferrite', 'silite', 'vexirite', 'isorium',
   'noxium', 'zyridium', 'megacite', 'voidsteel',
+  'morphite', 'zydrine',
+];
+
+export const DATACORE_IDS = [
+  'datacore-mechanical', 'datacore-electronic', 'datacore-starship',
 ];
 
 export const SHIP_RESOURCE_IDS = [
   'ship-shuttle', 'ship-frigate', 'ship-mining-frigate',
   'ship-hauler', 'ship-destroyer', 'ship-exhumer',
+  'ship-assault-frigate', 'ship-covert-ops', 'ship-command-destroyer',
 ];
 
 export function formatResourceAmount(amount: number, _precision = 0): string {

@@ -23,9 +23,10 @@ Idleverse resources follow a five-tier production chain.
 | Tier | Category | Examples | Produced By |
 |---|---|---|---|
 | Tier 1 | Raw Ore | Ferrock, Corite, Arkonite | Asteroid belt mining |
-| Tier 2 | Minerals | Ferrite, Silite, Voidsteel | Reprocessing ore |
-| Tier 3 | Components | Hull Plate, Thruster Node | Manufacturing minerals |
+| Tier 2 | Minerals | Ferrite, Silite, Morphite | Reprocessing ore |
+| Tier 3 | Components / Datacores | Hull Plate, Datacores | Manufacturing or NPC loot |
 | Tier 4 | Ships | Frigate, Hauler, Destroyer | Manufacturing components |
+| Tier 5 | T2 Components / T2 Ships | Advanced Hull Plate, Assault Frigate | T2 manufacturing |
 | T0 | Currency | ISK (credits) | NPC market sales |
 
 ---
@@ -87,7 +88,9 @@ Minerals are produced by reprocessing raw ores. They are the building block of a
 | `noxium` | Noxium | Mid-tier mineral from lowsec ores |
 | `zyridium` | Zyridium | Rare mineral, primarily from lowsec/nullsec ores |
 | `megacite` | Megacite | Rare mineral from nullsec ores |
-| `voidsteel` | Voidsteel | Premium mineral, nullsec exclusive; used in T2 manufacturing |
+| `voidsteel` | Voidsteel | Premium mineral, nullsec exclusive; used in T1 advanced recipes |
+| `morphite` | Morphite | Advanced nullsec mineral; required for T2 manufacturing |
+| `zydrine` | Zydrine | Advanced nullsec mineral; required for T2 manufacturing |
 
 ---
 
@@ -103,6 +106,18 @@ Components are crafted in the Manufacturing queue from minerals. They are consum
 | `sensor-cluster` | Sensor Cluster | Ship construction; requires Electronics II |
 | `mining-laser` | Mining Laser | Ship construction; dedicated mining component |
 | `shield-emitter` | Shield Emitter | Ship construction; requires Electronics I |
+
+---
+
+# Tier 3 – Datacores
+
+Datacores are rare loot resources obtained from NPC combat. They are consumed by the blueprint research queue to level up BPOs.
+
+| Resource ID | Name | Source | Used For |
+|---|---|---|---|
+| `datacore-mechanical` | Mechanical Engineering Core | Lowsec pirate loot | Research industrial/component blueprints |
+| `datacore-electronic` | Electronic Systems Core | Nullsec pirate loot | Research sensor/electronics blueprints |
+| `datacore-starship` | Starship Engineering Core | Faction raid loot | Research advanced hull/ship blueprints |
 
 ---
 
@@ -123,6 +138,30 @@ Ships are not stacked in inventory. Each manufactured ship creates one unique `S
 
 ---
 
+# Tier 5 – T2 Components
+
+Advanced manufactured components crafted from morphite, zydrine, and T1 components. Required for T2 ship manufacturing and consumed by T2 BPCs.
+
+| Resource ID | Name | Notes |
+|---|---|---|
+| `advanced-hull-plate` | Advanced Hull Plate | T2 ship construction; requires morphite + hull-plate |
+| `advanced-thruster-node` | Advanced Thruster Node | T2 ship construction; requires zydrine + thruster-node |
+| `advanced-condenser-coil` | Advanced Condenser Coil | T2 ship construction; requires morphite + zydrine + condenser-coil |
+
+---
+
+# Tier 5 – T2 Ships
+
+Tech 2 ships manufactured using T2 components and a T2 BPC (Blueprint Copy). Represent mid-game progression pinnacles — 40–60% stronger per stat than equivalent T1 hulls.
+
+| Resource ID | Name | Hull Class | Prerequisites |
+|---|---|---|---|
+| `ship-assault-frigate` | Assault Frigate | `frigate` | T2 BPC + Advanced Industry L1 |
+| `ship-covert-ops` | Covert Ops | `frigate` | T2 BPC + Advanced Industry L1 |
+| `ship-command-destroyer` | Command Destroyer | `destroyer` | T2 BPC + Advanced Industry L1 |
+
+---
+
 # Resource Economic Chains
 
 ## Full Production Chain
@@ -131,11 +170,20 @@ Ships are not stacked in inventory. Each manufactured ship creates one unique `S
 Asteroid Belts
   └─ Raw Ore (Tier 1)
        └─ Reprocessing
-            └─ Minerals (Tier 2)
-                 └─ Manufacturing
+            └─ Minerals (Tier 2)  [+ morphite/zydrine for T2]
+                 └─ Manufacturing (T1 recipes)
                       └─ Components (Tier 3)
-                           └─ Manufacturing
-                                └─ Ships (Tier 4)
+                           └─ Manufacturing (T2 recipes, requires T2 BPC)
+                                ├─ T2 Components (Tier 5)
+                                └─ T2 Ships (Tier 5)
+                      └─ Manufacturing (T1 ship recipes)
+                           └─ T1 Ships (Tier 4)
+NPC Combat Loot
+  └─ Datacores (Tier 3)
+       └─ Blueprint Research Queue
+            └─ BPO level up → T2 BPO at level 5
+                 └─ Blueprint Copy → BPC
+                      └─ T2 Manufacturing (consumed per job)
 ```
 
 ## Hull Repair Loop
@@ -153,20 +201,6 @@ Minerals → Hull Plate (T3)
 Minerals / Components / Ships → NPC Market → ISK
   └─ Used for: pilot payroll, future trade route purchases, structure costs
 ```
-
----
-
-# Planned Future Resources (Phase 3+)
-
-Designed but not yet implemented:
-
-| Resource | Source | Phase |
-|---|---|---|
-| `morphite` | Nullsec belt (T2 ore) | Phase 3 – T2 manufacturing |
-| `zydrine` | Nullsec anomaly | Phase 3 – T2 manufacturing |
-| Mechanical Engineering Core | Lowsec NPC loot | Phase 3 – Blueprint research |
-| Electronic Systems Core | Nullsec NPC loot | Phase 3 – Blueprint research |
-| Starship Engineering Core | Faction raid loot | Phase 3 – Blueprint research |
 
 ---
 

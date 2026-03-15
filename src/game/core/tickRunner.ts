@@ -1,7 +1,7 @@
 ﻿import type { GameState } from '@/types/game.types';
 import { tickMining, getOreHoldCapacity, getHaulIntervalSeconds } from '@/game/systems/mining/mining.logic';
 import { tickSkills } from '@/game/systems/skills/skills.logic';
-import { tickManufacturing } from '@/game/systems/manufacturing/manufacturing.logic';
+import { tickManufacturing, tickResearch } from '@/game/systems/manufacturing/manufacturing.logic';
 import { tickReprocessing } from '@/game/systems/reprocessing/reprocessing.logic';
 import { tickMarket } from '@/game/systems/market/market.logic';
 import { tickPricePressure, tickTradeRoutes } from '@/game/systems/market/market.logic';
@@ -152,9 +152,22 @@ export function runTick(state: GameState, deltaSeconds: number): TickResult {
     const newQueue          = s.systems.manufacturing.queue.slice(1);
     const newCompletedCount = { ...s.systems.manufacturing.completedCount };
     const newResources      = { ...s.resources };
+    let blueprints = [...s.systems.manufacturing.blueprints];
     for (const job of mfgResult.completedJobs) {
       newCompletedCount[job.recipeId] = (newCompletedCount[job.recipeId] ?? 0) + job.qty;
       completedManufacturing[job.recipeId] = (completedManufacturing[job.recipeId] ?? 0) + job.qty;
+      // Consume BPC run if applicable
+      if (job.blueprintId) {
+        blueprints = blueprints.reduce<typeof blueprints>((acc, bp) => {
+          if (bp.id !== job.blueprintId) { acc.push(bp); return acc; }
+          const remaining = bp.copiesRemaining !== null ? bp.copiesRemaining - 1 : null;
+          if (remaining === null || remaining > 0) {
+            acc.push({ ...bp, copiesRemaining: remaining });
+          }
+          // remaining === 0 → BPC deleted (not pushed)
+          return acc;
+        }, []);
+      }
     }
     for (const [id, amount] of Object.entries(mfgResult.resourceProduced)) {
       newResources[id] = (newResources[id] ?? 0) + amount;
@@ -164,7 +177,7 @@ export function runTick(state: GameState, deltaSeconds: number): TickResult {
       resources: newResources,
       systems: {
         ...s.systems,
-        manufacturing: { ...s.systems.manufacturing, queue: newQueue, completedCount: newCompletedCount },
+        manufacturing: { ...s.systems.manufacturing, queue: newQueue, completedCount: newCompletedCount, blueprints },
       },
     };
   } else if (s.systems.manufacturing.queue.length > 0) {
@@ -174,6 +187,73 @@ export function runTick(state: GameState, deltaSeconds: number): TickResult {
       ...s,
       systems: { ...s.systems, manufacturing: { ...s.systems.manufacturing, queue: updatedQueue } },
     };
+  }
+
+  // ── 4a. Research & Copy: advance blueprint research/copy jobs ─────────
+  if (s.unlocks['system-manufacturing']) {
+    const researchResult = tickResearch(s, deltaSeconds);
+
+    if (
+      researchResult.completedResearch.length > 0 ||
+      researchResult.completedCopies.length > 0 ||
+      researchResult.newBlueprints.length > 0
+    ) {
+      const completedResearchIds = new Set(researchResult.completedResearch.map(j => j.id));
+      const completedCopyIds     = new Set(researchResult.completedCopies.map(j => j.id));
+      const unlockIds            = new Set(researchResult.unlockBlueprintIds);
+
+      // Apply blueprint updates (level-ups + unlocks)
+      const blueprintUpdateMap = new Map(researchResult.blueprintUpdates.map(b => [b.id, b]));
+      let updatedBlueprints = s.systems.manufacturing.blueprints.map(b => {
+        if (blueprintUpdateMap.has(b.id))    return blueprintUpdateMap.get(b.id)!;
+        if (unlockIds.has(b.id))             return { ...b, isLocked: false };
+        return b;
+      });
+
+      // Add newly created T2 BPOs and BPCs
+      updatedBlueprints = [...updatedBlueprints, ...researchResult.newBlueprints];
+
+      const updatedResearchJobs = s.systems.manufacturing.researchJobs
+        .filter(j => !completedResearchIds.has(j.id));
+      const updatedCopyJobs = s.systems.manufacturing.copyJobs
+        .filter(j => !completedCopyIds.has(j.id));
+
+      s = {
+        ...s,
+        systems: {
+          ...s.systems,
+          manufacturing: {
+            ...s.systems.manufacturing,
+            blueprints: updatedBlueprints,
+            researchJobs: updatedResearchJobs,
+            copyJobs: updatedCopyJobs,
+          },
+        },
+      };
+    } else {
+      // Just advance progress on all running research/copy jobs
+      const mfgSys = s.systems.manufacturing;
+      const completedResearchIds = new Set(researchResult.completedResearch.map(j => j.id));
+      const completedCopyIds     = new Set(researchResult.completedCopies.map(j => j.id));
+      const speedMult = 1 + (s.modifiers['blueprint-research-speed'] ?? 0);
+      const effectiveDelta = deltaSeconds * speedMult;
+
+      if (mfgSys.researchJobs.length > 0 || mfgSys.copyJobs.length > 0) {
+        const updatedResearch = mfgSys.researchJobs
+          .filter(j => !completedResearchIds.has(j.id))
+          .map(j => ({ ...j, progress: j.progress + effectiveDelta }));
+        const updatedCopies = mfgSys.copyJobs
+          .filter(j => !completedCopyIds.has(j.id))
+          .map(j => ({ ...j, progress: j.progress + effectiveDelta }));
+        s = {
+          ...s,
+          systems: {
+            ...s.systems,
+            manufacturing: { ...s.systems.manufacturing, researchJobs: updatedResearch, copyJobs: updatedCopies },
+          },
+        };
+      }
+    }
   }
 
   // ── 5. Market: auto-sell tick ─────────────────────────────────────────

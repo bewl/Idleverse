@@ -35,7 +35,7 @@ impact. Each phase is independently shippable and leaves the game in a playable,
 | Fleet movement (player fleets, orders, warp) | ✅ Complete | Per-hop tick advancement |
 | Fleet ship roles & doctrines | ✅ Complete | ShipRole, FleetDoctrine, FleetPanel Fleets tab, StarMapPanel Intel\|Route |
 | Fleet combat | ✅ Complete | NPC groups, patrol/raid orders, hull damage, bounty/loot, combat log |
-| Blueprint research & T2 manufacturing | ⬜ Phase 3 | Science skill exists, no research system |
+| Blueprint research & T2 manufacturing | ✅ Complete | Phase 3 shipped — research queue, BPC copies, T2 recipes |
 | Exploration & anomalies | ⬜ Phase 4 | Visited flags exist, no scanning |
 | Factions & missions | ⬜ Phase 5 | Rep tracking exists, no consequences |
 | Dynamic economy & trade routes | ✅ Complete | Phase 1 shipped — dynamic prices + trade route automation |
@@ -251,10 +251,22 @@ buy-here/sell-there ratio for the selected destination system (only if ratio > 1
 
 ---
 
-# Phase 3 — Blueprint Research & T2 Manufacturing
+# ✅ COMPLETED — Phase 3 — Blueprint Research & T2 Manufacturing
 
-> **Status:** Designed, not yet implemented.
-> **Depends on:** Phase 2 (datacores drop from NPC loot).
+> **Status:** ✅ Shipped — July 2025
+> **Files changed:** `src/types/game.types.ts`, `src/game/resources/resourceRegistry.ts`, `src/game/systems/manufacturing/manufacturing.config.ts`, `src/game/systems/manufacturing/manufacturing.logic.ts`, `src/stores/initialState.ts`, `src/game/core/tickRunner.ts`, `src/stores/gameStore.ts`, `src/ui/panels/ManufacturingPanel.tsx`
+
+## What Was Built
+
+- `Blueprint` type: id, itemId, tier (1|2), type ('original'|'copy'), researchLevel 0–10, copiesRemaining, isLocked
+- 12 T1 BPOs in initial state (one per existing recipe) at researchLevel 0
+- **Research queue**: up to 3 concurrent slots (+1 at Science L3, +1 at Science L5); each level costs 1 datacore; time formula `300 × 1.5^currentLevel`; at level 5 the corresponding T2 BPO is auto-unlocked
+- **Copy system**: BPC with 1–10 runs chosen at copy time; copy time `300 × 0.5 × runs`; BPC consumed one-per-job on manufacturing completion
+- **3 T2 component recipes**: Advanced Hull Plate, Advanced Thruster Node, Advanced Condenser Coil (require morphite/zydrine + T1 components + T2 BPC)
+- **3 T2 ship recipes**: Assault Frigate, Covert Ops, Command Destroyer (require T2 components + T2 BPC)
+- **3 datacore resources**: datacore-mechanical (lowsec loot), datacore-electronic (nullsec loot), datacore-starship (faction loot)
+- **2 advanced minerals**: morphite and zydrine (nullsec-only, required for T2 manufacturing)
+- **ManufacturingPanel** rewritten with Jobs tab (existing queue with T2 BPC info) and Blueprints tab (library, research slots, active research/copy jobs)
 
 ## Goal
 

@@ -328,14 +328,115 @@ and specialisations that affect their ship's combat/mining/hauling effectiveness
 
 ---
 
+# System 11 – Blueprint Research & T2 Manufacturing
+
+## Role
+
+Converts NPC combat loot (datacores) + Science skill + time into T2 blueprints. T2 ships
+and components are 40–60% stronger and represent the mid-game manufacturing plateau.
+The research loop closes the combat → manufacturing → combat cycle.
+
+## State
+
+`src/game/systems/manufacturing/` (extended)
+
+```ts
+ManufacturingState {
+  // existing fields ...
+  blueprints:   Blueprint[]
+  researchJobs: ResearchJob[]
+  copyJobs:     CopyJob[]
+}
+
+Blueprint {
+  id: string
+  itemId: string            // links to manufacturing recipe
+  tier: 1 | 2
+  type: 'original' | 'copy'
+  researchLevel: number     // 0–10 (originals only); level 5 unlocks T2 BPO
+  copiesRemaining: number | null  // null = unlimited (originals)
+  isLocked: boolean         // true while being researched or copied
+}
+
+ResearchJob {
+  id: string              // unique job id
+  blueprintId: string     // which BPO is being researched
+  progress: number        // seconds accumulated
+  totalTime: number       // computed by getResearchTimeForLevel(currentLevel)
+}
+
+CopyJob {
+  id: string
+  sourceBlueprintId: string
+  runs: number            // BPC run count chosen at copy time
+  progress: number
+  totalTime: number
+}
+```
+
+## Mechanics
+
+### Blueprint Library
+All players start with 12 T1 BPOs (one per T1 recipe) at `researchLevel 0`.
+
+### Research Queue
+- Default 3 concurrent slots; +1 at Science L3; +1 at Science L5 (max 5)
+- Each level consumes 1 datacore of the matching type and takes `300 × 1.5^currentLevel` seconds
+- Progress rate: `1 unit/s × researchSpeedMultiplier`; speed from `blueprint-research-speed` modifier (Science skill)
+- At `researchLevel 5` on a T1 BPO → corresponding T2 BPO automatically unlocked
+- BPO is `isLocked = true` while being researched or copied
+
+### Copy System
+- Select a BPO + number of runs (1–10); occupies one research slot
+- Copy time: `150 × runs` seconds
+- On completion: BPO unlocked; new BPC added to `blueprints` with `copiesRemaining = runs`
+- BPC consumed one-per-job on manufacturing completion (decrements `copiesRemaining`; removed at 0)
+
+### T2 Manufacturing
+- T2 recipes require T2 BPC + morphite/zydrine + T1 components
+- Queuing a T2 job via `queueManufacturingWithBpc` validates the BPC and deducts resources
+- T2 jobs show blueprintId in the job card; amber color theme in UI
+
+## Dependencies
+
+- Skills: Science (research speed, +slots), Advanced Industry (T2 BPC usage)
+- Resources: datacores (research cost), morphite + zydrine (T2 material inputs)
+- Combat: NPC loot tables (datacore source)
+
+## Key Functions (`manufacturing.logic.ts`)
+
+| Function | Description |
+|---|---|
+| `getResearchSpeedMultiplier(state)` | Returns `1 + blueprint-research-speed` modifier sum |
+| `getMaxResearchSlots(state)` | Returns 3–5 based on Science skill level |
+| `getResearchTimeForLevel(level)` | Returns `round(300 × 1.5^level)` |
+| `getCopyTime(runs)` | Returns `round(150 × runs)` |
+| `tickResearch(state, delta)` | Advances all research/copy jobs; handles completions |
+
+## Store Actions (`gameStore.ts`)
+
+| Action | Description |
+|---|---|
+| `queueManufacturingWithBpc(recipeId, qty, blueprintId)` | T2 manufacturing job with BPC validation |
+| `researchBlueprint(blueprintId)` | Start research on a BPO (deducts datacore, checks slots) |
+| `cancelResearchJob(jobId)` | Cancel active research; unlock BPO; no datacore refund |
+| `copyBlueprint(blueprintId, runs)` | Start copying; checks slots; locks BPO |
+| `cancelCopyJob(jobId)` | Cancel copy; unlock source BPO |
+
+## UI
+
+**ManufacturingPanel** — two tabs:
+- **Jobs tab** — active + queued jobs; T2 BPC info rows; T2 amber color accent
+- **Blueprints tab** — research slot counter, active research/copy job cards (violet/green progress), BPO/BPC library with research level pips, Improve/Copy/Queue buttons
+
+---
+
 # Planned Future Systems
 
 See `Idleverse_DESIGN_PLAN.md` for detailed specs on:
 
 | System | Phase |
 |---|---|
-| Dynamic Economy & Trade Routes | Phase 1 |
-| Blueprint Research & T2 Manufacturing | Phase 3 |
 | Exploration & Anomaly Scanning | Phase 4 |
 | Factions, Stations & Mission Boards | Phase 5 |
 | Structures & Player Outposts | Phase 6 |

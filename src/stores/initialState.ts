@@ -1,7 +1,25 @@
-﻿import type { GameState } from '@/types/game.types';
+﻿import type { GameState, Blueprint } from '@/types/game.types';
 import { RESOURCE_IDS } from '@/game/resources/resourceRegistry';
 import { SAVE_VERSION } from '@/game/balance/constants';
 import { generateFoundingPilot } from '@/game/systems/fleet/fleet.gen';
+
+// T1 recipe IDs that every player starts with as unlocked BPOs
+const T1_RECIPE_IDS = [
+  'craft-hull-plate', 'craft-thruster-node', 'craft-condenser-coil',
+  'craft-sensor-cluster', 'craft-mining-laser', 'craft-shield-emitter',
+  'recipe-ship-shuttle', 'recipe-ship-frigate', 'recipe-ship-mining-frigate',
+  'recipe-ship-hauler', 'recipe-ship-destroyer', 'recipe-ship-exhumer',
+];
+
+const INITIAL_BLUEPRINTS: Blueprint[] = T1_RECIPE_IDS.map(recipeId => ({
+  id: `bpo-${recipeId}`,
+  itemId: recipeId,
+  tier: 1,
+  type: 'original',
+  researchLevel: 0,
+  copiesRemaining: null,
+  isLocked: false,
+}));
 
 /** Default galaxy seed. Players eventually get a unique seed per run. */
 export const DEFAULT_GALAXY_SEED = 0x4944_4c56; // "IDLV" in ASCII
@@ -55,6 +73,9 @@ export function createInitialState(): GameState {
       manufacturing: {
         queue: [],
         completedCount: {},
+        blueprints: INITIAL_BLUEPRINTS,
+        researchJobs: [],
+        copyJobs: [],
       },
 
       market: {
@@ -85,6 +106,21 @@ export function createInitialState(): GameState {
           'sensor-cluster': 4000,
           'mining-laser':   3500,
           'shield-emitter': 2800,
+          // NPC buy prices for advanced minerals
+          'morphite':  45000,
+          'zydrine':   12000,
+          // Datacores (not directly sold — used for research — but priced for market display)
+          'datacore-mechanical':  250000,
+          'datacore-electronic':  400000,
+          'datacore-starship':    750000,
+          // T2 Components
+          'advanced-hull-plate':     85000,
+          'advanced-thruster-node':  110000,
+          'advanced-condenser-coil': 95000,
+          // T2 Ships
+          'ship-assault-frigate':    1200000,
+          'ship-covert-ops':         1500000,
+          'ship-command-destroyer':  3500000,
           // Ships (manufactured)
           'ship-shuttle':         12000,
           'ship-frigate':         45000,

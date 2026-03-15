@@ -253,6 +253,9 @@ These values are live in the codebase (`src/game/balance/constants.ts`):
 | `IDLE_REPAIR_RATE_PER_SEC` | 1.5/60 (~0.025) | Hull % repaired per second while idle |
 | `BASE_HAUL_SECONDS` | 120 | Default ore haul interval |
 | `MIN_HAUL_SECONDS` | 10 | Minimum possible haul interval |
+| `BASE_RESEARCH_TIME` | 300 | Base seconds for blueprint research level 0→1 |
+| `BASE_COPY_TIME_MULTIPLIER` | 0.5 | Multiplier for copy time vs research time |
+| `DEFAULT_RESEARCH_SLOTS` | 3 | Concurrent research/copy slots before Science bonuses |
 
 ---
 
@@ -373,6 +376,66 @@ First month:
 
 Long term:
 - megastructures and cosmic research
+
+---
+
+# Blueprint Research Time Formula
+
+Research duration grows exponentially with level to create a meaningful mid-game time investment.
+
+```
+ResearchTime(level) = round(BASE_RESEARCH_TIME × 1.5^level)
+```
+
+Where `BASE_RESEARCH_TIME = 300` seconds.
+
+Each level also consumes 1 datacore of the appropriate type. Progress is scaled by:
+
+```
+effectiveRate = 1 / (researchTime × (1 / researchSpeedMultiplier))
+researchSpeedMultiplier = 1 + modifiers['blueprint-research-speed']
+```
+
+Example research durations (accelerated by Science skill):
+
+| Level | Base Time | Science L5 (~+20%) |
+|---|---|---|
+| 0 → 1 | 300 s (5 min) | ~250 s |
+| 1 → 2 | 450 s (7.5 min) | ~375 s |
+| 2 → 3 | 675 s (11 min) | ~562 s |
+| 3 → 4 | 1,013 s (17 min) | ~844 s |
+| 4 → 5 (T2 unlock) | 1,519 s (25 min) | ~1,266 s |
+
+Total time to unlock a T2 BPO (levels 0–5): ~3,957 s base (~66 min) — 45 min with Science L5.
+
+---
+
+# Blueprint Copy Time Formula
+
+```
+CopyTime(runs) = round(BASE_RESEARCH_TIME × BASE_COPY_TIME_MULTIPLIER × runs)
+             = round(300 × 0.5 × runs)
+             = 150 × runs  (seconds)
+```
+
+Example copy times:
+
+| Runs | Copy Time |
+|---|---|
+| 1 | 150 s (2.5 min) |
+| 5 | 750 s (12.5 min) |
+| 10 | 1,500 s (25 min) |
+
+---
+
+# Blueprint Research Slot Formula
+
+```
+maxResearchSlots = DEFAULT_RESEARCH_SLOTS + (science ≥ 3 ? 1 : 0) + (science ≥ 5 ? 1 : 0)
+DEFAULT_RESEARCH_SLOTS = 3
+```
+
+Maximum: 5 slots (at Science L5).
 
 ---
 
