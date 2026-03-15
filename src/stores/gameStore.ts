@@ -1,49 +1,162 @@
-import { create } from 'zustand';
-import type { GameState, OfflineSummary, ManufacturingJob } from '@/types/game.types';
+﻿import { create } from 'zustand';
+import type { GameState, OfflineSummary, ManufacturingJob, SkillQueueEntry, ReprocessingJob, FleetActivity, PilotTrainingFocus } from '@/types/game.types';
+import type { FactionId, RouteSecurityFilter } from '@/types/faction.types';
 import { createInitialState } from './initialState';
 import { runTick } from '@/game/core/tickRunner';
 import { MANUFACTURING_RECIPES } from '@/game/systems/manufacturing/manufacturing.config';
-import { RESEARCH_NODES } from '@/game/systems/research/research.config';
-import { MINING_TARGETS, MINING_UPGRADES } from '@/game/systems/mining/mining.config';
-import { ENERGY_SOURCES } from '@/game/systems/energy/energy.config';
+import { ORE_BELTS, MINING_UPGRADES } from '@/game/systems/mining/mining.config';
+import { SKILL_DEFINITIONS } from '@/game/systems/skills/skills.config';
+import {
+  enqueueSkill,
+  dequeueSkill,
+  canTrainSkill,
+  buildModifiersFromSkills,
+  buildUnlocksFromSkills,
+} from '@/game/systems/skills/skills.logic';
 import { upgradeCost } from '@/game/balance/constants';
 import { saveGame, loadGame } from '@/game/persistence/saveLoad';
 import { processOfflineProgress } from '@/game/offline/offlineCalc';
-import { canPrestige, performPrestige } from '@/game/prestige/prestige.logic';
+import { calculateSellValue } from '@/game/systems/market/market.logic';
+import { BATCH_SIZE_BASE } from '@/game/systems/reprocessing/reprocessing.config';
+import { getSystemById, getSystemBeltIds, generateGalaxy, systemDistance } from '@/game/galaxy/galaxy.gen';
+import { calcWarpDuration } from '@/game/galaxy/travel.logic';
+import {
+  deployShip,
+  recallShip,
+  assignPilotToShip,
+  setShipActivity,
+  fitModule,
+  removeModule,
+  createPlayerFleet,
+  disbandPlayerFleet,
+  addShipToFleet,
+  removeShipFromFleet,
+  renamePlayerFleet,
+} from '@/game/systems/fleet/fleet.logic';
+import {
+  issueFleetOrder,
+  cancelFleetOrder,
+  issueFleetGroupOrder,
+  cancelFleetGroupOrder,
+} from '@/game/systems/fleet/fleet.orders';
+import { adjustRep, dockAtStation, undockFromStation, getStationInSystem } from '@/game/systems/factions/faction.logic';
+import {
+  enqueuePilotSkill,
+  dequeuePilotSkill,
+} from '@/game/systems/fleet/pilot.logic';
+import { generatePilot, generateRecruitmentOffers } from '@/game/systems/fleet/fleet.gen';
+
+// ─── Store interface ───────────────────────────────────────────────────────
 
 interface GameStore {
   state: GameState;
   offlineSummary: OfflineSummary | null;
 
+  // Core loop
   tick: (deltaSeconds: number) => void;
-  toggleMiningTarget: (targetId: string) => void;
+
+  // Mining
+  toggleMiningBelt: (beltId: string) => void;
   purchaseMiningUpgrade: (upgradeId: string) => void;
-  purchaseEnergySource: (sourceId: string) => void;
-  startResearch: (nodeId: string) => void;
-  cancelResearch: () => void;
-  queueManufacturing: (recipeId: string, quantity: number) => void;
+  haulOreHold: () => void;
+
+  // Skills
+  addSkillToQueue: (skillId: string, targetLevel: 1 | 2 | 3 | 4 | 5) => boolean;
+  removeSkillFromQueue: (index: number) => void;
+  clearSkillQueue: () => void;
+
+  // Manufacturing
+  queueManufacturing: (recipeId: string, quantity: number) => boolean;
   cancelManufacturingJob: (index: number) => void;
-  triggerPrestige: () => void;
+  prioritizeManufacturingJob: (index: number) => void;
+
+  // Reprocessing
+  queueReprocessing: (oreId: string, amount: number) => boolean;
+  cancelReprocessingJob: (index: number) => void;
+  toggleAutoReprocess: (oreId: string) => void;
+  setAutoThreshold: (oreId: string, amount: number) => void;
+
+  // Market
+  sellResource: (resourceId: string, amount: number) => boolean;
+  sellAll: (resourceId: string) => boolean;
+  toggleAutoSell: (resourceId: string) => void;
+  setAutoSellThreshold: (resourceId: string, amount: number) => void;
+
+  // Pilot
+  renamePilot: (name: string) => void;
+
+  // Fleet
+  deployShip: (hullId: string, customName?: string) => boolean;
+  recallShip: (shipId: string) => boolean;
+  assignPilotToShip: (pilotId: string, shipId: string | null) => boolean;
+  setShipActivity: (shipId: string, activity: FleetActivity, assignedBeltId?: string) => boolean;
+  fitModule: (shipId: string, slotType: 'high' | 'mid' | 'low', moduleId: string) => boolean;
+  removeModule: (shipId: string, slotType: 'high' | 'mid' | 'low', index: number) => boolean;
+  addPilotSkillToQueue: (pilotId: string, skillId: string, targetLevel: 1 | 2 | 3 | 4 | 5) => boolean;
+  removePilotSkillFromQueue: (pilotId: string, index: number) => void;
+  setPilotTrainingFocus: (pilotId: string, focus: PilotTrainingFocus | null) => void;
+  hirePilot: (offerId: string) => boolean;
+  refreshRecruitmentOffers: () => void;
+  renamePilotCharacter: (pilotId: string, name: string) => void;
+  issueFleetOrder: (shipId: string, destinationId: string, securityFilter?: RouteSecurityFilter, pauseOnArrival?: boolean) => boolean;
+  cancelFleetOrder: (shipId: string) => boolean;
+  createPlayerFleet: (name: string, shipIds: string[]) => string | null;
+  disbandPlayerFleet: (fleetId: string) => boolean;
+  addShipToFleet: (fleetId: string, shipId: string) => boolean;
+  removeShipFromFleet: (fleetId: string, shipId: string) => boolean;
+  renamePlayerFleet: (fleetId: string, name: string) => boolean;
+  issueFleetGroupOrder: (fleetId: string, destinationId: string, securityFilter?: RouteSecurityFilter, pauseOnArrival?: boolean) => boolean;
+  cancelFleetGroupOrder: (fleetId: string) => boolean;
+
+  // Factions
+  adjustReputation: (factionId: FactionId, delta: number) => void;
+  dockAtStation: (stationId: string) => boolean;
+  undockFromStation: () => void;
+
+  // Galaxy / Travel
+  /** Begin a warp jump to another system. Returns false if already in warp or same system. */
+  initiateWarp: (toSystemId: string) => boolean;
+  /** Cancel a warp in progress (only if not yet past the point of no return -- 50% progress). */
+  cancelWarp: () => void;
+  /** Mark a system as scanned (reveals all body details). */
+  scanSystem: (systemId: string) => void;
+  /** Global galaxy selector helper — reads galaxy from state. */
+  getGalaxy: () => ReturnType<typeof generateGalaxy>;
+
+  // Persistence
   saveToStorage: () => void;
   loadFromStorage: () => void;
   dismissOfflineSummary: () => void;
+  clearSave: () => void;
 }
+
+// ─── Store ─────────────────────────────────────────────────────────────────
 
 export const useGameStore = create<GameStore>((set, get) => ({
   state: createInitialState(),
   offlineSummary: null,
+
+  // ── Core loop ────────────────────────────────────────────────────────────
 
   tick: (deltaSeconds) => {
     const { newState } = runTick(get().state, deltaSeconds);
     set({ state: newState });
   },
 
-  toggleMiningTarget: (targetId) => {
+  // ── Mining ───────────────────────────────────────────────────────────────
+
+  toggleMiningBelt: (beltId) => {
     const { state } = get();
-    const def = MINING_TARGETS[targetId];
+    const def = ORE_BELTS[beltId];
     if (!def) return;
-    if (def.unlockResearch && !state.systems.research.unlockedNodes[def.unlockResearch]) return;
-    const current = state.systems.mining.targets[targetId] ?? false;
+
+    // Check skill requirement
+    if (def.requiredSkill) {
+      const lvl = state.systems.skills.levels[def.requiredSkill.skillId] ?? 0;
+      if (lvl < def.requiredSkill.minLevel) return;
+    }
+
+    const current = state.systems.mining.targets[beltId] ?? false;
     set({
       state: {
         ...state,
@@ -51,7 +164,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
           ...state.systems,
           mining: {
             ...state.systems.mining,
-            targets: { ...state.systems.mining.targets, [targetId]: !current },
+            targets: { ...state.systems.mining.targets, [beltId]: !current },
           },
         },
       },
@@ -62,15 +175,22 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const { state } = get();
     const def = MINING_UPGRADES[upgradeId];
     if (!def) return;
+
     const currentLevel = state.systems.mining.upgrades[upgradeId] ?? 0;
     if (currentLevel >= def.maxLevel) return;
-    if (def.prerequisiteResearch && !state.systems.research.unlockedNodes[def.prerequisiteResearch]) return;
+
+    if (def.prerequisiteSkill) {
+      const lvl = state.systems.skills.levels[def.prerequisiteSkill.skillId] ?? 0;
+      if (lvl < def.prerequisiteSkill.minLevel) return;
+    }
+
     const newResources = { ...state.resources };
     for (const [resourceId, baseAmount] of Object.entries(def.baseCost)) {
       const cost = upgradeCost(baseAmount, currentLevel);
       if ((newResources[resourceId] ?? 0) < cost) return;
       newResources[resourceId] = (newResources[resourceId] ?? 0) - cost;
     }
+
     set({
       state: {
         ...state,
@@ -86,92 +206,112 @@ export const useGameStore = create<GameStore>((set, get) => ({
     });
   },
 
-  purchaseEnergySource: (sourceId) => {
+  haulOreHold: () => {
     const { state } = get();
-    const def = ENERGY_SOURCES[sourceId];
-    if (!def) return;
-    const currentLevel = state.systems.energy.sources[sourceId] ?? 0;
-    if (currentLevel >= def.maxLevel) return;
-    if (def.unlockResearch && !state.systems.research.unlockedNodes[def.unlockResearch]) return;
+    const oreHold = state.systems.mining.oreHold ?? {};
+    if (Object.keys(oreHold).length === 0) return;
+
     const newResources = { ...state.resources };
-    for (const [resourceId, baseAmount] of Object.entries(def.baseCost)) {
-      const cost = upgradeCost(baseAmount, currentLevel);
-      if ((newResources[resourceId] ?? 0) < cost) return;
-      newResources[resourceId] = (newResources[resourceId] ?? 0) - cost;
+    for (const [resourceId, amount] of Object.entries(oreHold)) {
+      if (amount > 0) {
+        newResources[resourceId] = (newResources[resourceId] ?? 0) + amount;
+      }
     }
+
     set({
       state: {
         ...state,
         resources: newResources,
         systems: {
           ...state.systems,
-          energy: {
-            ...state.systems.energy,
-            sources: { ...state.systems.energy.sources, [sourceId]: currentLevel + 1 },
+          mining: {
+            ...state.systems.mining,
+            oreHold: {},
+            lastHaulAt: Date.now(),
           },
         },
       },
     });
   },
 
-  startResearch: (nodeId) => {
+  // ── Skills ───────────────────────────────────────────────────────────────
+
+  addSkillToQueue: (skillId, targetLevel) => {
     const { state } = get();
-    const def = RESEARCH_NODES[nodeId];
-    if (!def) return;
-    if (state.systems.research.unlockedNodes[nodeId]) return;
-    if (state.systems.research.activeNodeId) return;
-    if (!def.prerequisites.every(p => state.systems.research.unlockedNodes[p])) return;
-    const newResources = { ...state.resources };
-    for (const [resourceId, amount] of Object.entries(def.baseCost)) {
-      if ((newResources[resourceId] ?? 0) < amount) return;
-      newResources[resourceId] = (newResources[resourceId] ?? 0) - amount;
-    }
+    const def = SKILL_DEFINITIONS[skillId];
+    if (!def) return false;
+
+    if (!canTrainSkill(state, skillId)) return false;
+
+    const currentLevel = state.systems.skills.levels[skillId] ?? 0;
+    if (targetLevel <= currentLevel) return false;
+
+    const newSkillsState = enqueueSkill(state, skillId, targetLevel);
+    if (!newSkillsState) return false;
+
+    // If nothing is actively training, start this skill immediately
+    const shouldActivate = !newSkillsState.activeSkillId;
     set({
       state: {
         ...state,
-        resources: newResources,
         systems: {
           ...state.systems,
-          research: { ...state.systems.research, activeNodeId: nodeId, activeProgress: 0 },
+          skills: shouldActivate
+            ? { ...newSkillsState, activeSkillId: skillId, activeProgress: 0 }
+            : newSkillsState,
+        },
+      },
+    });
+    return true;
+  },
+
+  removeSkillFromQueue: (index) => {
+    const { state } = get();
+    const newSkillsState = dequeueSkill(state, index);
+    set({
+      state: { ...state, systems: { ...state.systems, skills: newSkillsState } },
+    });
+  },
+
+  clearSkillQueue: () => {
+    const { state } = get();
+    set({
+      state: {
+        ...state,
+        systems: {
+          ...state.systems,
+          skills: {
+            ...state.systems.skills,
+            queue: [],
+            activeSkillId: null,
+            activeProgress: 0,
+          },
         },
       },
     });
   },
 
-  cancelResearch: () => {
-    const { state } = get();
-    if (!state.systems.research.activeNodeId) return;
-    const def = RESEARCH_NODES[state.systems.research.activeNodeId];
-    const newResources = { ...state.resources };
-    if (def) {
-      for (const [resourceId, amount] of Object.entries(def.baseCost)) {
-        newResources[resourceId] = (newResources[resourceId] ?? 0) + Math.floor(amount * 0.5);
-      }
-    }
-    set({
-      state: {
-        ...state,
-        resources: newResources,
-        systems: {
-          ...state.systems,
-          research: { ...state.systems.research, activeNodeId: null, activeProgress: 0 },
-        },
-      },
-    });
-  },
+  // ── Manufacturing ────────────────────────────────────────────────────────
 
   queueManufacturing: (recipeId, quantity) => {
     const { state } = get();
-    if (!state.unlocks['system-manufacturing']) return;
+    if (!state.unlocks['system-manufacturing']) return false;
+
     const recipe = MANUFACTURING_RECIPES[recipeId];
-    if (!recipe) return;
-    if (recipe.prerequisiteResearch && !state.systems.research.unlockedNodes[recipe.prerequisiteResearch]) return;
+    if (!recipe) return false;
+
+    if (recipe.requiredSkill) {
+      const lvl = state.systems.skills.levels[recipe.requiredSkill.skillId] ?? 0;
+      if (lvl < recipe.requiredSkill.minLevel) return false;
+    }
+
     const newResources = { ...state.resources };
     for (const [resourceId, amount] of Object.entries(recipe.inputs)) {
       const total = amount * quantity;
-      if ((newResources[resourceId] ?? 0) < total) return;
+      if ((newResources[resourceId] ?? 0) < total) return false;
       newResources[resourceId] = (newResources[resourceId] ?? 0) - total;
     }
+
     const newJob: ManufacturingJob = { recipeId, progress: 0, quantity };
     set({
       state: {
@@ -186,20 +326,22 @@ export const useGameStore = create<GameStore>((set, get) => ({
         },
       },
     });
+    return true;
   },
 
   cancelManufacturingJob: (index) => {
     const { state } = get();
     const job = state.systems.manufacturing.queue[index];
     if (!job) return;
+
     const recipe = MANUFACTURING_RECIPES[job.recipeId];
     const newResources = { ...state.resources };
     if (recipe) {
       for (const [resourceId, amount] of Object.entries(recipe.inputs)) {
-        newResources[resourceId] =
-          (newResources[resourceId] ?? 0) + Math.floor(amount * job.quantity * 0.5);
+        newResources[resourceId] = (newResources[resourceId] ?? 0) + Math.floor(amount * job.quantity * 0.5);
       }
     }
+
     set({
       state: {
         ...state,
@@ -215,13 +357,553 @@ export const useGameStore = create<GameStore>((set, get) => ({
     });
   },
 
-  triggerPrestige: () => {
+  prioritizeManufacturingJob: (index) => {
     const { state } = get();
-    if (!canPrestige(state)) return;
-    const newState = performPrestige(state);
-    set({ state: newState });
-    saveGame(newState);
+    const queue = state.systems.manufacturing.queue;
+    if (index <= 0 || index >= queue.length) return;
+    const newQueue = [...queue];
+    const [chosen] = newQueue.splice(index, 1);
+    newQueue.unshift(chosen);
+    set({
+      state: {
+        ...state,
+        systems: {
+          ...state.systems,
+          manufacturing: { ...state.systems.manufacturing, queue: newQueue },
+        },
+      },
+    });
   },
+
+  // ── Reprocessing ─────────────────────────────────────────────────────────
+
+  queueReprocessing: (oreId, amount) => {
+    const { state } = get();
+    if (!state.unlocks['system-reprocessing']) return false;
+
+    const have = state.resources[oreId] ?? 0;
+    const batches = Math.floor(amount / BATCH_SIZE_BASE);
+    if (batches < 1) return false;
+    const totalOre = batches * BATCH_SIZE_BASE;
+    if (have < totalOre) return false;
+
+    const newResources = { ...state.resources, [oreId]: have - totalOre };
+    const newJobs: ReprocessingJob[] = Array.from({ length: batches }, () => ({
+      oreId, amount: BATCH_SIZE_BASE, progress: 0, isAuto: false,
+    }));
+
+    set({
+      state: {
+        ...state,
+        resources: newResources,
+        systems: {
+          ...state.systems,
+          reprocessing: {
+            ...state.systems.reprocessing,
+            queue: [...state.systems.reprocessing.queue, ...newJobs],
+          },
+        },
+      },
+    });
+    return true;
+  },
+
+  cancelReprocessingJob: (index) => {
+    const { state } = get();
+    const job = state.systems.reprocessing.queue[index];
+    if (!job) return;
+
+    // Refund the ore (50% recovery on cancel; 100% if not yet started)
+    const refund = job.progress === 0 ? job.amount : Math.floor(job.amount * 0.5);
+    const newResources = { ...state.resources };
+    newResources[job.oreId] = (newResources[job.oreId] ?? 0) + refund;
+
+    set({
+      state: {
+        ...state,
+        resources: newResources,
+        systems: {
+          ...state.systems,
+          reprocessing: {
+            ...state.systems.reprocessing,
+            queue: state.systems.reprocessing.queue.filter((_, i) => i !== index),
+          },
+        },
+      },
+    });
+  },
+
+  toggleAutoReprocess: (oreId) => {
+    const { state } = get();
+    const current = state.systems.reprocessing.autoTargets?.[oreId] ?? false;
+    set({
+      state: {
+        ...state,
+        systems: {
+          ...state.systems,
+          reprocessing: {
+            ...state.systems.reprocessing,
+            autoTargets: { ...(state.systems.reprocessing.autoTargets ?? {}), [oreId]: !current },
+          },
+        },
+      },
+    });
+  },
+
+  setAutoThreshold: (oreId, amount) => {
+    const { state } = get();
+    set({
+      state: {
+        ...state,
+        systems: {
+          ...state.systems,
+          reprocessing: {
+            ...state.systems.reprocessing,
+            autoThreshold: { ...(state.systems.reprocessing.autoThreshold ?? {}), [oreId]: Math.max(0, amount) },
+          },
+        },
+      },
+    });
+  },
+
+  // ── Market ───────────────────────────────────────────────────────────────
+
+  sellResource: (resourceId, amount) => {
+    const { state } = get();
+    if (!state.unlocks['system-market']) return false;
+    const have = state.resources[resourceId] ?? 0;
+    const sell = Math.min(Math.floor(amount), have);
+    if (sell <= 0) return false;
+
+    const isk = calculateSellValue(state, resourceId, sell);
+    if (isk === 0) return false;
+
+    const newLifetime = {
+      ...(state.systems.market.lifetimeSold ?? {}),
+      [resourceId]: ((state.systems.market.lifetimeSold ?? {})[resourceId] ?? 0) + isk,
+    };
+
+    set({
+      state: {
+        ...state,
+        resources: {
+          ...state.resources,
+          [resourceId]: have - sell,
+          'credits': (state.resources['credits'] ?? 0) + isk,
+        },
+        systems: {
+          ...state.systems,
+          market: { ...state.systems.market, lifetimeSold: newLifetime },
+        },
+      },
+    });
+    return true;
+  },
+
+  sellAll: (resourceId) => {
+    const { state } = get();
+    const have = state.resources[resourceId] ?? 0;
+    if (have <= 0) return false;
+    return get().sellResource(resourceId, have);
+  },
+
+  toggleAutoSell: (resourceId) => {
+    const { state } = get();
+    const current = state.systems.market.autoSell?.[resourceId];
+    const newEntry = { enabled: !(current?.enabled ?? false), threshold: current?.threshold ?? 0 };
+    set({
+      state: {
+        ...state,
+        systems: {
+          ...state.systems,
+          market: {
+            ...state.systems.market,
+            autoSell: { ...(state.systems.market.autoSell ?? {}), [resourceId]: newEntry },
+          },
+        },
+      },
+    });
+  },
+
+  setAutoSellThreshold: (resourceId, amount) => {
+    const { state } = get();
+    const current = state.systems.market.autoSell?.[resourceId];
+    const newEntry = { enabled: current?.enabled ?? false, threshold: Math.max(0, Math.floor(amount)) };
+    set({
+      state: {
+        ...state,
+        systems: {
+          ...state.systems,
+          market: {
+            ...state.systems.market,
+            autoSell: { ...(state.systems.market.autoSell ?? {}), [resourceId]: newEntry },
+          },
+        },
+      },
+    });
+  },
+
+  // ── Pilot ────────────────────────────────────────────────────────────────
+
+  renamePilot: (name) => {
+    const { state } = get();
+    const trimmed = name.trim().slice(0, 32);
+    if (!trimmed) return;
+    set({ state: { ...state, pilot: { ...state.pilot, name: trimmed } } });
+  },
+
+  // ── Fleet ────────────────────────────────────────────────────────────────
+
+  deployShip: (hullId, customName) => {
+    const newState = deployShip(get().state, hullId, customName);
+    if (!newState) return false;
+    set({ state: newState });
+    return true;
+  },
+
+  recallShip: (shipId) => {
+    const newState = recallShip(get().state, shipId);
+    if (!newState) return false;
+    set({ state: newState });
+    return true;
+  },
+
+  assignPilotToShip: (pilotId, shipId) => {
+    const newState = assignPilotToShip(get().state, pilotId, shipId);
+    if (!newState) return false;
+    set({ state: newState });
+    return true;
+  },
+
+  setShipActivity: (shipId, activity, assignedBeltId) => {
+    const newState = setShipActivity(get().state, shipId, activity, assignedBeltId);
+    if (!newState) return false;
+    set({ state: newState });
+    return true;
+  },
+
+  fitModule: (shipId, slotType, moduleId) => {
+    const newState = fitModule(get().state, shipId, slotType, moduleId);
+    if (!newState) return false;
+    set({ state: newState });
+    return true;
+  },
+
+  removeModule: (shipId, slotType, index) => {
+    const newState = removeModule(get().state, shipId, slotType, index);
+    if (!newState) return false;
+    set({ state: newState });
+    return true;
+  },
+
+  addPilotSkillToQueue: (pilotId, skillId, targetLevel) => {
+    const { state } = get();
+    const pilot = state.systems.fleet.pilots[pilotId];
+    if (!pilot) return false;
+    const newSkillState = enqueuePilotSkill(pilot, skillId, targetLevel);
+    if (!newSkillState) return false;
+    set({
+      state: {
+        ...state,
+        systems: {
+          ...state.systems,
+          fleet: {
+            ...state.systems.fleet,
+            pilots: {
+              ...state.systems.fleet.pilots,
+              [pilotId]: { ...pilot, skills: newSkillState },
+            },
+          },
+        },
+      },
+    });
+    return true;
+  },
+
+  removePilotSkillFromQueue: (pilotId, index) => {
+    const { state } = get();
+    const pilot = state.systems.fleet.pilots[pilotId];
+    if (!pilot) return;
+    const newSkillState = dequeuePilotSkill(pilot, index);
+    set({
+      state: {
+        ...state,
+        systems: {
+          ...state.systems,
+          fleet: {
+            ...state.systems.fleet,
+            pilots: { ...state.systems.fleet.pilots, [pilotId]: { ...pilot, skills: newSkillState } },
+          },
+        },
+      },
+    });
+  },
+
+  setPilotTrainingFocus: (pilotId, focus) => {
+    const { state } = get();
+    const pilot = state.systems.fleet.pilots[pilotId];
+    if (!pilot) return;
+    set({
+      state: {
+        ...state,
+        systems: {
+          ...state.systems,
+          fleet: {
+            ...state.systems.fleet,
+            pilots: {
+              ...state.systems.fleet.pilots,
+              [pilotId]: { ...pilot, skills: { ...pilot.skills, idleTrainingFocus: focus } },
+            },
+          },
+        },
+      },
+    });
+  },
+
+  hirePilot: (offerId) => {
+    const { state } = get();
+    const offer = state.systems.fleet.recruitmentOffers.find(o => o.id === offerId);
+    if (!offer) return false;
+    const credits = state.resources['credits'] ?? 0;
+    if (credits < offer.hiringCost) return false;
+
+    const newPilot = generatePilot(state.galaxy.seed, offer.pilotSeed);
+    const newOffers = state.systems.fleet.recruitmentOffers.filter(o => o.id !== offerId);
+
+    set({
+      state: {
+        ...state,
+        resources: { ...state.resources, 'credits': credits - offer.hiringCost },
+        systems: {
+          ...state.systems,
+          fleet: {
+            ...state.systems.fleet,
+            pilots: { ...state.systems.fleet.pilots, [newPilot.id]: newPilot },
+            recruitmentOffers: newOffers,
+          },
+        },
+      },
+    });
+    return true;
+  },
+
+  refreshRecruitmentOffers: () => {
+    const { state } = get();
+    const epoch = state.systems.fleet.recruitmentOffers.length; // simple epoch
+    const newOffers = generateRecruitmentOffers(state.galaxy.seed, epoch);
+    set({
+      state: {
+        ...state,
+        systems: {
+          ...state.systems,
+          fleet: { ...state.systems.fleet, recruitmentOffers: newOffers },
+        },
+      },
+    });
+  },
+
+  renamePilotCharacter: (pilotId, name) => {
+    const { state } = get();
+    const pilot = state.systems.fleet.pilots[pilotId];
+    if (!pilot) return;
+    const trimmed = name.trim().slice(0, 32);
+    if (!trimmed) return;
+    set({
+      state: {
+        ...state,
+        systems: {
+          ...state.systems,
+          fleet: {
+            ...state.systems.fleet,
+            pilots: { ...state.systems.fleet.pilots, [pilotId]: { ...pilot, name: trimmed } },
+          },
+        },
+      },
+    });
+  },
+
+  issueFleetOrder: (shipId, destinationId, securityFilter = 'shortest', pauseOnArrival = false) => {
+    const newState = issueFleetOrder(get().state, shipId, destinationId, securityFilter, pauseOnArrival);
+    if (!newState) return false;
+    set({ state: newState });
+    return true;
+  },
+
+  cancelFleetOrder: (shipId) => {
+    const newState = cancelFleetOrder(get().state, shipId);
+    if (!newState) return false;
+    set({ state: newState });
+    return true;
+  },
+
+  createPlayerFleet: (name, shipIds) => {
+    const newState = createPlayerFleet(get().state, name, shipIds);
+    if (!newState) return null;
+    // Extract the newly created fleet ID (the one not present before)
+    const before = new Set(Object.keys(get().state.systems.fleet.fleets));
+    set({ state: newState });
+    const after = Object.keys(newState.systems.fleet.fleets);
+    return after.find(id => !before.has(id)) ?? null;
+  },
+
+  disbandPlayerFleet: (fleetId) => {
+    const newState = disbandPlayerFleet(get().state, fleetId);
+    if (!newState) return false;
+    set({ state: newState });
+    return true;
+  },
+
+  addShipToFleet: (fleetId, shipId) => {
+    const newState = addShipToFleet(get().state, fleetId, shipId);
+    if (!newState) return false;
+    set({ state: newState });
+    return true;
+  },
+
+  removeShipFromFleet: (fleetId, shipId) => {
+    const newState = removeShipFromFleet(get().state, fleetId, shipId);
+    if (!newState) return false;
+    set({ state: newState });
+    return true;
+  },
+
+  renamePlayerFleet: (fleetId, name) => {
+    const newState = renamePlayerFleet(get().state, fleetId, name);
+    if (!newState) return false;
+    set({ state: newState });
+    return true;
+  },
+
+  issueFleetGroupOrder: (fleetId, destinationId, securityFilter = 'shortest', pauseOnArrival = false) => {
+    const newState = issueFleetGroupOrder(get().state, fleetId, destinationId, securityFilter, pauseOnArrival);
+    if (!newState) return false;
+    set({ state: newState });
+    return true;
+  },
+
+  cancelFleetGroupOrder: (fleetId) => {
+    const newState = cancelFleetGroupOrder(get().state, fleetId);
+    if (!newState) return false;
+    set({ state: newState });
+    return true;
+  },
+
+  // ── Factions ──────────────────────────────────────────────
+
+  adjustReputation: (factionId, delta) => {
+    const { state } = get();
+    set({
+      state: {
+        ...state,
+        systems: {
+          ...state.systems,
+          factions: adjustRep(state.systems.factions, factionId, delta),
+        },
+      },
+    });
+  },
+
+  dockAtStation: (stationId) => {
+    const { state } = get();
+    // Find the system that contains this station
+    const galaxy = generateGalaxy(state.galaxy.seed);
+    const system = galaxy.find(s => s.stationId === stationId);
+    if (!system || !system.factionId) return false;
+    const sysIndex = system.id === 'home' ? 0 : parseInt(system.id.replace('sys-', ''), 10);
+    const station = getStationInSystem(system, state.galaxy.seed, isNaN(sysIndex) ? 0 : sysIndex);
+    if (!station) return false;
+    const newFactions = dockAtStation(state.systems.factions, station);
+    if (!newFactions) return false;
+    set({
+      state: {
+        ...state,
+        systems: { ...state.systems, factions: newFactions },
+      },
+    });
+    return true;
+  },
+
+  undockFromStation: () => {
+    const { state } = get();
+    set({
+      state: {
+        ...state,
+        systems: {
+          ...state.systems,
+          factions: undockFromStation(state.systems.factions),
+        },
+      },
+    });
+  },
+
+  // ── Galaxy / Travel ─────────────────────────────────────────────────────
+
+  initiateWarp: (toSystemId) => {
+    const { state } = get();
+    const galaxy = state.galaxy;
+    if (galaxy.warp) return false;                        // already in warp
+    if (galaxy.currentSystemId === toSystemId) return false; // already here
+
+    const seed = galaxy.seed;
+    const fromSystem = getSystemById(seed, galaxy.currentSystemId);
+    const toSystem   = getSystemById(seed, toSystemId);
+    const duration   = calcWarpDuration(state, fromSystem, toSystem);
+
+    set({
+      state: {
+        ...state,
+        // Pause all mining belts while in warp
+        systems: {
+          ...state.systems,
+          mining: {
+            ...state.systems.mining,
+            targets: Object.fromEntries(
+              Object.keys(state.systems.mining.targets).map(k => [k, false]),
+            ),
+          },
+        },
+        galaxy: {
+          ...galaxy,
+          warp: {
+            fromSystemId: galaxy.currentSystemId,
+            toSystemId,
+            startedAt: Date.now(),
+            durationSeconds: duration,
+            progress: 0,
+          },
+        },
+      },
+    });
+    return true;
+  },
+
+  cancelWarp: () => {
+    const { state } = get();
+    const warp = state.galaxy.warp;
+    if (!warp) return;
+    // Can only cancel before 50% through
+    const progress = Math.min(1, (Date.now() - warp.startedAt) / 1000 / warp.durationSeconds);
+    if (progress >= 0.5) return;
+    set({ state: { ...state, galaxy: { ...state.galaxy, warp: null } } });
+  },
+
+  scanSystem: (systemId) => {
+    const { state } = get();
+    set({
+      state: {
+        ...state,
+        galaxy: {
+          ...state.galaxy,
+          scannedSystems: { ...state.galaxy.scannedSystems, [systemId]: true },
+        },
+      },
+    });
+  },
+
+  getGalaxy: () => {
+    return generateGalaxy(get().state.galaxy.seed);
+  },
+  // ── Persistence ──────────────────────────────────────────────────────────
 
   saveToStorage: () => {
     saveGame(get().state);
@@ -230,7 +912,59 @@ export const useGameStore = create<GameStore>((set, get) => ({
   loadFromStorage: () => {
     const save = loadGame();
     if (!save) return;
-    const { newState, summary } = processOfflineProgress(save.state, Date.now());
+
+    // Version guard: discard saves from pre-pivot (version < 2)
+    if (save.version < 2) {
+      console.info('[Idleverse] Old save format detected (v%d). Starting fresh.', save.version);
+      return;
+    }
+
+    // Patch any systems added after the save was created
+    const defaults      = createInitialState();
+    const patchedSystems = { ...defaults.systems, ...save.state.systems };
+    const patchedUnlocks = { ...defaults.unlocks,  ...save.state.unlocks };
+
+    // Patch fleet — ensure pilots + recruitmentOffers exist (added after initial release)
+    if (!patchedSystems.fleet.pilots) {
+      patchedSystems.fleet = { ...patchedSystems.fleet, pilots: defaults.systems.fleet.pilots };
+    }
+    if (!patchedSystems.fleet.recruitmentOffers) {
+      patchedSystems.fleet = { ...patchedSystems.fleet, recruitmentOffers: [] };
+    }
+    if (!patchedSystems.fleet.fleets) {
+      patchedSystems.fleet = { ...patchedSystems.fleet, fleets: {} };
+    }
+    if (patchedSystems.fleet.maxFleets === undefined) {
+      patchedSystems.fleet = { ...patchedSystems.fleet, maxFleets: defaults.systems.fleet.maxFleets };
+    }
+    // Patch existing ships — add fleetId field if missing
+    const patchedShips: typeof patchedSystems.fleet.ships = {};
+    for (const [id, ship] of Object.entries(patchedSystems.fleet.ships)) {
+      patchedShips[id] = ship.fleetId === undefined ? { ...ship, fleetId: null } : ship;
+    }
+    patchedSystems.fleet = { ...patchedSystems.fleet, ships: patchedShips };
+
+    // Patch factions — added in v3; default to fresh faction state for older saves
+    if (!patchedSystems.factions) {
+      patchedSystems.factions = defaults.systems.factions;
+    }
+
+    // Recompute skill-derived modifiers from saved skill levels (safety net)
+    const recomputedModifiers = buildModifiersFromSkills(patchedSystems.skills);
+    const recomputedUnlocks   = buildUnlocksFromSkills(patchedSystems.skills);
+
+    const patchedState: GameState = {
+      ...save.state,
+      systems:   patchedSystems,
+      unlocks:   { ...patchedUnlocks,  ...recomputedUnlocks },
+      modifiers: { ...save.state.modifiers, ...recomputedModifiers },
+      // Patch galaxy if it was added after this save was written
+      galaxy:    save.state.galaxy
+        ? { ...save.state.galaxy, galacticSliceZ: save.state.galaxy.galacticSliceZ ?? 0.5 }
+        : defaults.galaxy,
+    };
+
+    const { newState, summary } = processOfflineProgress(patchedState, Date.now());
     set({
       state: newState,
       offlineSummary: summary.elapsedSeconds > 60 ? summary : null,
@@ -238,4 +972,14 @@ export const useGameStore = create<GameStore>((set, get) => ({
   },
 
   dismissOfflineSummary: () => set({ offlineSummary: null }),
+
+  clearSave: () => {
+    const { deleteSave } = require('@/game/persistence/saveLoad') as typeof import('@/game/persistence/saveLoad');
+    deleteSave();
+    set({ state: createInitialState(), offlineSummary: null });
+  },
 }));
+
+// Export for backwards-compat with any surviving imports
+export type { SkillQueueEntry };
+

@@ -4,14 +4,13 @@ export function checkUnlockRequirement(req: UnlockRequirement, state: GameState)
   switch (req.type as UnlockRequirementType) {
     case 'resource':
       return (state.resources[req.target] ?? 0) >= Number(req.value);
-    case 'research':
-      return state.systems.research.unlockedNodes[req.target] === true;
+    case 'skill': {
+      // target = 'skillId:minLevel', e.g. 'mining:3'
+      const [skillId, minLvStr] = req.target.split(':');
+      return (state.systems.skills.levels[skillId] ?? 0) >= Number(minLvStr ?? req.value);
+    }
     case 'milestone':
       return state.unlocks[req.target] === true;
-    case 'prestige':
-      return state.prestige.points >= Number(req.value);
-    case 'systemLevel':
-      return (state.mastery[req.target]?.level ?? 0) >= Number(req.value);
     default:
       return false;
   }
@@ -22,18 +21,31 @@ interface UnlockRule {
   requirements: UnlockRequirement[];
 }
 
+// Most unlocks are driven by the skills system (skills grant unlock keys directly).
+// These rules cover resource-threshold or compound conditions.
 const UNLOCK_RULES: UnlockRule[] = [
   {
     unlockId: 'system-manufacturing',
     requirements: [
-      { type: 'research', target: 'industrial-manufacturing-i', value: 1 },
+      { type: 'skill', target: 'industry:1', value: 1 },
     ],
   },
   {
-    unlockId: 'system-prestige',
+    unlockId: 'system-market',
     requirements: [
-      { type: 'resource', target: 'refined-metals', value: 100 },
-      { type: 'research', target: 'industrial-mining-ii', value: 1 },
+      { type: 'skill', target: 'trade:1', value: 1 },
+    ],
+  },
+  {
+    unlockId: 'system-reprocessing',
+    requirements: [
+      { type: 'skill', target: 'reprocessing:1', value: 1 },
+    ],
+  },
+  {
+    unlockId: 'system-fleet',
+    requirements: [
+      { type: 'skill', target: 'spaceship-command:1', value: 1 },
     ],
   },
 ];

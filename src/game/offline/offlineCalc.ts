@@ -5,11 +5,11 @@ import { runTick } from '@/game/core/tickRunner';
 /** Simulate offline progress in discrete chunks using the live tick logic. */
 export function processOfflineProgress(
   state: GameState,
-  nowMs: number
+  nowMs: number,
 ): { newState: GameState; summary: OfflineSummary } {
   const elapsedRaw = (nowMs - state.lastUpdatedAt) / 1000;
-  const wasCapped = elapsedRaw > OFFLINE_CAP_SECONDS;
-  const elapsed = Math.min(elapsedRaw, OFFLINE_CAP_SECONDS);
+  const wasCapped  = elapsedRaw > OFFLINE_CAP_SECONDS;
+  const elapsed    = Math.min(elapsedRaw, OFFLINE_CAP_SECONDS);
 
   if (elapsed < 1) {
     return {
@@ -17,30 +17,31 @@ export function processOfflineProgress(
       summary: {
         elapsedSeconds: 0,
         resourcesGained: {},
-        completedResearch: [],
         completedManufacturing: {},
+        skillsAdvanced: [],
         wasCapped: false,
+        oreHoldFilled: 0,
       },
     };
   }
 
-  const resourcesBefore = { ...state.resources };
-  let currentState = { ...state };
-  const completedResearch: string[] = [];
+  const resourcesBefore      = { ...state.resources };
+  let currentState           = { ...state };
   const completedManufacturing: Record<string, number> = {};
+  const skillsAdvanced: Array<{ skillId: string; fromLevel: number; toLevel: number }> = [];
 
-  // Simulate in 60-second chunks to preserve queue/unlock logic
+  // Simulate in 60-second chunks to preserve queue and unlock logic
   let remaining = elapsed;
-  const CHUNK = 60;
+  const CHUNK   = 60;
   while (remaining > 0) {
-    const chunk = Math.min(remaining, CHUNK);
+    const chunk  = Math.min(remaining, CHUNK);
     const result = runTick(currentState, chunk);
-    completedResearch.push(...result.completedResearch);
     for (const [id, qty] of Object.entries(result.completedManufacturing)) {
       completedManufacturing[id] = (completedManufacturing[id] ?? 0) + qty;
     }
+    skillsAdvanced.push(...result.skillsAdvanced);
     currentState = result.newState;
-    remaining -= chunk;
+    remaining   -= chunk;
   }
 
   const resourcesGained: Record<string, number> = {};
@@ -51,12 +52,6 @@ export function processOfflineProgress(
 
   return {
     newState: { ...currentState, lastUpdatedAt: nowMs },
-    summary: {
-      elapsedSeconds: elapsed,
-      resourcesGained,
-      completedResearch,
-      completedManufacturing,
-      wasCapped,
-    },
+    summary: { elapsedSeconds: elapsed, resourcesGained, completedManufacturing, skillsAdvanced, wasCapped, oreHoldFilled: 0 },
   };
 }

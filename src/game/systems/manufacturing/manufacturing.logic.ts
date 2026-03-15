@@ -1,4 +1,4 @@
-import type { GameState, ManufacturingJob } from '@/types/game.types';
+﻿import type { GameState, ManufacturingJob } from '@/types/game.types';
 import { MANUFACTURING_RECIPES } from './manufacturing.config';
 
 export function getManufacturingSpeedMultiplier(state: GameState): number {
@@ -8,7 +8,10 @@ export function getManufacturingSpeedMultiplier(state: GameState): number {
 export function canAffordRecipe(recipeId: string, qty: number, state: GameState): boolean {
   const recipe = MANUFACTURING_RECIPES[recipeId];
   if (!recipe) return false;
-  if (recipe.prerequisiteResearch && !state.systems.research.unlockedNodes[recipe.prerequisiteResearch]) return false;
+  if (recipe.requiredSkill) {
+    const lvl = state.systems.skills.levels[recipe.requiredSkill.skillId] ?? 0;
+    if (lvl < recipe.requiredSkill.minLevel) return false;
+  }
   for (const [resourceId, amount] of Object.entries(recipe.inputs)) {
     if ((state.resources[resourceId] ?? 0) < amount * qty) return false;
   }
@@ -23,7 +26,7 @@ export interface ManufacturingTickResult {
 
 export function tickManufacturing(
   state: GameState,
-  deltaSeconds: number
+  deltaSeconds: number,
 ): ManufacturingTickResult {
   const result: ManufacturingTickResult = {
     completedJobs: [],
@@ -34,23 +37,23 @@ export function tickManufacturing(
   if (state.systems.manufacturing.queue.length === 0) return result;
 
   const speedMultiplier = getManufacturingSpeedMultiplier(state);
-  const effectiveDelta = deltaSeconds * speedMultiplier * state.systems.energy.powerFactor;
+  const effectiveDelta  = deltaSeconds * speedMultiplier;
   result.progressIncrement = effectiveDelta;
 
   const job: ManufacturingJob = state.systems.manufacturing.queue[0];
   const recipe = MANUFACTURING_RECIPES[job.recipeId];
   if (!recipe) return result;
 
-  const totalTime = recipe.timeCost * job.quantity;
+  const totalTime  = recipe.timeCost * job.quantity;
   const newProgress = job.progress + effectiveDelta;
 
   if (newProgress >= totalTime) {
     result.completedJobs.push({ recipeId: job.recipeId, qty: job.quantity });
     for (const [resourceId, amount] of Object.entries(recipe.outputs)) {
-      result.resourceProduced[resourceId] =
-        (result.resourceProduced[resourceId] ?? 0) + amount * job.quantity;
+      result.resourceProduced[resourceId] = (result.resourceProduced[resourceId] ?? 0) + amount * job.quantity;
     }
   }
 
   return result;
 }
+

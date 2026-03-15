@@ -1,44 +1,83 @@
-import type { ResourceDefinition } from '@/types/game.types';
+﻿import type { ResourceDefinition } from '@/types/game.types';
 
 const RESOURCES: ResourceDefinition[] = [
-  // ── Tier 1 – Raw Materials ─────────────────────────────────────────────
-  { id: 'raw-ore',           name: 'Raw Ore',           category: 'metallic',      tier: 1, precision: 1, description: 'Unprocessed ore extracted from asteroid fields.' },
-  { id: 'metallic-dust',     name: 'Metallic Dust',     category: 'metallic',      tier: 1, precision: 1, description: 'Fine metallic particulate, byproduct of mining operations.' },
-  { id: 'carbon-materials',  name: 'Carbon Materials',  category: 'industrial',    tier: 1, precision: 1, description: 'Carbon compounds mined from carbon-rich asteroids.' },
-  { id: 'ice-deposits',      name: 'Ice Deposits',      category: 'volatile',      tier: 1, precision: 1, description: 'Frozen water and volatile compounds from ice asteroids.' },
-  { id: 'silicon-crystals',  name: 'Silicon Crystals',  category: 'semiconductor', tier: 1, precision: 1, description: 'Raw silicon formations found in rocky asteroids.' },
+  // ── Currency ──────────────────────────────────────────────────────────────
+  { id: 'credits', name: 'ISK', category: 'currency', tier: 1, precision: 0,
+    description: 'Interstellar Kredits — the universal currency of New Aether.' },
 
-  // ── Tier 2 – Processed Materials ──────────────────────────────────────
-  { id: 'refined-metals',      name: 'Refined Metals',      category: 'processed', tier: 2, precision: 2, description: 'Smelted and purified metals ready for manufacturing.' },
-  { id: 'structural-alloys',   name: 'Structural Alloys',   category: 'processed', tier: 2, precision: 2, description: 'High-strength alloys formed from refined metals and carbon.' },
-  { id: 'industrial-polymers', name: 'Industrial Polymers', category: 'processed', tier: 2, precision: 2, description: 'Synthetic polymers derived from carbon materials.' },
-  { id: 'hydrogen-fuel',       name: 'Hydrogen Fuel',       category: 'fuel',      tier: 2, precision: 2, description: 'Extracted hydrogen, primary fuel for reactors and ships.' },
-  { id: 'silicon-wafers',      name: 'Silicon Wafers',      category: 'processed', tier: 2, precision: 2, description: 'Precision-cut silicon discs used in electronics.' },
+  // ── Highsec Ores (Tier 1) ──────────────────────────────────────────────────
+  { id: 'ferrock',   name: 'Ferrock',   category: 'ore-highsec', tier: 1, precision: 0,
+    description: 'Abundant iron-rich ore from high-security belts. Yields Ferrite and Silite.' },
+  { id: 'corite',    name: 'Corite',    category: 'ore-highsec', tier: 1, precision: 0,
+    description: 'Dense dark ore with high Ferrite yields and trace Vexirite content.' },
+  { id: 'silisite',  name: 'Silisite',  category: 'ore-highsec', tier: 1, precision: 0,
+    description: 'Crystalline whitish ore that reprocesses into Silite and Isorium.' },
+  { id: 'platonite', name: 'Platonite', category: 'ore-highsec', tier: 1, precision: 0,
+    description: 'Mixed-composition ore with broad mineral yields across all common types.' },
 
-  // ── Tier 3 – Advanced Components ──────────────────────────────────────
-  { id: 'energy-cells',      name: 'Energy Cells',      category: 'component', tier: 3, precision: 3, description: 'Compact energy storage units for advanced systems.' },
-  { id: 'machine-parts',     name: 'Machine Parts',     category: 'component', tier: 3, precision: 3, description: 'Precision mechanical components for factories and colonies.' },
-  { id: 'drone-components',  name: 'Drone Components',  category: 'component', tier: 3, precision: 3, description: 'Modular parts for constructing autonomous drones.' },
-  { id: 'quantum-circuits',  name: 'Quantum Circuits',  category: 'component', tier: 3, precision: 3, description: 'Advanced computing substrate enabling quantum processing.' },
-  { id: 'nano-assemblies',   name: 'Nano Assemblies',   category: 'component', tier: 3, precision: 3, description: 'Self-organising nanoscale structures for precision manufacturing.' },
+  // ── Lowsec Ores (Tier 1) ───────────────────────────────────────────────────
+  { id: 'darkstone', name: 'Darkstone', category: 'ore-lowsec', tier: 1, precision: 0,
+    description: 'Dark reactive ore from contested regions. Rich in Isorium and trace Noxium.' },
+  { id: 'hematite',  name: 'Hematite',  category: 'ore-lowsec', tier: 1, precision: 0,
+    description: 'Blood-red heavy ore from disputed belts. Notable Vexirite and Noxium source.' },
+  { id: 'voidite',   name: 'Voidite',   category: 'ore-lowsec', tier: 1, precision: 0,
+    description: 'Semi-translucent pale ore. Uncommon source of Zyridium crystals.' },
 
-  // ── Tier 4 – Exotic Materials ──────────────────────────────────────────
-  { id: 'exotic-matter',       name: 'Exotic Matter',       category: 'exotic', tier: 4, precision: 4, description: 'Strange matter with unusual physical properties.' },
-  { id: 'neutronium-plates',   name: 'Neutronium Plates',   category: 'exotic', tier: 4, precision: 4, description: 'Ultra-dense material harvested from stellar remnants.' },
-  { id: 'dark-energy-samples', name: 'Dark Energy Samples', category: 'exotic', tier: 4, precision: 4, description: 'Captured dark energy from deep space anomalies.' },
-  { id: 'stellar-fragments',   name: 'Stellar Fragments',   category: 'exotic', tier: 4, precision: 4, description: 'Remnant matter from supernova events.' },
-  { id: 'graviton-crystals',   name: 'Graviton Crystals',   category: 'exotic', tier: 4, precision: 4, description: 'Crystallised gravity waves from gravitational anomalies.' },
+  // ── Nullsec Ores (Tier 1) ──────────────────────────────────────────────────
+  { id: 'arkonite',  name: 'Arkonite',  category: 'ore-nullsec', tier: 1, precision: 0,
+    description: 'Rare silvery ore from null-security belts. Yields Zyridium and Megacite.' },
+  { id: 'crokitite', name: 'Crokitite', category: 'ore-nullsec', tier: 1, precision: 0,
+    description: 'Extremely dense null-sec ore. The only natural source of Voidsteel.' },
 
-  // ── Tier 5 – Cosmic Materials ──────────────────────────────────────────
-  { id: 'singularity-crystals', name: 'Singularity Crystals', category: 'cosmic', tier: 5, precision: 5, description: 'Crystallised remnants of collapsed singularities.' },
-  { id: 'temporal-particles',   name: 'Temporal Particles',   category: 'cosmic', tier: 5, precision: 5, description: 'Subatomic particles that exist across multiple timelines.' },
-  { id: 'cosmic-lattice',       name: 'Cosmic Lattice',       category: 'cosmic', tier: 5, precision: 5, description: 'A framework of cosmic strings spanning galactic distances.' },
-  { id: 'reality-shards',       name: 'Reality Shards',       category: 'cosmic', tier: 5, precision: 5, description: 'Fragments from dimensional rift events.' },
-  { id: 'primordial-energy',    name: 'Primordial Energy',    category: 'cosmic', tier: 5, precision: 5, description: 'Raw unstructured energy from the first moments of the universe.' },
+  // ── Minerals (Tier 2) ─────────────────────────────────────────────────────
+  { id: 'ferrite',   name: 'Ferrite',   category: 'mineral', tier: 2, precision: 0,
+    description: 'The most common structural mineral. Foundation of every manufactured hull.' },
+  { id: 'silite',    name: 'Silite',    category: 'mineral', tier: 2, precision: 0,
+    description: 'Lightweight mineral prized for hull plating and structural components.' },
+  { id: 'vexirite',  name: 'Vexirite',  category: 'mineral', tier: 2, precision: 0,
+    description: 'Industrial-grade mineral used in medium-complexity manufacturing.' },
+  { id: 'isorium',   name: 'Isorium',   category: 'mineral', tier: 2, precision: 0,
+    description: 'Conductive mineral essential for electronics and shield systems.' },
+  { id: 'noxium',    name: 'Noxium',    category: 'mineral', tier: 2, precision: 0,
+    description: 'Reactive mineral used in propulsion and advanced alloy production.' },
+  { id: 'zyridium',  name: 'Zyridium',  category: 'mineral', tier: 2, precision: 0,
+    description: 'Rare crystalline mineral required for advanced components.' },
+  { id: 'megacite',  name: 'Megacite',  category: 'mineral', tier: 2, precision: 0,
+    description: 'High-demand rare mineral at the heart of advanced ship manufacturing.' },
+  { id: 'voidsteel', name: 'Voidsteel', category: 'mineral', tier: 2, precision: 0,
+    description: 'Exotic ultra-rare mineral found only in deep null-security excavations.' },
+
+  // ── Manufactured Components (Tier 3) ─────────────────────────────────────
+  { id: 'hull-plate',      name: 'Hull Plate',      category: 'component', tier: 3, precision: 0,
+    description: 'Structural hull plating rolled from Ferrite and Silite.' },
+  { id: 'thruster-node',   name: 'Thruster Node',   category: 'component', tier: 3, precision: 0,
+    description: 'Propulsion subassembly for frigate-class hulls and above.' },
+  { id: 'condenser-coil',  name: 'Condenser Coil',  category: 'component', tier: 3, precision: 0,
+    description: 'Power storage component for capacitors, shield arrays and drives.' },
+  { id: 'sensor-cluster',  name: 'Sensor Cluster',  category: 'component', tier: 3, precision: 0,
+    description: 'Navigation and scanning system for exploration-capable vessels.' },
+  { id: 'mining-laser',    name: 'Mining Laser',    category: 'component', tier: 3, precision: 0,
+    description: 'Core ore-extraction module. Increases yield and reduces cycle time.' },
+  { id: 'shield-emitter',  name: 'Shield Emitter',  category: 'component', tier: 3, precision: 0,
+    description: 'Defensive shield projector for combat-capable vessels.' },
+
+  // ── Ships (Tier 4 — manufactured items) ──────────────────────────────────
+  { id: 'ship-shuttle',        name: 'Shuttle',        category: 'ship', tier: 4, precision: 0,
+    description: 'Entry-level vessel with minimal systems. Fast to produce and replace.' },
+  { id: 'ship-frigate',        name: 'Frigate',        category: 'ship', tier: 4, precision: 0,
+    description: 'Standard combat and exploration frigate. Versatile all-rounder.' },
+  { id: 'ship-mining-frigate', name: 'Mining Frigate', category: 'ship', tier: 4, precision: 0,
+    description: 'Dedicated mining vessel with enhanced laser hardpoints and ore bays.' },
+  { id: 'ship-hauler',         name: 'Hauler',         category: 'ship', tier: 4, precision: 0,
+    description: 'Industrial transport hull with expanded cargo hold for bulk logistics.' },
+  { id: 'ship-destroyer',      name: 'Destroyer',      category: 'ship', tier: 4, precision: 0,
+    description: 'Combat-focused multi-launcher hull bridging frigates and cruisers.' },
+  { id: 'ship-exhumer',        name: 'Exhumer',        category: 'ship', tier: 4, precision: 0,
+    description: 'Advanced mining barge with the highest ore yield per cycle in its class.' },
 ];
 
 export const RESOURCE_REGISTRY: Record<string, ResourceDefinition> = Object.fromEntries(
-  RESOURCES.map(r => [r.id, r])
+  RESOURCES.map(r => [r.id, r]),
 );
 
 export const RESOURCE_IDS: string[] = RESOURCES.map(r => r.id);
@@ -49,9 +88,35 @@ for (const r of RESOURCES) {
   RESOURCES_BY_TIER[r.tier].push(r);
 }
 
-export function formatResourceAmount(amount: number, precision: number): string {
+export const ORE_IDS = [
+  'ferrock', 'corite', 'silisite', 'platonite',
+  'darkstone', 'hematite', 'voidite',
+  'arkonite', 'crokitite',
+];
+
+export const MINERAL_IDS = [
+  'ferrite', 'silite', 'vexirite', 'isorium',
+  'noxium', 'zyridium', 'megacite', 'voidsteel',
+];
+
+export const SHIP_RESOURCE_IDS = [
+  'ship-shuttle', 'ship-frigate', 'ship-mining-frigate',
+  'ship-hauler', 'ship-destroyer', 'ship-exhumer',
+];
+
+export function formatResourceAmount(amount: number, _precision = 0): string {
   if (amount >= 1_000_000_000) return `${(amount / 1_000_000_000).toFixed(2)}B`;
   if (amount >= 1_000_000) return `${(amount / 1_000_000).toFixed(2)}M`;
   if (amount >= 1_000) return `${(amount / 1_000).toFixed(1)}K`;
-  return amount.toFixed(Math.min(precision, 1));
+  return Math.floor(amount).toString();
 }
+
+export function formatCredits(amount: number): string {
+  if (amount >= 1_000_000_000_000) return `${(amount / 1_000_000_000_000).toFixed(2)}T ISK`;
+  if (amount >= 1_000_000_000) return `${(amount / 1_000_000_000).toFixed(2)}B ISK`;
+  if (amount >= 1_000_000) return `${(amount / 1_000_000).toFixed(2)}M ISK`;
+  if (amount >= 1_000) return `${(amount / 1_000).toFixed(1)}K ISK`;
+  return `${Math.floor(amount).toLocaleString()} ISK`;
+}
+
+

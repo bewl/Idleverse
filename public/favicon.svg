@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Dark space background -->
+  <circle cx="32" cy="32" r="32" fill="#05060f"/>
+  <!-- Outer galaxy glow -->
+  <circle cx="32" cy="32" r="26" fill="none" stroke="#3a2a6e" stroke-width="6" opacity="0.5"/>
+  <!-- Galaxy disc ellipse -->
+  <ellipse cx="32" cy="32" rx="22" ry="7" fill="none" stroke="#7c5cbf" stroke-width="1.5" opacity="0.8"/>
+  <!-- Spiral arm 1 -->
+  <path d="M32 32 Q44 22 40 12" fill="none" stroke="#a78bfa" stroke-width="1.5" stroke-linecap="round" opacity="0.9"/>
+  <!-- Spiral arm 2 -->
+  <path d="M32 32 Q20 42 24 52" fill="none" stroke="#a78bfa" stroke-width="1.5" stroke-linecap="round" opacity="0.9"/>
+  <!-- Spiral arm 3 -->
+  <path d="M32 32 Q14 28 10 36" fill="none" stroke="#818cf8" stroke-width="1.2" stroke-linecap="round" opacity="0.7"/>
+  <!-- Spiral arm 4 -->
+  <path d="M32 32 Q50 36 54 28" fill="none" stroke="#818cf8" stroke-width="1.2" stroke-linecap="round" opacity="0.7"/>
+  <!-- Core glow outer -->
+  <circle cx="32" cy="32" r="7" fill="#6d28d9" opacity="0.5"/>
+  <!-- Core glow inner -->
+  <circle cx="32" cy="32" r="4" fill="#c4b5fd" opacity="0.85"/>
+  <!-- Core bright centre -->
+  <circle cx="32" cy="32" r="2" fill="#fff" opacity="1"/>
+  <!-- Background stars -->
+  <circle cx="12" cy="10" r="0.8" fill="#fff" opacity="0.7"/>
+  <circle cx="52" cy="8"  r="0.6" fill="#fff" opacity="0.6"/>
+  <circle cx="56" cy="50" r="0.7" fill="#fff" opacity="0.5"/>
+  <circle cx="8"  cy="48" r="0.9" fill="#fff" opacity="0.6"/>
+  <circle cx="46" cy="56" r="0.6" fill="#fff" opacity="0.5"/>
+  <circle cx="20" cy="56" r="0.7" fill="#c4b5fd" opacity="0.6"/>
+  <circle cx="58" cy="30" r="0.5" fill="#fff" opacity="0.5"/>
+  <circle cx="6"  cy="22" r="0.5" fill="#fff" opacity="0.4"/>
+</svg>

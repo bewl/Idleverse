@@ -1,112 +1,198 @@
-import type { MiningTargetDefinition, MiningUpgradeDefinition } from '@/types/game.types';
+﻿import type { OreBeltDefinition, MiningUpgradeDefinition } from '@/types/game.types';
 
-export const MINING_TARGETS: Record<string, MiningTargetDefinition> = {
-  'rocky-asteroid-cluster': {
-    id: 'rocky-asteroid-cluster',
-    name: 'Rocky Asteroid Cluster',
-    description: 'Dense cluster of rocky asteroids yielding raw ore and silicon crystals.',
-    outputs: [
-      { resourceId: 'raw-ore',          baseRate: 1.5 },
-      { resourceId: 'silicon-crystals', baseRate: 0.3 },
-    ],
-    energyCost: 3,
+// ─── Ore Belts ─────────────────────────────────────────────────────────────
+// Rates are base units/sec before skill and upgrade multipliers.
+
+export const ORE_BELTS: Record<string, OreBeltDefinition> = {
+
+  // ── HighSec Belts (always accessible, no skill required) ─────────────────
+
+  'belt-ferrock': {
+    id: 'belt-ferrock',
+    name: 'Ferrock Belt',
+    description: 'Dense cluster of Ferrock asteroids. Bread-and-butter ore for new capsuleers.',
+    securityTier: 'highsec',
+    outputs: [{ resourceId: 'ferrock', baseRate: 2.0 }],
+    poolSize: 10_000,
+    respawnSeconds: 14_400, // 4 hours
   },
-  'metallic-asteroid-field': {
-    id: 'metallic-asteroid-field',
-    name: 'Metallic Asteroid Field',
-    description: 'High-density metal-rich asteroids with excellent ore yields.',
-    outputs: [
-      { resourceId: 'raw-ore',       baseRate: 3.0 },
-      { resourceId: 'metallic-dust', baseRate: 0.8 },
-    ],
-    energyCost: 6,
-    unlockResearch: 'industrial-mining-ii',
+
+  'belt-corite': {
+    id: 'belt-corite',
+    name: 'Corite Vein',
+    description: 'Dark compressed Corite formations rich in Ferrite and Vexirite content.',
+    securityTier: 'highsec',
+    outputs: [{ resourceId: 'corite', baseRate: 1.6 }],
+    poolSize: 9_000,
+    respawnSeconds: 14_400,
   },
-  'carbon-asteroid-belt': {
-    id: 'carbon-asteroid-belt',
-    name: 'Carbon Asteroid Belt',
-    description: 'Rich belt of carbonaceous asteroids with trace ice deposits.',
-    outputs: [
-      { resourceId: 'carbon-materials', baseRate: 1.2 },
-      { resourceId: 'ice-deposits',     baseRate: 0.4 },
-    ],
-    energyCost: 4,
-    unlockResearch: 'industrial-mining-ii',
+
+  'belt-silisite': {
+    id: 'belt-silisite',
+    name: 'Silisite Cluster',
+    description: 'A crystalline Silisite formation yielding Silite and Isorium.',
+    securityTier: 'highsec',
+    outputs: [{ resourceId: 'silisite', baseRate: 1.3 }],
+    requiredSkill: { skillId: 'astrogeology', minLevel: 1 },
+    poolSize: 8_500,
+    respawnSeconds: 14_400,
   },
-  'ice-asteroid-cluster': {
-    id: 'ice-asteroid-cluster',
-    name: 'Ice Asteroid Cluster',
-    description: 'Frozen bodies rich in water ice and volatile compounds.',
-    outputs: [
-      { resourceId: 'ice-deposits',     baseRate: 2.5 },
-      { resourceId: 'carbon-materials', baseRate: 0.2 },
-    ],
-    energyCost: 5,
-    unlockResearch: 'exploration-remote-sensing',
+
+  'belt-platonite': {
+    id: 'belt-platonite',
+    name: 'Platonite Field',
+    description: 'Mixed-composition Platonite asteroids with above-average multi-mineral yields.',
+    securityTier: 'highsec',
+    outputs: [{ resourceId: 'platonite', baseRate: 1.8 }],
+    requiredSkill: { skillId: 'astrogeology', minLevel: 1 },
+    poolSize: 9_500,
+    respawnSeconds: 14_400,
+  },
+
+  // ── LowSec Belts (require Mining 3+ via advanced-mining unlock) ───────────
+
+  'belt-darkstone': {
+    id: 'belt-darkstone',
+    name: 'Darkstone Seam',
+    description: 'A reactive Darkstone deposit in a contested lowsec system. High Isorium and trace Noxium.',
+    securityTier: 'lowsec',
+    outputs: [{ resourceId: 'darkstone', baseRate: 1.1 }],
+    requiredSkill: { skillId: 'advanced-mining', minLevel: 1 },
+    poolSize: 40_000,
+    respawnSeconds: 28_800, // 8 hours
+  },
+
+  'belt-hematite': {
+    id: 'belt-hematite',
+    name: 'Hematite Field',
+    description: 'Blood-red Hematite asteroids in a disputed belt. Notable Vexirite and Noxium source.',
+    securityTier: 'lowsec',
+    outputs: [{ resourceId: 'hematite', baseRate: 0.9 }],
+    requiredSkill: { skillId: 'advanced-mining', minLevel: 1 },
+    poolSize: 38_000,
+    respawnSeconds: 28_800,
+  },
+
+  'belt-voidite': {
+    id: 'belt-voidite',
+    name: 'Voidite Anomaly',
+    description: 'Semi-translucent Voidite formations deep in lowsec. Rare Zyridium crystal source.',
+    securityTier: 'lowsec',
+    outputs: [{ resourceId: 'voidite', baseRate: 0.55 }],
+    requiredSkill: { skillId: 'mining-barge', minLevel: 1 },
+    poolSize: 50_000,
+    respawnSeconds: 28_800,
+  },
+
+  // ── NullSec Belts (require Mining Barge certification) ───────────────────
+
+  'belt-arkonite': {
+    id: 'belt-arkonite',
+    name: 'Arkonite Vein',
+    description: 'Rare Arkonite deposits found only in null-security systems. Yields Zyridium and Megacite.',
+    securityTier: 'nullsec',
+    outputs: [{ resourceId: 'arkonite', baseRate: 0.4 }],
+    requiredSkill: { skillId: 'mining-barge', minLevel: 1 },
+    poolSize: 160_000,
+    respawnSeconds: 86_400, // 24 hours
+  },
+
+  'belt-crokitite': {
+    id: 'belt-crokitite',
+    name: 'Crokitite Core',
+    description: 'Extraordinarily dense Crokitite. The only reliable source of the exotic Voidsteel mineral.',
+    securityTier: 'nullsec',
+    outputs: [{ resourceId: 'crokitite', baseRate: 0.18 }],
+    requiredSkill: { skillId: 'astrogeology', minLevel: 5 },
+    poolSize: 200_000,
+    respawnSeconds: 86_400,
   },
 };
+
+export const BELT_ORDER = [
+  'belt-ferrock', 'belt-corite', 'belt-silisite', 'belt-platonite',
+  'belt-darkstone', 'belt-hematite', 'belt-voidite',
+  'belt-arkonite', 'belt-crokitite',
+];
+
+// ─── Mining Upgrades ───────────────────────────────────────────────────────
 
 export const MINING_UPGRADES: Record<string, MiningUpgradeDefinition> = {
-  'mining-laser-i': {
-    id: 'mining-laser-i',
-    name: 'Mining Laser I',
-    description: 'Basic laser enhancement. +10% mining output per level.',
-    category: 'efficiency',
-    systemId: 'mining',
-    baseCost: { 'raw-ore': 50 },
+
+  'laser-focus-i': {
+    id: 'laser-focus-i', name: 'Mining Laser Focus I',
+    description: 'Calibrates laser frequencies for tighter ore extraction. +10% yield per level.',
+    category: 'laser', systemId: 'mining',
+    baseCost: { 'ferrite': 50 },
     maxLevel: 5,
-    effects: { 'mining-efficiency': 0.10 },
+    effects: { 'mining-yield': 0.10 },
   },
-  'mining-laser-ii': {
-    id: 'mining-laser-ii',
-    name: 'Mining Laser II',
-    description: 'Advanced laser optics. +15% mining output per level.',
-    category: 'efficiency',
-    systemId: 'mining',
-    baseCost: { 'raw-ore': 500, 'refined-metals': 20 },
+
+  'laser-focus-ii': {
+    id: 'laser-focus-ii', name: 'Mining Laser Focus II',
+    description: 'Advanced cavity focus optics for maximum energy transfer. +12% yield per level.',
+    category: 'laser', systemId: 'mining',
+    baseCost: { 'ferrite': 300, 'isorium': 50 },
     maxLevel: 5,
-    effects: { 'mining-efficiency': 0.15 },
-    prerequisiteUpgrade: 'mining-laser-i',
-    prerequisiteResearch: 'industrial-laser-refinement',
+    effects: { 'mining-yield': 0.12 },
+    prerequisiteSkill: { skillId: 'mining', minLevel: 3 },
   },
-  'extractor-array-i': {
-    id: 'extractor-array-i',
-    name: 'Extractor Array I',
-    description: 'Wider extraction net. +8% resource yield per level.',
-    category: 'extraction',
-    systemId: 'mining',
-    baseCost: { 'raw-ore': 150, 'metallic-dust': 30 },
-    maxLevel: 5,
-    effects: { 'mining-yield': 0.08 },
-  },
-  'drone-coordinator': {
-    id: 'drone-coordinator',
-    name: 'Drone Coordinator',
-    description: 'Enables autonomous mining drones. Adds +1 drone slot.',
-    category: 'drone',
-    systemId: 'mining',
-    baseCost: { 'refined-metals': 80, 'machine-parts': 10 },
-    maxLevel: 1,
-    effects: { 'mining-drone-slots': 1 },
-    prerequisiteResearch: 'ai-basic-automation',
-  },
-  'deep-scan-array': {
-    id: 'deep-scan-array',
-    name: 'Deep Scan Array',
-    description: 'Reveals rare mineral deposits in deeper asteroid strata. +5% rare bonus per level.',
-    category: 'deepMining',
-    systemId: 'mining',
-    baseCost: { 'quantum-circuits': 5, 'refined-metals': 200 },
+
+  'drone-harvesters-i': {
+    id: 'drone-harvesters-i', name: 'Mining Drone Harvesters',
+    description: 'Deploy autonomous ore-collection drones alongside laser operations. +8% yield per level.',
+    category: 'drone', systemId: 'mining',
+    baseCost: { 'ferrite': 200, 'vexirite': 30 },
     maxLevel: 3,
-    effects: { 'mining-rare-bonus': 0.05 },
-    prerequisiteResearch: 'exploration-deep-scan',
+    effects: { 'mining-yield': 0.08 },
+    prerequisiteSkill: { skillId: 'drone-interfacing', minLevel: 1 },
+  },
+
+  'deep-core-drill': {
+    id: 'deep-core-drill', name: 'Deep-Core Drill Array',
+    description: 'Tunnels past surface deposits into the asteroid core. +15% yield for lowsec and nullsec ores.',
+    category: 'yield', systemId: 'mining',
+    baseCost: { 'vexirite': 200, 'isorium': 100 },
+    maxLevel: 3,
+    effects: { 'deep-ore-yield': 0.15 },
+    prerequisiteSkill: { skillId: 'advanced-mining', minLevel: 2 },
+  },
+
+  // ── Ore Hold & Haul upgrades ──────────────────────────────────────────────
+
+  'expanded-ore-bay': {
+    id: 'expanded-ore-bay', name: 'Expanded Ore Bay',
+    description: 'Retrofits additional cargo volume for ore storage. +20% ore hold capacity per level.',
+    category: 'hull', systemId: 'mining',
+    baseCost: { 'ferrite': 150 },
+    maxLevel: 5,
+    effects: { 'ore-hold-capacity': 0.20 },
+    prerequisiteSkill: { skillId: 'mining', minLevel: 2 },
+  },
+
+  'express-hauler': {
+    id: 'express-hauler', name: 'Express Hauler Protocol',
+    description: 'Streamlines ore transfer procedures. Reduces auto-haul interval by 10% per level.',
+    category: 'hull', systemId: 'mining',
+    baseCost: { 'ferrite': 100, 'vexirite': 20 },
+    maxLevel: 5,
+    effects: { 'haul-speed': 0.10 },
+    prerequisiteSkill: { skillId: 'industrial', minLevel: 1 },
+  },
+
+  'ore-compression-array': {
+    id: 'ore-compression-array', name: 'Ore Compression Array',
+    description: 'Compresses ore in-place to extend the effective pool size. +25% belt pool size per level.',
+    category: 'yield', systemId: 'mining',
+    baseCost: { 'isorium': 100, 'vexirite': 50 },
+    maxLevel: 3,
+    effects: { 'belt-pool-size': 0.25 },
+    prerequisiteSkill: { skillId: 'astrogeology', minLevel: 2 },
   },
 };
 
-export const MINING_UPGRADE_ORDER = [
-  'mining-laser-i',
-  'mining-laser-ii',
-  'extractor-array-i',
-  'drone-coordinator',
-  'deep-scan-array',
+export const UPGRADE_ORDER = [
+  'laser-focus-i', 'laser-focus-ii', 'drone-harvesters-i', 'deep-core-drill',
+  'expanded-ore-bay', 'express-hauler', 'ore-compression-array',
 ];
+
