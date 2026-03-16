@@ -211,7 +211,8 @@ systems via BFS shortest-path or Dijkstra least-cost routing.
 ## Role
 
 The player's ships, pilots, and named fleets. All fleet operations (mining assignment, hauling,
-combat) flow through this system.
+combat) flow through this system. The player acts as a **CEO director** — no personal location.
+All ore production and hauling runs through fleet `cargoHold` → Corp HQ.
 
 ## State
 
@@ -228,9 +229,34 @@ ShipInstance {
 }
 
 PlayerFleet {
-  shipIds, currentSystemId, fleetOrder, doctrine, combatOrder, ...
+  shipIds, currentSystemId, fleetOrder, doctrine, combatOrder, isScanning
+  cargoHold: Record<string, number>   // ore accumulated from fleet mining ships
+  // cargoCapacity computed via computeFleetCargoCapacity(fleet, ships)
 }
 ```
+
+## Corp Identity
+
+The corporation state lives in `GameState.corp: CorpState { name, foundedAt }`.
+The deprecated `state.pilot` field is migration-only and no longer written to.
+
+## Corporal HQ
+
+`GameState.systems.factions.homeStationId / homeStationSystemId` tracks the designated Corp HQ.
+Set via `setHomeStation(stationId, systemId)` store action (wired to SystemPanel "Set as Corp HQ" button).
+
+## Fleet Cargo Hold
+
+Each `PlayerFleet` has a `cargoHold: Record<string, number>` accumulating ore from mining ships.
+`computeFleetCargoCapacity(fleet, ships)` sums `BASE_SHIP_CARGO_M3 × hull.baseCargoMultiplier` per ship.
+
+**Auto-haul trigger**: Every tick, if a fleet's cargo is ≥ 80% full, no active movement order exists,
+and Corp HQ is set, a haul route to HQ is automatically dispatched.
+
+**HQ dump**: When a fleet arrives at the HQ system with no pending order, its `cargoHold` is
+flushed into `state.resources` (the corp-wide resource pool).
+
+**Manual haul**: FleetPanel expanded card shows a fill bar and a "Haul to HQ" button.
 
 ## Mechanics
 

@@ -38,8 +38,9 @@ impact. Each phase is independently shippable and leaves the game in a playable,
 | Blueprint research & T2 manufacturing | ✅ Complete | Phase 3 shipped — research queue, BPC copies, T2 recipes |
 | Exploration & anomalies | ✅ Complete | Phase 4 shipped — anomaly scanning, discovery feed, Astrometrics/Archaeology/Hacking skills |
 | UI Overhaul — navigation, tooltips, data density | ✅ Complete | GameTooltip + NavTag + useUiStore + DevPanel overhaul + 8-panel renovation (Stream D) |
-| **Fleet-centric remodel (CEO model, no player location)** | **⚡ FC-1 TOP PRIORITY** | **Remove currentSystemId gate; wire dead oreDeltas; fleet cargo hold; Corp HQ** |
-| **CEO identity + command dashboard** | **⚡ FC-1G TOP PRIORITY** | **state.pilot → state.corp; Mining panel → fleet dashboard; Overview → corp command center; pilot focus tree UI** |
+| Fleet-centric remodel — cargo hold + auto-haul (FC-1b/c/d/e) | ✅ Complete | oreDeltas wired to fleet cargoHold; auto-haul to Corp HQ; HQ dump on arrival |
+| Corp identity migration (FC-1G partial) | ✅ Complete | state.pilot → state.corp; OverviewPanel → corp command center (CorpCard + CorpHQCard) |
+| **FC-1a/1f — Remove currentSystemId mining gate; MiningPanel fleet dashboard** | **⚡ FC-1 NEXT** | **isBeltAccessible still skill-only but MiningPanel still filters to currentSystemId; fleet dashboard redesign pending** |
 | **Fleet commander skills** | **⚡ FC-2 TOP PRIORITY** | **Designate pilot as commander; command skill trees; fleet-wide bonuses** |
 | **Fleet wings (hauling + escort)** | **⚡ FC-3 TOP PRIORITY** | **Sub-fleets; hauling wing auto-hauls to HQ with security escort** |
 | **Corp HQ — station registration & POS** | **⚡ FC-4 TOP PRIORITY** | **Register with faction station or build own POS; gate manufacturing/reprocessing** |
@@ -576,11 +577,34 @@ All 8 targeted panels renovated with NavTag entity links, data density additions
 
 ---
 
-# ⚡ FC-1 — Fleet-Centric Foundation (TOP PRIORITY)
+# ✅ PARTIAL — FC-1 — Fleet-Centric Foundation
 
-> **Status:** Designed, not yet implemented.
-> **Priority:** Highest — fixes dead code and establishes the CEO model all other FC phases depend on.
-> **Depends on:** Nothing — standalone refactor + type extension.
+> **Status:** 🔄 Partially shipped — March 2026
+> **Files changed:** `game.types.ts`, `faction.types.ts`, `fleet.logic.ts`, `fleet.tick.ts`, `tickRunner.ts`, `initialState.ts`, `gameStore.ts`, `FleetPanel.tsx`, `OverviewPanel.tsx`
+
+## What Was Shipped (FC-1b / FC-1c / FC-1d / FC-1e / FC-1G)
+
+| Step | Status | Notes |
+|---|---|---|
+| **FC-1a** — Remove `currentSystemId` mining gate | ⬜ Pending | `isBeltAccessible` is now skill-only (location removed), but MiningPanel still filters belts to current system |
+| **FC-1b** — Wire fleet `oreDeltas` to `cargoHold` | ✅ Shipped | `tickRunner` applies `oreDeltas` to each fleet's `cargoHold` each tick, capped by cargo capacity |
+| **FC-1c** — Fleet cargo hold model | ✅ Shipped | `PlayerFleet.cargoHold: Record<string, number>` added; `computeFleetCargoCapacity()` in `fleet.logic.ts` |
+| **FC-1d** — Corp HQ concept | ✅ Shipped | `FactionsState.homeStationId / homeStationSystemId / registeredStations`; `setHomeStation` store action |
+| **FC-1e** — Fleet auto-haul to HQ | ✅ Shipped | Auto-dispatch at ≥80% cargo fill; HQ dump on arrival; FleetPanel "Haul to HQ" button + fill bar |
+| **FC-1f** — Clean remaining UI gates | ⬜ Pending | MiningPanel fleet dashboard redesign; remove `isBrowsing` reset in SystemPanel |
+| **FC-1G** — Corp identity (state.pilot → state.corp) | ✅ Shipped | `state.corp: CorpState` replaces deprecated `state.pilot`; save migration included; OverviewPanel → CorpCard + CorpHQCard |
+
+## Remaining Work
+
+- **FC-1a / FC-1f**: Redesign MiningPanel as a fleet-centric mining dashboard (all fleets across all systems, per-fleet cargoHold bars). Remove `currentSystemId`-based belt filtering from MiningPanel.
+
+---
+
+# ⚡ FC-1 (REMAINING) — Fleet-Centric Foundation
+
+> **Status:** Steps FC-1a and FC-1f remain. Core data model is shipped.
+> **Priority:** High — MiningPanel still shows wrong data without this.
+> **Depends on:** Nothing new.
 
 ## Goal
 

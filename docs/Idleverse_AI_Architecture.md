@@ -98,16 +98,17 @@ src/
     systems/
       combat/       — combat.logic.ts, combat.tick.ts
       energy/       — stub
-      exploration/  — stub
-      factions/     — faction.config.ts, rep tracking
+      exploration/  — implemented in fleet/exploration.logic.ts
+      factions/     — faction.config.ts, rep tracking, station generation
       fleet/        — fleet.config.ts, fleet.logic.ts, fleet.tick.ts,
-      |               fleet.orders.ts, fleet.gen.ts, pilot.logic.ts
-      manufacturing/ — manufacturing.config.ts, manufacturing.logic.ts
-      market/       — market.config.ts, market.logic.ts
+      |               fleet.orders.ts, fleet.gen.ts, pilot.logic.ts,
+      |               exploration.logic.ts
+      manufacturing/ — manufacturing.config.ts, manufacturing.logic.ts (T1 + T2 + research)
+      market/       — market.config.ts, market.logic.ts (dynamic pricing + trade routes)
       mining/       — mining.config.ts, mining.logic.ts, mining.tick.ts
       project/      — stub
       reprocessing/ — reprocessing.logic.ts
-      research/     — stub (Phase 3)
+      research/     — implemented in manufacturing/manufacturing.logic.ts (Phase 3 done)
       skills/       — skills.config.ts, skills.logic.ts
     utils/          — seeded RNG, math helpers
   stores/

@@ -2,11 +2,9 @@
 
 ## Project Overview
 
-**Idleverse** is a browser-based idle strategy game inspired by games such as Melvor Idle but set in a **hard sci-fi universe**.
+**Idleverse** is a browser-based idle strategy game inspired by Eve Online. Players run a **player-owned corporation (corp)** — hiring pilots, deploying ship fleets, and building an automated industrial empire across a procedurally generated 400-system galaxy.
 
-Players take on the role of a **galactic overseer**, gradually building a large-scale automated civilization through interconnected systems such as mining, research, terraforming, colonization, and logistics.
-
-The game is designed to have **extremely long progression depth**, potentially allowing players to advance for **months or years**.
+The player is a **CEO director** with no personal location. All resource production flows through fleets: mining ships accumulate ore in fleet cargo holds, haul it to Corp HQ, and feed the manufacturing chain.
 
 The design philosophy prioritizes:
 
@@ -160,15 +158,17 @@ For detailed specs see `Idleverse_SYSTEM_BLUEPRINTS.md`. For the upcoming pipeli
 
 - Asteroid Mining (9 ore belts, 3 security tiers, pool depletion)
 - Ore Reprocessing (mineral yield, skill-scaled, auto-queue)
-- Manufacturing (12 recipes — components + ships, skill-gated)
-- Skills (34+ corp-wide skills; pilot individual skills)
-- NPC Market (ISK income via sell orders, auto-sell, lifetime tracking)
+- Manufacturing (12 T1 + 6 T2 recipes — components + ships, skill-gated, BPC system)
+- Skills (34+ corp-wide skills; pilots each have individual skill queues)
+- NPC Market (ISK income via sell orders, dynamic per-system pricing, auto-sell, trade routes)
 - Galaxy & Navigation (400 procedurally generated systems, BFS/Dijkstra routing)
-- Fleet Management (ships, pilots, named fleets, doctrines, ship roles)
-- Fleet Combat (NPC pirate groups, patrol/raid orders, hull damage, loot)
-- Factions (rep tracking — consequences planned for Phase 5)
-- Pilots (individual crew with skills, morale, training focus)
-- Blueprint Research & T2 Manufacturing (research levels, BPC copies, T2 recipes)
+- Fleet Management (ships, pilots, named fleets, doctrines, ship roles, **fleet cargo holds**)
+- Fleet Cargo & Auto-Haul (fleet cargoHold filled by mining ships; auto-dispatched to Corp HQ at ≥80% full; dumped on HQ arrival)
+- Fleet Combat (NPC pirate groups, patrol/raid orders, hull damage, loot, bounty)
+- Corp Identity (state.corp: name + foundedAt; OverviewPanel = corp command center with HQ card)
+- Factions (rep tracking, docking, Corp HQ registration)
+- Pilots (individual crew with skills, morale, training focus, skill queue)
+- Blueprint Research & T2 Manufacturing (research levels 0–10, BPC copies, T2 recipes)
 - Exploration & Anomaly Scanning (scan progress, 5 anomaly types, discovery feed)
 
 ### Planned Systems (see Design Plan)
