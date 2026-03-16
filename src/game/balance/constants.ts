@@ -28,6 +28,9 @@ export const BASE_ORE_HOLD_CAPACITY = 5_000;
 
 /** Hull damage repaired per second while a ship is idle. ~1.5% per minute. */
 export const IDLE_REPAIR_RATE_PER_SEC = 1.5 / 60;
+
+/** Base cargo capacity per ship slot in m³, scaled by hull.baseCargoMultiplier. */
+export const BASE_SHIP_CARGO_M3 = 500;
 /** Base auto-haul interval in seconds. */
 export const BASE_HAUL_SECONDS = 120;
 /** Minimum auto-haul interval in seconds regardless of upgrades. */

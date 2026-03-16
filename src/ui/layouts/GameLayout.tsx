@@ -167,8 +167,8 @@ export function GameLayout() {
         )}
 
         {/* Panel content — full width with responsive max-width */}
-        <main className={`flex-1 overscroll-contain ${activePanel === 'starmap' ? 'overflow-hidden' : 'overflow-y-auto'}`}>
-          {activePanel === 'starmap' ? (
+        <main className={`flex-1 overscroll-contain ${['starmap', 'system', 'fleet', 'skills'].includes(activePanel) ? 'overflow-hidden' : 'overflow-y-auto'}`}>
+          {(['starmap', 'system', 'fleet', 'skills'] as PanelId[]).includes(activePanel) ? (
             <div style={{ height: '100%' }}>{PANELS[activePanel]}</div>
           ) : (
             /* pb-20 on mobile so bottom nav doesn't clip content */

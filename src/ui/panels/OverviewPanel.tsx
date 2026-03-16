@@ -1,8 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useGameStore } from '@/stores/gameStore';
 import { MANUFACTURING_RECIPES } from '@/game/systems/manufacturing/manufacturing.config';
-import { ORE_BELTS } from '@/game/systems/mining/mining.config';
-import { getMiningSkillMultiplier, getOreHoldCapacity, getOreHoldUsed, getHaulIntervalSeconds } from '@/game/systems/mining/mining.logic';
 import { getManufacturingSpeedMultiplier } from '@/game/systems/manufacturing/manufacturing.logic';
 import { FlairProgressBar } from '@/ui/components/FlairProgressBar';
 import { useResourceRates } from '@/game/hooks/useResourceRates';
@@ -11,7 +9,10 @@ import { SKILL_DEFINITIONS } from '@/game/systems/skills/skills.config';
 import { activeTrainingEta, formatTrainingEta } from '@/game/systems/skills/skills.logic';
 import { skillTrainingSeconds } from '@/game/balance/constants';
 import { NavTag } from '@/ui/components/NavTag';
+import { getStationInSystem } from '@/game/systems/factions/faction.logic';
 import { getSystemById } from '@/game/galaxy/galaxy.gen';
+import { computeFleetCargoCapacity } from '@/game/systems/fleet/fleet.logic';
+
 import type { AnomalyType } from '@/types/game.types';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -32,11 +33,11 @@ function fmtSec(s: number): string {
   return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
 }
 
-// ─── Pilot card ───────────────────────────────────────────────────────────────
+// ─── Corp card ────────────────────────────────────────────────────────────────
 
-function PilotCard() {
+function CorpCard() {
   const state  = useGameStore(s => s.state);
-  const rename = useGameStore(s => s.renamePilot);
+  const rename = useGameStore(s => s.renameCorpName);
   const [editing, setEditing] = useState(false);
   const [draftName, setDraftName] = useState('');
   const [, setTick] = useState(0);
@@ -46,13 +47,14 @@ function PilotCard() {
     return () => clearInterval(t);
   }, []);
 
-  const age      = Date.now() - state.pilot.birthdate;
+  const age      = Date.now() - state.corp.foundedAt;
   const credits  = state.resources['credits'] ?? 0;
   const totalSkillLevels = Object.values(state.systems.skills.levels).reduce((a, b) => a + b, 0);
+  const fleetCount = Object.keys(state.systems.fleet.fleets).length;
 
   function commitRename() {
     const trimmed = draftName.trim();
-    if (trimmed && trimmed !== state.pilot.name) rename(trimmed);
+    if (trimmed && trimmed !== state.corp.name) rename(trimmed);
     setEditing(false);
   }
 
@@ -66,12 +68,12 @@ function PilotCard() {
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-3 min-w-0">
-          {/* Avatar placeholder */}
+          {/* Corp logo placeholder */}
           <div
             className="w-10 h-10 rounded-full shrink-0 flex items-center justify-center text-lg font-bold"
             style={{ background: 'rgba(34,211,238,0.12)', border: '1px solid rgba(34,211,238,0.3)', color: '#22d3ee' }}
           >
-            {state.pilot.name.charAt(0).toUpperCase()}
+            {state.corp.name.charAt(0).toUpperCase()}
           </div>
           <div className="min-w-0">
             {editing ? (
@@ -87,22 +89,137 @@ function PilotCard() {
             ) : (
               <button
                 className="text-white font-bold text-base leading-tight hover:text-cyan-300 transition-colors text-left"
-                onClick={() => { setDraftName(state.pilot.name); setEditing(true); }}
+                onClick={() => { setDraftName(state.corp.name); setEditing(true); }}
                 title="Click to rename"
               >
-                {state.pilot.name}
+                {state.corp.name}
               </button>
             )}
             <div className="text-slate-500 text-xs mt-0.5">
-              Capsuleer · {fmtDuration(age)} in space
+              Corporation · Founded {fmtDuration(age)} ago
             </div>
           </div>
         </div>
         <div className="text-right shrink-0">
           <div className="text-amber-400 font-bold font-mono text-sm">{formatCredits(credits)}</div>
-          <div className="text-slate-600 text-[10px] mt-0.5">{totalSkillLevels} skill points</div>
+          <div className="text-slate-600 text-[10px] mt-0.5">{fleetCount} fleet{fleetCount !== 1 ? 's' : ''} · {totalSkillLevels} SP</div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ─── Corp HQ card ─────────────────────────────────────────────────────────────
+
+function CorpHQCard() {
+  const state = useGameStore(s => s.state);
+  const hqSystemId = state.systems.factions.homeStationSystemId;
+
+  if (!hqSystemId) {
+    return (
+      <div
+        className="rounded-xl p-4 text-center"
+        style={{ background: 'rgba(3,8,20,0.6)', border: '1px dashed rgba(255,255,255,0.08)' }}
+      >
+        <p className="text-slate-600 text-xs">No Corp HQ. Open System panel and set a station as headquarters.</p>
+      </div>
+    );
+  }
+
+  const systemObj   = hqSystemId ? getSystemById(state.galaxy.seed, hqSystemId) : null;
+  const systemIndex  = hqSystemId ? parseInt(hqSystemId.replace('sys-', ''), 10) : 0;
+  const station      = hqSystemId && systemObj
+    ? getStationInSystem(systemObj, state.galaxy.seed, systemIndex)
+    : null;
+
+  return (
+    <div
+      className="rounded-xl p-4 flex flex-col gap-2"
+      style={{
+        background: 'linear-gradient(135deg, rgba(3,8,20,0.95), rgba(34,211,238,0.04))',
+        border: '1px solid rgba(34,211,238,0.18)',
+      }}
+    >
+      <div className="flex items-center justify-between">
+        <div className="text-[9px] text-cyan-400 uppercase tracking-widest mb-0.5 font-bold">🏢 Corp HQ</div>
+      </div>
+      <div className="flex items-center gap-2">
+        <NavTag entityType="system" entityId={hqSystemId} label={systemObj?.name ?? hqSystemId} />
+        {station && <span className="text-xs text-slate-400">• {station.name}</span>}
+      </div>
+      <div className="text-slate-500 text-xs">
+        {station ? (
+          <div className="flex flex-col gap-0.5">
+            {station.services.map((svc: string) => (
+              <div key={svc} className="text-[10px]">• {svc}</div>
+            ))}
+            {station.marketPriceModifier !== 1 && (
+              <div className="text-[10px]">• Market {station.marketPriceModifier > 1 ? '+' : ''}{Math.round((station.marketPriceModifier - 1) * 100)}% prices</div>
+            )}
+            {station.manufacturingSpeedBonus > 0 && (
+              <div className="text-[10px]">• +{Math.round(station.manufacturingSpeedBonus * 100)}% manufacturing speed</div>
+            )}
+          </div>
+        ) : 'Standard station services'}
+      </div>
+    </div>
+  );
+}
+
+// ─── Alerts card ─────────────────────────────────────────────────────────────
+
+function AlertsCard() {
+  const state = useGameStore(s => s.state);
+  const fleets = Object.values(state.systems.fleet.fleets);
+  const ships = state.systems.fleet.ships;
+
+  const alerts: Array<{ type: 'cargo' | 'hull' | 'idle'; fleetId: string; fleetName: string; detail: string }> = [];
+
+  for (const fleet of fleets) {
+    // Cargo ≥80% with no haul order
+    const cargoUsed = Object.values(fleet.cargoHold).reduce((sum, amt) => sum + amt, 0);
+    const cargoCap = computeFleetCargoCapacity(fleet, ships);
+    const cargoFill = cargoCap > 0 ? (cargoUsed / cargoCap) * 100 : 0;
+
+    if (cargoFill >= 80 && fleet.fleetOrder === null) {
+      alerts.push({ type: 'cargo', fleetId: fleet.id, fleetName: fleet.name, detail: `${Math.round(cargoFill)}% full` });
+    }
+
+    // Hull damage >30%
+    const avgHull = fleet.shipIds.length > 0
+      ? fleet.shipIds.reduce((sum, sid) => sum + (ships[sid]?.hullDamage ?? 0), 0) / fleet.shipIds.length
+      : 0;
+    if (avgHull > 30) {
+      alerts.push({ type: 'hull', fleetId: fleet.id, fleetName: fleet.name, detail: `${Math.round(avgHull)}% damaged` });
+    }
+
+    // Idle with ships
+    if (fleet.shipIds.length > 0 && fleet.fleetOrder === null && !fleet.combatOrder) {
+      const anyMining = fleet.shipIds.some(sid => ships[sid]?.assignedBeltId);
+      if (!anyMining) {
+        alerts.push({ type: 'idle', fleetId: fleet.id, fleetName: fleet.name, detail: 'No orders' });
+      }
+    }
+  }
+
+  if (alerts.length === 0) return null;
+
+  const iconMap = { cargo: '📦', hull: '🛡️', idle: '💤' };
+  const colorMap = { cargo: 'text-amber-400', hull: 'text-rose-400', idle: 'text-slate-500' };
+
+  return (
+    <div
+      className="rounded-xl p-4 flex flex-col gap-2"
+      style={{ background: 'rgba(3,8,20,0.7)', border: '1px solid rgba(251,146,60,0.2)' }}
+    >
+      <div className="text-[10px] text-amber-400 uppercase tracking-widest font-bold">⚠️ Alerts</div>
+      {alerts.slice(0, 6).map((alert, i) => (
+        <div key={i} className="flex items-center gap-2 text-xs">
+          <span className={colorMap[alert.type]}>{iconMap[alert.type]}</span>
+          <NavTag entityType="fleet" entityId={alert.fleetId} label={alert.fleetName} />
+          <span className="text-slate-400">— {alert.detail}</span>
+        </div>
+      ))}
     </div>
   );
 }
@@ -146,7 +263,7 @@ function ActiveSkillCard() {
     >
       <div className="flex items-start justify-between gap-3">
         <div>
-          <div className="text-[9px] text-cyan-400 uppercase tracking-widest mb-0.5 font-bold">⚡ Training</div>
+          <div className="text-[9px] text-cyan-400 uppercase tracking-widest mb-0.5 font-bold">⚡ Corp Research</div>
           <div className="text-white font-bold text-sm">{def?.name ?? skillsState.activeSkillId}</div>
           <div className="text-slate-400 text-xs">Level {level - 1} → {level}</div>
         </div>
@@ -159,108 +276,6 @@ function ActiveSkillCard() {
       {skillsState.queue.length > 0 && (
         <div className="text-slate-600 text-xs">
           +{skillsState.queue.length} skill{skillsState.queue.length !== 1 ? 's' : ''} queued
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─── Mining card ──────────────────────────────────────────────────────────────
-
-function MiningCard() {
-  const state  = useGameStore(s => s.state);
-  const rates  = useResourceRates();
-  const mult   = getMiningSkillMultiplier(state);
-
-  const activeBelts = Object.entries(state.systems.mining.targets)
-    .filter(([, v]) => v)
-    .map(([id]) => id);
-
-  // Ore hold stats
-  const holdCapacity = getOreHoldCapacity(state);
-  const holdUsed     = getOreHoldUsed(state);
-  const holdPct      = holdCapacity > 0 ? Math.min(100, (holdUsed / holdCapacity) * 100) : 0;
-  const haulInterval = getHaulIntervalSeconds(state);
-  const nextHaulMs   = state.systems.mining.lastHaulAt + haulInterval * 1000;
-  const secToHaul    = Math.max(0, Math.ceil((nextHaulMs - state.lastUpdatedAt) / 1000));
-
-  // Collect ore output rates
-  const oreRates: Record<string, number> = {};
-  for (const [beltId, isActive] of Object.entries(state.systems.mining.targets)) {
-    if (!isActive) continue;
-    const def = ORE_BELTS[beltId];
-    if (!def) continue;
-    for (const o of def.outputs) {
-      oreRates[o.resourceId] = (oreRates[o.resourceId] ?? 0) + (rates[o.resourceId] ?? o.baseRate * mult);
-    }
-  }
-
-  // Lifetime totals
-  const topLifetime = Object.entries(state.systems.mining.lifetimeProduced)
-    .sort(([, a], [, b]) => b - a)
-    .slice(0, 3);
-
-  return (
-    <div
-      className="rounded-xl p-4 flex flex-col gap-3"
-      style={{ background: 'rgba(3,8,20,0.7)', border: '1px solid rgba(255,255,255,0.07)' }}
-    >
-      <div className="flex items-center justify-between">
-        <div className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">⛏ Mining</div>
-        <span className="text-xs font-mono text-cyan-400">×{mult.toFixed(2)} yield</span>
-      </div>
-
-      {/* Ore hold summary */}
-      <div>
-        <div className="flex items-center justify-between mb-1">
-          <span className="text-[9px] text-slate-600">Ore Hold</span>
-          <span className="text-[9px] font-mono text-slate-500">
-            {formatResourceAmount(holdUsed, 0)} / {formatResourceAmount(holdCapacity, 0)} · haul in {secToHaul}s
-          </span>
-        </div>
-        <div className="h-1 rounded-full bg-slate-800 overflow-hidden">
-          <div
-            className={`h-full rounded-full transition-all duration-500 ${
-              holdPct >= 95 ? 'bg-rose-500' : holdPct >= 70 ? 'bg-amber-500' : 'bg-cyan-600'
-            }`}
-            style={{ width: `${holdPct}%` }}
-          />
-        </div>
-      </div>
-
-      {activeBelts.length === 0 ? (
-        <p className="text-slate-600 text-xs italic">No belts active. Open Mining to start extraction.</p>
-      ) : (
-        <div className="flex flex-col gap-1.5">
-          {activeBelts.map(beltId => {
-            const def = ORE_BELTS[beltId];
-            if (!def) return null;
-            return (
-              <div key={beltId} className="flex items-center gap-2 text-xs">
-                <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse shrink-0" />
-                <span className="text-slate-300 flex-1 truncate">{def.name}</span>
-                <div className="flex gap-1">
-                  {def.outputs.map(o => (
-                    <span key={o.resourceId} className="text-cyan-300 font-mono">
-                      +{(oreRates[o.resourceId] ?? 0).toFixed(2)}/s
-                    </span>
-                  ))}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {topLifetime.length > 0 && (
-        <div className="pt-2 flex flex-col gap-1" style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }}>
-          <div className="text-[9px] text-slate-600 uppercase tracking-wider mb-0.5">Lifetime extracted</div>
-          {topLifetime.map(([id, amount]) => (
-            <div key={id} className="flex items-center gap-2 text-xs">
-              <span className="text-slate-500 flex-1">{RESOURCE_REGISTRY[id]?.name ?? id}</span>
-              <span className="text-slate-400 font-mono">{formatResourceAmount(amount, 0)}</span>
-            </div>
-          ))}
         </div>
       )}
     </div>
@@ -343,14 +358,14 @@ function StatsRow() {
 
   const skillsLearned   = Object.values(state.systems.skills.levels).filter(l => l > 0).length;
   const maxSkillLevel   = Math.max(0, ...Object.values(state.systems.skills.levels));
-  const totalMined      = Object.values(state.systems.mining.lifetimeProduced).reduce((a, b) => a + b, 0);
-  const activeBelts     = Object.values(state.systems.mining.targets).filter(Boolean).length;
+  const fleetCount      = Object.keys(state.systems.fleet.fleets).length;
+  const totalShips      = Object.keys(state.systems.fleet.ships).length;
 
   const stats = [
     { label: 'Skills Known',    value: skillsLearned.toString(),          color: '#22d3ee' },
     { label: 'Highest Level',   value: maxSkillLevel > 0 ? `Lv ${maxSkillLevel}` : '—', color: '#22d3ee' },
-    { label: 'Ore Mined',       value: formatResourceAmount(totalMined, 0), color: '#fbbf24' },
-    { label: 'Active Belts',    value: activeBelts.toString(),            color: '#fbbf24' },
+    { label: 'Fleets',          value: fleetCount.toString(),             color: '#fbbf24' },
+    { label: 'Total Ships',     value: totalShips.toString(),            color: '#fbbf24' },
   ];
 
   return (
@@ -488,6 +503,7 @@ function FleetStatusCard() {
   if (fleets.length === 0) return null;
 
   const galaxy = state.galaxy;
+  const ships = state.systems.fleet.ships;
 
   function activityLabel(fleet: typeof fleets[0]) {
     if (fleet.fleetOrder !== null)                         return { text: 'In Transit', color: '#22d3ee', dot: 'bg-cyan-400 animate-pulse' };
@@ -512,15 +528,26 @@ function FleetStatusCard() {
         const status = activityLabel(fleet);
         const hullPct = fleet.shipIds.length > 0
           ? fleet.shipIds.reduce((sum, sid) => {
-              const ship = state.systems.fleet.ships[sid];
+              const ship = ships[sid];
               return sum + (ship ? (ship.hullDamage ?? 0) : 0);
             }, 0) / fleet.shipIds.length
           : 0;
+
+        // Cargo fill %
+        const cargoUsed = Object.values(fleet.cargoHold).reduce((sum, amt) => sum + amt, 0);
+        const cargoCap = computeFleetCargoCapacity(fleet, ships);
+        const cargoFillPct = cargoCap > 0 ? Math.round((cargoUsed / cargoCap) * 100) : 0;
+
         return (
           <div key={fleet.id} className="flex items-center gap-2 py-1.5 px-2 rounded-lg" style={{ background: 'rgba(255,255,255,0.02)' }}>
             <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${status.dot}`} />
             <NavTag entityType="fleet" entityId={fleet.id} label={fleet.name} />
             <span className="text-[9px] font-mono shrink-0" style={{ color: status.color }}>{status.text}</span>
+            {cargoFillPct > 0 && (
+              <span className={`text-[8px] font-mono shrink-0 ${cargoFillPct >= 80 ? 'text-amber-400' : 'text-slate-600'}`}>
+                cargo {cargoFillPct}%
+              </span>
+            )}
             <span className="flex-1" />
             {hullPct > 0 && (
               <span className={`text-[8px] font-mono shrink-0 ${hullPct > 50 ? 'text-rose-400' : hullPct > 20 ? 'text-amber-400' : 'text-slate-600'}`}>
@@ -541,24 +568,17 @@ function FleetStatusCard() {
 
 function ResourceIncomeCard() {
   const rates  = useResourceRates();
-  const state  = useGameStore(s => s.state);
+  const creditsRate = rates['credits'] ?? 0;
 
-  // Gather ore rates from active belts
-  const oreEntries: Array<{ id: string; rate: number }> = [];
-  for (const [beltId, active] of Object.entries(state.systems.mining.targets)) {
-    if (!active) continue;
-    const def = ORE_BELTS[beltId];
-    if (!def) continue;
-    for (const o of def.outputs) {
-      const existing = oreEntries.find(e => e.id === o.resourceId);
-      if (existing) existing.rate += rates[o.resourceId] ?? 0;
-      else oreEntries.push({ id: o.resourceId, rate: rates[o.resourceId] ?? 0 });
+  // Gather all positive resource rates
+  const resourceRates: Array<{ id: string; rate: number }> = [];
+  for (const [id, rate] of Object.entries(rates)) {
+    if (rate > 0 && id !== 'credits') {
+      resourceRates.push({ id, rate });
     }
   }
 
-  const creditsRate = rates['credits'] ?? 0;
-
-  if (oreEntries.length === 0 && creditsRate === 0) return null;
+  if (resourceRates.length === 0 && creditsRate === 0) return null;
 
   return (
     <div
@@ -566,7 +586,7 @@ function ResourceIncomeCard() {
       style={{ background: 'rgba(3,8,20,0.55)', border: '1px solid rgba(255,255,255,0.05)' }}
     >
       <span className="text-[9px] text-slate-600 uppercase tracking-widest self-center w-full sm:w-auto">Income / sec</span>
-      {oreEntries.map(({ id, rate }) => (
+      {resourceRates.slice(0, 5).map(({ id, rate }) => (
         <div key={id} className="flex items-center gap-1.5">
           <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 shrink-0" />
           <span className="text-[10px] text-slate-400">{RESOURCE_REGISTRY[id]?.name ?? id}</span>
@@ -589,22 +609,22 @@ function ResourceIncomeCard() {
 export function OverviewPanel() {
   return (
     <div className="flex flex-col gap-4">
-      <h2 className="panel-header">📊 Pilot Overview</h2>
+      <h2 className="panel-header">📊 Corp Command Center</h2>
 
-      <PilotCard />
+      <CorpCard />
+      <CorpHQCard />
+      <AlertsCard />
       <ActiveSkillCard />
       <ResourceIncomeCard />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <MiningCard />
+        <FleetStatusCard />
         <ManufacturingCard />
       </div>
 
-      <FleetStatusCard />
       <StatsRow />
       <DiscoveriesCard />
       <CombatLogCard />
     </div>
   );
 }
-

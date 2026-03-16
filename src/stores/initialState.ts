@@ -36,9 +36,11 @@ export function createInitialState(): GameState {
     version: SAVE_VERSION,
     lastUpdatedAt: Date.now(),
 
-    pilot: {
-      name: 'New Capsuleer',
-      birthdate: Date.now(),
+    pilot: undefined,
+
+    corp: {
+      name: 'New Corp',
+      foundedAt: Date.now(),
     },
 
     resources,
@@ -160,6 +162,9 @@ export function createInitialState(): GameState {
         },
         dockedStationId: null,
         outposts: {},
+        homeStationId: null,
+        homeStationSystemId: null,
+        registeredStations: [],
       },
     },
 

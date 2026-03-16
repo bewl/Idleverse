@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useGameStore } from '@/stores/gameStore';
+import { useUiStore } from '@/stores/uiStore';
 import { SKILL_DEFINITIONS, SKILL_CATEGORIES, SKILL_CATEGORY_LABELS, SKILL_CATEGORY_ICONS } from '@/game/systems/skills/skills.config';
 import {
   canTrainSkill,
@@ -546,8 +547,7 @@ function SkillDetail({ skillId }: { skillId: string }) {
       {/* Train button(s) */}
       {!isMaxed && canTrain && (
         <div className="mt-auto flex flex-wrap gap-2">
-          {[pendingLevel + 1, Math.min(5, pendingLevel + 2), 5]
-            .filter((lv, i, arr) => lv > pendingLevel && lv <= 5 && arr.indexOf(lv) === i)
+          {Array.from({ length: 5 - pendingLevel }, (_, i) => pendingLevel + 1 + i)
             .map(targetLv => (
             <button
               key={targetLv}
@@ -587,6 +587,18 @@ export function SkillsPanel() {
   const [selectedSkillId, setSelectedSkillId] = useState<string | null>(
     () => SKILL_CATEGORIES['mining']?.[0] ?? null
   );
+
+  const focusTarget = useUiStore(s => s.focusTarget);
+  const clearFocus  = useUiStore(s => s.clearFocus);
+
+  useEffect(() => {
+    if (focusTarget?.entityType !== 'skill') return;
+    const skillId = focusTarget.entityId;
+    const cat = (Object.entries(SKILL_CATEGORIES) as [SkillCategory, string[]][]).find(([, ids]) => ids.includes(skillId))?.[0];
+    if (cat) setActiveCategory(cat);
+    setSelectedSkillId(skillId);
+    clearFocus();
+  }, [focusTarget, clearFocus]);
 
   const categorySkills = SKILL_CATEGORIES[activeCategory] ?? [];
 

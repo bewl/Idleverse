@@ -37,7 +37,14 @@ impact. Each phase is independently shippable and leaves the game in a playable,
 | Fleet combat | ✅ Complete | NPC groups, patrol/raid orders, hull damage, bounty/loot, combat log |
 | Blueprint research & T2 manufacturing | ✅ Complete | Phase 3 shipped — research queue, BPC copies, T2 recipes |
 | Exploration & anomalies | ✅ Complete | Phase 4 shipped — anomaly scanning, discovery feed, Astrometrics/Archaeology/Hacking skills |
-| UI Overhaul — navigation, tooltips, data density | 🔄 In Progress | GameTooltip + NavTag + useUiStore + DevPanel overhaul + 9-panel renovation |
+| UI Overhaul — navigation, tooltips, data density | ✅ Complete | GameTooltip + NavTag + useUiStore + DevPanel overhaul + 8-panel renovation (Stream D) |
+| **Fleet-centric remodel (CEO model, no player location)** | **⚡ FC-1 TOP PRIORITY** | **Remove currentSystemId gate; wire dead oreDeltas; fleet cargo hold; Corp HQ** |
+| **CEO identity + command dashboard** | **⚡ FC-1G TOP PRIORITY** | **state.pilot → state.corp; Mining panel → fleet dashboard; Overview → corp command center; pilot focus tree UI** |
+| **Fleet commander skills** | **⚡ FC-2 TOP PRIORITY** | **Designate pilot as commander; command skill trees; fleet-wide bonuses** |
+| **Fleet wings (hauling + escort)** | **⚡ FC-3 TOP PRIORITY** | **Sub-fleets; hauling wing auto-hauls to HQ with security escort** |
+| **Corp HQ — station registration & POS** | **⚡ FC-4 TOP PRIORITY** | **Register with faction station or build own POS; gate manufacturing/reprocessing** |
+| **On-site fleet reprocessing** | **⚡ FC-5 TOP PRIORITY** | **Ore refinery module; industrial hull; refine ore in-field** |
+| **Dynamic mining threats & fleet defense** | **⚡ FC-6 TOP PRIORITY** | **Mining attracts NPC threats; resource claims; fleet reputation** |
 | Factions & missions | ⬜ Phase 5 | Rep tracking exists, no consequences |
 | Dynamic economy & trade routes | ✅ Complete | Phase 1 shipped — dynamic prices + trade route automation |
 | Structures & player outposts | ⬜ Phase 6 | Type stub exists |
@@ -485,7 +492,7 @@ n-levels deep with their own clickable tags.
 | B4 | `fitModule` / `removeModule` | FleetPanel ships | ✅ Slot grid with + fit select and ✕ per module |
 | B5 | `issueFleetGroupOrder` / `cancelFleetGroupOrder` | FleetPanel fleets | ✅ Navigation section: destination + route filter + Move/Cancel |
 | B6 | `removePilotSkillFromQueue` / `renamePilotCharacter` | FleetPanel pilots | ✅ Training queue with ✕ rows + click-to-rename |
-| B7 | `dockAtStation` / `undockFromStation` | SystemPanel | ⬜ Deferred to SystemPanel renovation |
+| B7 | `dockAtStation` / `undockFromStation` | SystemPanel | ✅ Dock/Undock button wired in SystemPanelInner (Stream D) |
 | B8 | `refreshRecruitmentOffers()` | FleetPanel pilots | ✅ Refresh Offers button in Operations tab |
 
 ### Stream C — DevPanel Complete Overhaul  ✅ Shipped — March 2026
@@ -500,9 +507,25 @@ n-levels deep with their own clickable tags.
 - **C6** ✅ — New **State** tab: key metrics grid (credits, ships, pilots, mfg jobs, unlock count), Dump-to-Console button, active unlocks list, state keys reference
 - **C7** ✅ — Fleet tab enhanced: **Ship Integrity** section with live hull % bars (colour-coded green/amber/red) + per-ship **REPAIR** button via `repairShip`
 
-### Stream D — Panel Renovations  *(after Stream A ships)*
+### ✅ COMPLETED — Stream D — Panel Renovations
+> **Status:** ✅ Shipped — June 2025
+> **Files changed:** `OverviewPanel.tsx`, `MiningPanel.tsx`, `ManufacturingPanel.tsx`, `SkillsPanel.tsx`, `SystemPanel.tsx`, `ReprocessingPanel.tsx`, `MarketPanel.tsx`, `FleetPanel.tsx`
+> **Commit:** `d1e4e32`
 
-All 9 panels renovated with: data density additions, `NavTag` links on every entity reference, `GameTooltip` + `TT.*` for hover cards, and accent-color `.glow-*` on active/state elements.
+All 8 targeted panels renovated with NavTag entity links, data density additions, and contextual status indicators. StarMapPanel renovation deferred (low priority — existing panel is functional).
+
+### What Was Built
+
+| Panel | Shipped |
+|---|---|
+| OverviewPanel | `FleetStatusCard` (fleet dots, status label, hull dmg avg, NavTag fleet+system links); `ResourceIncomeCard` (active ore/credit rates) |
+| MiningPanel | NavTag on current system name; NavTag on skill-lock refs in BeltCard |
+| ManufacturingPanel | Queue utilization bar (amber@50%, rose@90%); NavTag on material cost labels in `CostBar` |
+| SkillsPanel | `QueueEtaBadge` in panel header (queue count + total ETA); NavTag on prerequisite skill refs in `SkillDetail` |
+| SystemPanel (B7) | Dock/Undock button with rep gate and disabled state; "Fleets here" strip with NavTag fleet links |
+| ReprocessingPanel | Letter-grade efficiency badge (S/A/B/C/D, color-coded) in header; NavTag on Reprocessing skill ref |
+| MarketPanel | Trend arrows (▲▼─) on price vs base in `MarketRow`; NavTag on resource names; NavTag on skill lock messages |
+| FleetPanel | NavTag on system location in fleet header; NavTag on navigation destination; NavTag on patrol/raid skill requirement messages; NavTag on active skill in pilot card |
 
 | Panel | Key Data Additions | Notable NavTags |
 |---|---|---|
@@ -548,6 +571,440 @@ All 9 panels renovated with: data density additions, `NavTag` links on every ent
 | `src/ui/panels/StarMapPanel.tsx` | D | Renovation |
 | `docs/Idleverse_AI_Architecture.md` | — | Document UI layer architecture |
 | `docs/Idleverse_SYSTEM_BLUEPRINTS.md` | — | System 13 |
+
+---
+
+---
+
+# ⚡ FC-1 — Fleet-Centric Foundation (TOP PRIORITY)
+
+> **Status:** Designed, not yet implemented.
+> **Priority:** Highest — fixes dead code and establishes the CEO model all other FC phases depend on.
+> **Depends on:** Nothing — standalone refactor + type extension.
+
+## Goal
+
+Remove `galaxy.currentSystemId` as a gate on any gameplay system. The CEO is an abstract director with no physical location. All mining, hauling, and production flows through **fleets**. Fleet cargo holds are the primary ore storage layer; haul trips to Corp HQ deposit ore into the corp-wide resource pool.
+
+## Steps
+
+### FC-1a — Remove `galaxy.currentSystemId` as mining gate
+
+- `src/game/systems/mining/mining.logic.ts`: Replace `isBeltAccessible()` (checks `galaxy.currentSystemId`) with `isBeltInSystem(beltId, systemId)` — pure function, takes explicit `systemId` arg.
+- Replace `getCurrentSystemBeltIds(state)` with `getBeltsForSystem(systemId, galaxy)` — no longer reads from player state.
+- `src/game/core/tickRunner.ts`: Remove warp-arrival guard that resets belt targets; remove mining skip-during-warp.
+- `src/ui/panels/MiningPanel.tsx`: Stop filtering belts to `galaxy.currentSystemId`; show all active mining fleets across all systems.
+
+### FC-1b — Wire fleet mining `oreDeltas` (dead code fix)
+
+- `src/game/systems/fleet/fleet.tick.ts`: Confirm `oreDeltas: Record<string, Record<string, number>>` is computed per mining ship — it is, but the result is discarded.
+- `src/game/core/tickRunner.ts` step 8: Capture `fleetResult.oreDeltas` and apply to each fleet's `cargoHold` (new field — FC-1c) instead of discarding.
+
+### FC-1c — Add fleet cargo hold model
+
+**Type changes** (`src/types/game.types.ts`):
+```ts
+interface PlayerFleet {
+  // existing fields unchanged...
+  cargoHold: Record<string, number>;    // oreId → quantity
+  cargoCapacity: number;               // total m³ (computed from ship hulls)
+}
+```
+- `src/stores/initialState.ts`: Add `cargoHold: {}`, `cargoCapacity: 0` to initial fleet shape.
+- `src/game/systems/fleet/fleet.logic.ts`: Add `computeFleetCargoCapacity(fleet, ships)` — sums `hull.baseCargoMultiplier × baseCargoM3` for all fleet ships.
+- Mining pauses automatically when `cargoHold total >= cargoCapacity`.
+
+### FC-1d — Corp HQ concept
+
+**Type changes** (`src/types/game.types.ts`):
+```ts
+interface FactionsState {
+  // existing fields unchanged...
+  homeStationId: string | null;
+  registeredStations: string[];
+}
+```
+- `src/stores/initialState.ts`: `homeStationId: null`, `registeredStations: []`.
+- `src/stores/gameStore.ts`: Add `setHomeStation(stationId: string): void`.
+- `src/ui/panels/SystemPanel.tsx`: Show "Register Corp HQ here" button when viewing a system with a station and `homeStationId` is null or a different station.
+
+### FC-1e — Fleet auto-haul to HQ
+
+- `src/game/core/tickRunner.ts`: After applying oreDeltas — if fleet cargo ≥ 80% full AND `homeStationId` is set AND fleet has at least one hauler-class ship AND fleet has no active `fleetOrder`: auto-issue haul order to HQ system.
+- On fleet arrival at HQ system: dump `cargoHold` contents into `state.resources` ore pool; clear fleet `cargoHold`.
+- `src/ui/panels/FleetPanel.tsx`: Expose "Haul Now" manual button in fleet card.
+
+### FC-1f — Clean remaining UI gates
+
+- `src/ui/panels/SystemPanel.tsx`: Remove any `isBrowsing` logic that resets to player system on warp arrival.
+- `src/ui/panels/MiningPanel.tsx`: Redesign as "Fleet Mining Dashboard" — all mining fleets, all systems, per-fleet cargoHold fill bars.
+
+## Files Changed
+
+| File | Change |
+|---|---|
+| `src/types/game.types.ts` | Add `cargoHold`, `cargoCapacity` to `PlayerFleet`; add `homeStationId`, `registeredStations` to `FactionsState` |
+| `src/stores/initialState.ts` | New fields with defaults |
+| `src/stores/gameStore.ts` | `setHomeStation` action |
+| `src/game/systems/mining/mining.logic.ts` | Remove currentSystemId gate; add `isBeltInSystem`, `getBeltsForSystem` |
+| `src/game/core/tickRunner.ts` | Wire oreDeltas to fleet cargo; remove warp-skip mining guard |
+| `src/game/systems/fleet/fleet.logic.ts` | Add `computeFleetCargoCapacity` |
+| `src/ui/panels/MiningPanel.tsx` | Fleet Mining Dashboard (all fleets/systems) |
+| `src/ui/panels/SystemPanel.tsx` | Remove isBrowsing reset; add "Set Corp HQ" button |
+| `src/ui/panels/FleetPanel.tsx` | "Haul Now" button; cargoHold fill bar in fleet card |
+
+---
+
+---
+
+# ⚡ FC-2 — Fleet Commander System (TOP PRIORITY)
+
+> **Status:** Designed, not yet implemented.
+> **Priority:** Highest — primary new skill loop for the CEO model.
+> **Depends on:** FC-1 (fleet cargo model must exist; commander bonuses feed into mining tick).
+
+## Goal
+
+Any pilot can be designated Fleet Commander. Commanders have a separate manually-queued skill tree — **command skills** — whose trained levels apply fleet-wide bonuses (yield, combat, logistics, recon). Organic pilot skill training is unchanged; command skills are additive.
+
+## Data Model
+
+**Type changes** (`src/types/game.types.ts`):
+```ts
+interface PlayerFleet {
+  // existing...
+  commanderId: string | null;  // pilotId of designated commander
+}
+
+interface CommanderSkillState {
+  levels: Record<string, number>;       // commandSkillId → level 0–5
+  queue: CommanderSkillQueueEntry[];
+  activeSkillId: string | null;
+  activeProgress: number;               // 0–1
+}
+
+interface CommanderSkillQueueEntry {
+  skillId: string;
+  targetLevel: 1 | 2 | 3 | 4 | 5;
+}
+
+interface PilotInstance {
+  // existing...
+  commandSkills: CommanderSkillState;  // populated for all pilots; active only when pilot is commanderId
+}
+```
+
+## Commander Skill Trees
+
+New file: `src/game/systems/fleet/commander.config.ts`
+
+Five trees, each 5 levels. Training time: 2–48 h per level (exponential, same formula pattern as pilot skills).
+
+| Skill ID | Effect per level | Milestone unlock |
+|---|---|---|
+| `mining-command` | +4% fleet mining yield | L3: multi-belt assignment |
+| `combat-command` | +5% fleet DPS, +3% fleet tank | L4: patrol + raid combo order |
+| `logistics-command` | +8% fleet cargo capacity, −5% haul trip duration | L3: −5% haul time triggers |
+| `industrial-command` | +6% on-site refining yield | L2: unlocks `ore-refinery` module (FC-5) |
+| `recon-command` | +10% fleet scan strength, −8% anomaly signature radius | L5: deep-space probe module |
+
+## Logic
+
+- `src/game/systems/fleet/commander.config.ts` *(new)*: `COMMANDER_SKILL_DEFINITIONS`
+- `src/game/systems/fleet/commander.logic.ts` *(new)*: Getter fns — `getCommanderMiningBonus(pilot)`, `getCommanderCargoBonus(pilot)`, `getCommanderCombatBonus(pilot)`, `getCommanderScanBonus(pilot)`, `getCommanderIndustrialBonus(pilot)`. Also fixes the existing `getFleetMiningMultiplier()` TODO by wiring it to `mining-command` level.
+- `src/game/systems/fleet/fleet.tick.ts`: Add `tickCommanderSkillTraining(pilot, fleet)` — mirrors `tickPilotSkillTraining`; only runs when `fleet.commanderId === pilot.id`; experience accrues 1.5× while fleet is active (mining/scanning/combat).
+- Commander bonuses applied as multipliers in existing fleet mining yield, combat resolution, cargo capacity, scan strength calculations.
+
+## UI: Commander Section in Fleet Card
+
+- `src/ui/panels/FleetPanel.tsx`: New "Fleet Commander" section above Doctrine.
+  - Assigned commander: pilot name + portrait placeholder.
+  - Or: "No Commander" empty state with prompt.
+  - Dropdown to assign any pilot currently in the fleet as commander.
+  - Command skill queue: same visual style as pilot skill queue — skill name, target level picker, ETA, ✕ to remove.
+  - Active bonus chips below queue: `⛏ +8% Yield` `⚔ +10% DPS` etc. (only non-zero bonuses shown).
+
+## Store Actions
+
+- `designateFleetCommander(fleetId, pilotId | null): void`
+- `queueCommanderSkill(pilotId, skillId, targetLevel): void`
+- `removeCommanderSkillFromQueue(pilotId, index): void`
+
+## Files Changed
+
+| File | Change |
+|---|---|
+| `src/types/game.types.ts` | Add `commanderId` to `PlayerFleet`; add `CommanderSkillState`, `CommanderSkillQueueEntry`; add `commandSkills` to `PilotInstance` |
+| `src/stores/initialState.ts` | Default `commanderId: null`; default `commandSkills: { levels:{}, queue:[], activeSkillId:null, activeProgress:0 }` |
+| `src/stores/gameStore.ts` | `designateFleetCommander`, `queueCommanderSkill`, `removeCommanderSkillFromQueue` |
+| `src/game/systems/fleet/commander.config.ts` | *(new)* `COMMANDER_SKILL_DEFINITIONS` |
+| `src/game/systems/fleet/commander.logic.ts` | *(new)* bonus getter fns; fixes `getFleetMiningMultiplier()` |
+| `src/game/systems/fleet/fleet.tick.ts` | Add `tickCommanderSkillTraining` |
+| `src/ui/panels/FleetPanel.tsx` | Commander section with skill queue + bonus chips |
+
+---
+
+---
+
+# ⚡ FC-3 — Fleet Wings (TOP PRIORITY)
+
+> **Status:** Designed, not yet implemented.
+> **Priority:** Highest — enables the hauler auto-escort loop that makes fleet mining self-sustaining.
+> **Depends on:** FC-1 (fleet cargo model), FC-2 (commander skills feed wing-level bonuses).
+
+## Goal
+
+Sub-divide a fleet into **Wings** — logical groups of ships with defined roles (mining, hauling, combat/escort, recon, industrial). A hauling wing attached to a mining wing automatically routes to Corp HQ when cargo is full, optionally with a combat escort wing traveling alongside.
+
+## Data Model
+
+**Type changes** (`src/types/game.types.ts`):
+```ts
+type WingType = 'combat' | 'mining' | 'hauling' | 'recon' | 'industrial';
+
+interface FleetWing {
+  id: string;
+  name: string;
+  type: WingType;
+  shipIds: string[];
+  wingCommanderId: string | null;   // pilot in the lead ship of this wing
+  escortWingId: string | null;      // combat wing that escorts this wing on haul trips
+}
+
+interface PlayerFleet {
+  // existing...
+  wings: FleetWing[];
+}
+```
+
+Ships can be unassigned (no wing) or assigned to exactly one wing.
+
+## Logic
+
+New file: `src/game/systems/fleet/wings.logic.ts`
+- `getWingCargoCapacity(wing, ships)` — sum hauler ships' cargo in the wing.
+- `isHaulingWingFull(wing, fleet)` — hauling wing's ore share ≥ 90% of wing capacity.
+- `dispatchHaulerWing(wingId, fleet, homeSystemId)` — issues a sub-group haul order with escort; returns new fleet orders state.
+- `getMiningWingShips(fleet)` — all ships across mining wings.
+
+**Tick behavior:**
+- Mining wing ships mine ore → fills hauling wing's cargo hold (tracked separately from whole-fleet cargo).
+- When hauling wing is full: `dispatchHaulerWing` fires automatically in tickRunner.
+- Escort combat wing travels same route as hauling wing during the trip.
+- On HQ arrival: ore deposited; wings return to mining wing's last known system.
+
+## UI: Wing Management in Fleet Card
+
+- `src/ui/panels/FleetPanel.tsx`: "Fleet Wings" collapsible section in expanded fleet card.
+  - "+ Create Wing" buttons per wing type.
+  - Each wing: editable name, ship assignment list (drag or dropdown), escort assignment dropdown.
+  - Wing status chip: `Hauling Wing — 2 ships — 3,400 / 4,000 m³ (85%) → hauling to HQ`.
+  - Ships not in any wing shown as "Unassigned" at the bottom.
+
+## Store Actions
+
+- `createFleetWing(fleetId, type, name): void`
+- `deleteFleetWing(fleetId, wingId): void`
+- `assignShipToWing(fleetId, shipId, wingId | null): void`
+- `setWingEscort(fleetId, wingId, escortWingId | null): void`
+
+## Files Changed
+
+| File | Change |
+|---|---|
+| `src/types/game.types.ts` | Add `FleetWing`, `WingType`; add `wings` to `PlayerFleet` |
+| `src/stores/initialState.ts` | `wings: []` default on fleet |
+| `src/stores/gameStore.ts` | `createFleetWing`, `deleteFleetWing`, `assignShipToWing`, `setWingEscort` |
+| `src/game/systems/fleet/wings.logic.ts` | *(new)* wing capacity + dispatch logic |
+| `src/game/core/tickRunner.ts` | Wing-aware haul dispatch trigger |
+| `src/ui/panels/FleetPanel.tsx` | Wing management section |
+
+---
+
+---
+
+# ⚡ FC-4 — Corp HQ: Station Registration & Player-Owned Structures (TOP PRIORITY)
+
+> **Status:** Designed, not yet implemented.
+> **Priority:** Highest — provides the physical anchor for all corp activities.
+> **Depends on:** FC-1 (homeStationId model), Phase 5 (faction rep system needed for station registration gating).
+
+## Goal
+
+Two flavors of Corp HQ:
+1. **Register with a faction station** — pay credits + meet rep threshold → access corp facilities at that station.
+2. **Build a POS (Player-Owned Station)** — manufacture a `pos-core` and deploy it in any system → full corp HQ with upgradeable tiers.
+
+Manufacturing and reprocessing gain a soft warning (then hard gate in this phase) when no HQ is set.
+
+## Registered Faction Stations
+
+- `src/game/systems/factions/faction.config.ts`: Add `registrationCost: number` (ISK) and `registrationRepRequired: number` per station.
+- `src/stores/gameStore.ts`: `registerWithStation(stationId)` — deducts ISK, checks rep, adds to `registeredStations`.
+- Each faction station provides a unique passive bonus:
+
+| Faction | Station Bonus |
+|---|---|
+| Concordat | +10% manufacturing speed |
+| Veldris | +15% mining yield in their systems |
+| Free Covenant | +10% market sell price |
+| Null Syndicate | +20% combat loot quality |
+
+## Player-Owned Station (POS)
+
+- New manufacturing recipe `pos-core` (T2 tier): requires advanced minerals + T2 components.
+- New store action: `deployPOS(systemId): void` — places POS in `FactionsState.outposts` (stub already exists in type).
+- POS acts as full Corp HQ: factory, refinery, hangar access for all fleets.
+- POS upgradeable via `StructuresState.levels` (already stubbed): Level 1–5, each level increases speed/yield bonuses and unlocks additional slots.
+- POS can be attacked by NPC factions if faction rep is sufficiently negative → creates defense alert event.
+
+## UI Changes
+
+- `src/ui/panels/SystemPanel.tsx`: Gold ⬡ icon on orrery star when viewing the Corp HQ system. "Set as Corp HQ" button for unregistered stations. "Deploy POS" button when viewing a system without a POS.
+- `src/ui/panels/ManufacturingPanel.tsx`: Show HQ status indicator in panel header if no HQ is registered.
+- `src/ui/panels/ReprocessingPanel.tsx`: Same HQ status indicator.
+
+## Store Actions
+
+- `registerWithStation(stationId): void`
+- `deployPOS(systemId): void`
+- `upgradePOS(systemId): void`
+
+## Files Changed
+
+| File | Change |
+|---|---|
+| `src/game/systems/factions/faction.config.ts` | Station `registrationCost` + `registrationRepRequired` + bonus per faction |
+| `src/stores/gameStore.ts` | `registerWithStation`, `deployPOS`, `upgradePOS` |
+| `src/game/systems/manufacturing/manufacturing.config.ts` | New `pos-core` T2 recipe |
+| `src/ui/panels/SystemPanel.tsx` | HQ marker, registration + POS deploy buttons |
+| `src/ui/panels/ManufacturingPanel.tsx` | HQ status indicator |
+| `src/ui/panels/ReprocessingPanel.tsx` | HQ status indicator |
+
+---
+
+---
+
+# ⚡ FC-5 — On-Site Reprocessing & Industrial Ships (TOP PRIORITY)
+
+> **Status:** Designed, not yet implemented.
+> **Priority:** High — depth addition; reduces haul trips and enables deep-space industrial operations.
+> **Depends on:** FC-2 (`industrial-command` L2 gate), FC-4 (POS refinery for HQ-side refining comparison).
+
+## Goal
+
+Fleets equipped with an **Ore Refinery Array** module and a commander trained in `industrial-command` can refine ore in the field. On-site yield is 65% (vs HQ 100%), but minerals weigh far less than ore — dramatically reducing haul trip frequency.
+
+## Refinery Module
+
+- `src/game/systems/fleet/fleet.config.ts`: New module entry:
+  ```ts
+  {
+    id: 'ore-refinery',
+    name: 'Ore Refinery Array',
+    slot: 'high',
+    fitsHullTypes: ['exhumer', 'industrial-barge', 'hauler'],
+    gives: { onSiteRefiningEfficiency: 0.65 }
+  }
+  ```
+- Unlocked via `industrial-command` L2 (commander skill gating).
+
+## Industrial Barge Hull
+
+- `src/game/systems/fleet/fleet.config.ts`: New hull `industrial-barge`:
+  - High cargo hold (8,000 m³)
+  - Can fit `ore-refinery` module
+  - Low combat rating (not a combat ship)
+  - Slow movement (higher warp time per hop)
+
+## On-Site Refining Tick
+
+- `src/game/systems/fleet/fleet.tick.ts`: Each tick, if fleet has ≥1 ship with `ore-refinery` module AND `fleet.commanderId` pilot has `industrial-command` level ≥ 2:
+  - Process a fraction of fleet `cargoHold` ore into minerals.
+  - Yield = `0.65 × (1 + getCommanderIndustrialBonus(commander))`.
+  - Minerals replace ore in fleet cargoHold (minerals have lower m³/unit → frees capacity).
+
+## UI Changes
+
+- `src/ui/panels/FleetPanel.tsx`: Fleet card shows "Refining Active" badge when on-site refining is running. Efficiency chip: `♻ Refining at 72%`.
+- `src/ui/panels/MiningPanel.tsx`: Fleet mining rows show whether ore is being stored raw or refined on-site.
+
+## Files Changed
+
+| File | Change |
+|---|---|
+| `src/game/systems/fleet/fleet.config.ts` | `ore-refinery` module; `industrial-barge` hull |
+| `src/game/systems/fleet/fleet.tick.ts` | On-site refining tick logic |
+| `src/game/resources/resourceRegistry.ts` | Register `industrial-barge` hull |
+| `src/ui/panels/FleetPanel.tsx` | Refining active badge |
+| `src/ui/panels/MiningPanel.tsx` | Raw vs refined indicator |
+
+---
+
+---
+
+# ⚡ FC-6 — Dynamic Mining Threats & Fleet Defense (TOP PRIORITY)
+
+> **Status:** Designed, not yet implemented.
+> **Priority:** High — provides ongoing tension and content generation for fleet operations.
+> **Depends on:** FC-1 (fleet-based mining), FC-3 (wings — combat wing auto-responds), Phase 2 (combat resolution).
+
+## Goal
+
+Sustained mining operations in contested space attract NPC pirate responses, creating an ongoing threat loop. Fleets with combat wings handle threats autonomously; unprotected mining fleets trigger player alerts. Resource claim beacons make territory visible to factions.
+
+## Mining Threat Escalation
+
+- `src/game/systems/fleet/fleet.tick.ts` / `src/game/systems/combat/combat.logic.ts`:
+  - Track per-fleet `continuousMiningMinutes` counter (reset on fleet move or idle).
+  - If mining in lowsec and `continuousMiningMinutes >= 20`: spawn a pirate group threat in the system.
+  - If mining in nullsec and `continuousMiningMinutes >= 10`: spawn a stronger NPC group.
+  - If fleet has a combat wing assigned: auto-engage (reuse existing patrol/combat order resolution).
+  - If no combat wing: fire a fleet alert event — `{ type: 'mining-threat', fleetId, systemId }`; mining pauses.
+
+## Resource Claim Beacons
+
+- New store action: `plantResourceClaim(fleetId, systemId): void`.
+- Adds a `ResourceClaim` to `FactionsState` — visible to faction NPC logic.
+- If claiming systems in a faction's territory with rep `< −200`: faction dispatches an enforcement fleet to the system (existing NPC spawn mechanic) within `12–48h`.
+- Creates dynamic consequence: the more ore you extract from faction space, the more active their response.
+
+## Fleet Reputation
+
+**Type changes** (`src/types/game.types.ts`):
+```ts
+interface PlayerFleet {
+  // existing...
+  combatReputation: number;   // earned from NPC kills
+  miningReputation: number;   // earned from total ore extracted
+}
+```
+
+Reputation milestones unlock fleet-specific passive bonuses:
+- `combatReputation >= 100`: "Battle-Hardened" — +5% fleet combat stats
+- `combatReputation >= 500`: "Veteran" — +10% combat stats, −5% hull damage taken
+- `miningReputation >= 1000`: "Ore Baron" — +5% mining yield, +10% cargo capacity
+
+## UI Changes
+
+- `src/ui/panels/FleetPanel.tsx`: Fleet reputation bars (combat / mining) in fleet card expanded section. Active reputation bonus chips.
+- `src/ui/panels/OverviewPanel.tsx`: Alert card for mining threats; "Assign Combat Wing" quick action.
+
+## Store Actions
+
+- `plantResourceClaim(fleetId, systemId): void`
+- `dismissMiningThreat(alertId): void`
+
+## Files Changed
+
+| File | Change |
+|---|---|
+| `src/types/game.types.ts` | Add `combatReputation`, `miningReputation`, `continuousMiningMinutes` to `PlayerFleet`; add `ResourceClaim` to `FactionsState` |
+| `src/stores/initialState.ts` | Default `combatReputation: 0`, `miningReputation: 0` |
+| `src/stores/gameStore.ts` | `plantResourceClaim`, `dismissMiningThreat` |
+| `src/game/systems/fleet/fleet.tick.ts` | Threat escalation timer; auto-engage check |
+| `src/ui/panels/FleetPanel.tsx` | Reputation bars + bonus chips |
+| `src/ui/panels/OverviewPanel.tsx` | Mining threat alert card |
 
 ---
 

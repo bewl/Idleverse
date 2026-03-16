@@ -321,6 +321,8 @@ export interface PlayerFleet {
   combatOrder: CombatOrder | null;
   /** When true the fleet is actively scanning its current system for anomalies. */
   isScanning: boolean;
+  /** Ore currently held in this fleet's cargo holds, waiting to haul to Corp HQ. */
+  cargoHold: Record<string, number>;
 }
 
 // ─── Pilot ─────────────────────────────────────────────────────────────────
@@ -440,10 +442,13 @@ export interface StructuresState {
 
 // ─── Corp Director ────────────────────────────────────────────────────────
 
-export interface PilotState {
+export interface CorpState {
   name: string;
-  birthdate: number; // ms timestamp
+  foundedAt: number; // ms timestamp
 }
+
+/** @deprecated Use CorpState --- kept for save migration */
+export type PilotState = CorpState;
 
 // ─── Settings ──────────────────────────────────────────────────────────────
 
@@ -478,7 +483,9 @@ export interface GameSystems {
 export interface GameState {
   version: number;
   lastUpdatedAt: number;
-  pilot: PilotState;
+  corp: CorpState;
+  /** @deprecated legacy field - present only during save migration */
+  pilot?: PilotState;
   resources: Record<string, number>;
   systems: GameSystems;
   unlocks: Record<string, boolean>;

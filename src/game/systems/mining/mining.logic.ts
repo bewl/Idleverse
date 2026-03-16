@@ -53,16 +53,11 @@ export function getFleetMiningMultiplier(state: GameState): number {
   return best;
 }
 
-/** True if the player has unlocked the belt via skill training or the unlock map. */
+/** True if the player has unlocked the belt via skill training or the unlock map.
+ * No longer checks player location — any skilled corp can mine any belt. */
 function isBeltAccessible(state: GameState, beltId: string): boolean {
   const def = ORE_BELTS[beltId];
   if (!def) return false;
-  // Belt must exist in the current system
-  if (state.galaxy) {
-    const currentSystem = getSystemById(state.galaxy.seed, state.galaxy.currentSystemId);
-    const systemBelts   = getSystemBeltIds(currentSystem);
-    if (!systemBelts.includes(beltId)) return false;
-  }
   if (!def.requiredSkill) return true;
   if (state.unlocks[beltId]) return true;
   const lvl = getSkillLevel(state, def.requiredSkill.skillId);
@@ -104,8 +99,18 @@ export function getHaulIntervalSeconds(state: GameState): number {
 }
 
 /**
+ * Returns the belt IDs present in the given system.
+ * Pure function — does not depend on player location.
+ */
+export function getBeltsForSystem(systemId: string, galaxySeed: number): string[] {
+  const system = getSystemById(galaxySeed, systemId);
+  return getSystemBeltIds(system);
+}
+
+/**
  * Returns the belt IDs available in the current system, respecting skill gates.
  * Used by MiningPanel to know which tabs/belts to show.
+ * @deprecated Prefer getBeltsForSystem(systemId, seed) for fleet-centric code.
  */
 export function getCurrentSystemBeltIds(state: GameState): string[] {
   if (!state.galaxy) return Object.keys(ORE_BELTS);

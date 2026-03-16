@@ -113,4 +113,10 @@ export interface FactionsState {
   dockedStationId: string | null;
   /** Player-built outposts, keyed by systemId. */
   outposts: Record<string, OutpostState>;
+  /** Station ID designated as the corp HQ (null = no HQ set). */
+  homeStationId: string | null;
+  /** System ID of the corp HQ station (null = no HQ set). Stored alongside homeStationId for fast lookup. */
+  homeStationSystemId: string | null;
+  /** Station IDs the corp has registered with (includes homeStationId if set). */
+  registeredStations: string[];
 }

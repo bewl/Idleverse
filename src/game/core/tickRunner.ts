@@ -7,11 +7,12 @@ import { tickMarket } from '@/game/systems/market/market.logic';
 import { tickPricePressure, tickTradeRoutes } from '@/game/systems/market/market.logic';
 import { processUnlocks } from '@/game/progression/unlocks';
 import { tickTravel } from '@/game/galaxy/travel.logic';
-import { getSystemById, getSystemBeltIds } from '@/game/galaxy/galaxy.gen';
 import { tickFleet } from '@/game/systems/fleet/fleet.tick';
 import { advanceFleetOrders } from '@/game/systems/fleet/fleet.orders';
 import { tickCombat } from '@/game/systems/combat/combat.logic';
 import { tickExploration } from '@/game/systems/fleet/exploration.logic';
+import { computeFleetCargoCapacity } from '@/game/systems/fleet/fleet.logic';
+import { issueFleetGroupOrder } from '@/game/systems/fleet/fleet.orders';
 
 export interface TickResult {
   newState: GameState;
@@ -45,11 +46,8 @@ export function runTick(state: GameState, deltaSeconds: number): TickResult {
     s = { ...s, unlocks: { ...s.unlocks, ...skillsResult.unlockDeltas } };
   }
 
-  // ── 2. Mining: produce ores into ore hold (suspended during warp) ──────
-  const inWarp = !!(s.galaxy?.warp);
-  const miningResult = inWarp
-    ? { oreHoldDeltas: {}, newBeltPool: {}, newBeltRespawnAt: {}, autoDeactivated: [] }
-    : tickMining(s, deltaSeconds);
+  // ── 2. Mining: produce ores into ore hold ────────────────────────────────────
+  const miningResult = tickMining(s, deltaSeconds);
 
   {
     // Apply ore hold deltas (capped by capacity)
@@ -292,15 +290,8 @@ export function runTick(state: GameState, deltaSeconds: number): TickResult {
   if (s.galaxy?.warp) {
     const travelResult = tickTravel(s.galaxy.warp, nowMs);
     if (travelResult.arrivedAt) {
-      // Arrived — update current system, mark visited, clear available belt targets
+      // Arrived — update current system, mark visited
       const arrivedId = travelResult.arrivedAt;
-      const arrivedSystem = getSystemById(s.galaxy.seed, arrivedId);
-      const systemBeltIds = getSystemBeltIds(arrivedSystem);
-      // Build fresh target map: all belts in new system default to false
-      const freshTargets: Record<string, boolean> = {};
-      for (const beltId of systemBeltIds) {
-        freshTargets[beltId] = false;
-      }
       s = {
         ...s,
         galaxy: {
@@ -308,16 +299,6 @@ export function runTick(state: GameState, deltaSeconds: number): TickResult {
           currentSystemId: arrivedId,
           warp: null,
           visitedSystems: { ...s.galaxy.visitedSystems, [arrivedId]: true },
-        },
-        systems: {
-          ...s.systems,
-          mining: {
-            ...s.systems.mining,
-            targets: freshTargets,
-            // Clear belt pool + respawn state for the new system (fresh discovery)
-            beltPool: {},
-            beltRespawnAt: {},
-          },
         },
       };
     } else if (travelResult.newWarp) {
@@ -335,9 +316,80 @@ export function runTick(state: GameState, deltaSeconds: number): TickResult {
         fleet: fleetResult.newFleetState,
       },
     };
+
+    // ── FC-1b: Apply fleet mining oreDeltas to fleet cargoHolds ──────────
+    if (Object.keys(fleetResult.oreDeltas).length > 0) {
+      const newFleets = { ...s.systems.fleet.fleets };
+      for (const [fleetId, fleetOreDelta] of Object.entries(fleetResult.oreDeltas)) {
+        const fleet = newFleets[fleetId];
+        if (!fleet) continue;
+        const capacity = computeFleetCargoCapacity(fleet, s.systems.fleet.ships);
+        const currentUsed = Object.values(fleet.cargoHold).reduce((a, v) => a + v, 0);
+        let spaceLeft = Math.max(0, capacity - currentUsed);
+        const newCargoHold = { ...fleet.cargoHold };
+        for (const [resourceId, amount] of Object.entries(fleetOreDelta)) {
+          const clamped = Math.min(amount, spaceLeft);
+          if (clamped <= 0) continue;
+          newCargoHold[resourceId] = (newCargoHold[resourceId] ?? 0) + clamped;
+          spaceLeft -= clamped;
+        }
+        newFleets[fleetId] = { ...fleet, cargoHold: newCargoHold };
+      }
+      s = { ...s, systems: { ...s.systems, fleet: { ...s.systems.fleet, fleets: newFleets } } };
+    }
+
+    // ── FC-1e: Auto-haul — issue route to HQ when fleet cargo ≥ 80% ─────
+    {
+      const homeSystemId = s.systems.factions.homeStationSystemId;
+      if (homeSystemId) {
+        for (const [fleetId, fleet] of Object.entries(s.systems.fleet.fleets)) {
+          if (fleet.fleetOrder) continue;
+          if (fleet.currentSystemId === homeSystemId) continue;
+          const capacity = computeFleetCargoCapacity(fleet, s.systems.fleet.ships);
+          if (capacity <= 0) continue;
+          const used = Object.values(fleet.cargoHold).reduce((a, v) => a + v, 0);
+          if (used < capacity * 0.8) continue;
+          const hauled = issueFleetGroupOrder(s, fleetId, homeSystemId);
+          if (hauled) s = hauled;
+        }
+      }
+    }
+
     // ── 8a. Advance autonomous fleet orders (one hop per tick) ──────────
     const orderResult = advanceFleetOrders(s);
     s = orderResult.newState;
+
+    // ── FC-1e: Dump cargoHold when fleet is stationary at Corp HQ ────────
+    {
+      const homeSystemId = s.systems.factions.homeStationSystemId;
+      if (homeSystemId) {
+        let newResources = s.resources;
+        let newFleets = s.systems.fleet.fleets;
+        let dumpHappened = false;
+        for (const [fleetId, fleet] of Object.entries(newFleets)) {
+          if (fleet.currentSystemId !== homeSystemId) continue;
+          if (fleet.fleetOrder) continue; // still in transit
+          const held = Object.entries(fleet.cargoHold).filter(([, v]) => v > 0);
+          if (held.length === 0) continue;
+          if (!dumpHappened) {
+            newResources = { ...newResources };
+            newFleets    = { ...newFleets };
+            dumpHappened = true;
+          }
+          for (const [resourceId, amount] of held) {
+            newResources[resourceId] = (newResources[resourceId] ?? 0) + amount;
+          }
+          newFleets[fleetId] = { ...fleet, cargoHold: {} };
+        }
+        if (dumpHappened) {
+          s = {
+            ...s,
+            resources: newResources,
+            systems: { ...s.systems, fleet: { ...s.systems.fleet, fleets: newFleets } },
+          };
+        }
+      }
+    }
 
     // ── 8b. Trade route automation (buy/sell + dispatch) ────────────────
     s = tickTradeRoutes(s);

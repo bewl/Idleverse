@@ -1,4 +1,4 @@
-﻿import { create } from 'zustand';
+import { create } from 'zustand';
 import type { GameState, OfflineSummary, ManufacturingJob, SkillQueueEntry, ReprocessingJob, FleetActivity, PilotTrainingFocus } from '@/types/game.types';
 import type { FactionId, RouteSecurityFilter } from '@/types/faction.types';
 import { createInitialState } from './initialState';
@@ -101,6 +101,8 @@ interface GameStore {
 
   // Pilot
   renamePilot: (name: string) => void;
+  /** Rename the corp. Preferred over the legacy renamePilot. */
+  renameCorpName: (name: string) => void;
 
   // Fleet
   deployShip: (hullId: string, customName?: string) => boolean;
@@ -148,6 +150,8 @@ interface GameStore {
   adjustReputation: (factionId: FactionId, delta: number) => void;
   dockAtStation: (stationId: string) => boolean;
   undockFromStation: () => void;
+  /** Register a station as Corp HQ. Stores both the station ID and its system ID for fast lookup. */
+  setHomeStation: (stationId: string, systemId: string) => void;
 
   // Galaxy / Travel
   /** Begin a warp jump to another system. Returns false if already in warp or same system. */
@@ -761,7 +765,14 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const { state } = get();
     const trimmed = name.trim().slice(0, 32);
     if (!trimmed) return;
-    set({ state: { ...state, pilot: { ...state.pilot, name: trimmed } } });
+    set({ state: { ...state, corp: { ...state.corp, name: trimmed } } });
+  },
+
+  renameCorpName: (name) => {
+    const { state } = get();
+    const trimmed = name.trim().slice(0, 40);
+    if (!trimmed) return;
+    set({ state: { ...state, corp: { ...state.corp, name: trimmed } } });
   },
 
   // ── Fleet ────────────────────────────────────────────────────────────────
@@ -1176,6 +1187,27 @@ export const useGameStore = create<GameStore>((set, get) => ({
     });
   },
 
+  setHomeStation: (stationId, systemId) => {
+    const { state } = get();
+    const factions = state.systems.factions;
+    const existing = factions.registeredStations ?? [];
+    const registered = existing.includes(stationId) ? existing : [...existing, stationId];
+    set({
+      state: {
+        ...state,
+        systems: {
+          ...state.systems,
+          factions: {
+            ...factions,
+            homeStationId: stationId,
+            homeStationSystemId: systemId,
+            registeredStations: registered,
+          },
+        },
+      },
+    });
+  },
+
   // ── Galaxy / Travel ─────────────────────────────────────────────────────
 
   initiateWarp: (toSystemId) => {
@@ -1416,13 +1448,15 @@ export const useGameStore = create<GameStore>((set, get) => ({
       patchedSystems.manufacturing = { ...patchedSystems.manufacturing, copyJobs: [] };
     }
 
-    // Patch fleet Phase 4 — discoveries feed, isScanning flag on every fleet
+    // Patch fleet Phase 4 — discoveries feed, isScanning flag on every fleet; FC-1b cargoHold
     if (!patchedSystems.fleet.discoveries) {
       patchedSystems.fleet = { ...patchedSystems.fleet, discoveries: [] };
     }
     const patchedFleets4: typeof patchedSystems.fleet.fleets = {};
     for (const [id, fleet] of Object.entries(patchedSystems.fleet.fleets)) {
-      patchedFleets4[id] = fleet.isScanning === undefined ? { ...fleet, isScanning: false } : fleet;
+      let f = fleet.isScanning === undefined ? { ...fleet, isScanning: false } : fleet;
+      if (f.cargoHold === undefined) f = { ...f, cargoHold: {} };
+      patchedFleets4[id] = f;
     }
     patchedSystems.fleet = { ...patchedSystems.fleet, fleets: patchedFleets4 };
 
@@ -1430,8 +1464,17 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const recomputedModifiers = buildModifiersFromSkills(patchedSystems.skills);
     const recomputedUnlocks   = buildUnlocksFromSkills(patchedSystems.skills);
 
+    // Migrate pilot → corp (FC-1G): old saves had state.pilot, new saves use state.corp
+    const migratedCorp: typeof defaults.corp = save.state.corp ?? {
+      name:      (save.state as GameState & { pilot?: { name?: string; birthdate?: number } }).pilot?.name ?? defaults.corp.name,
+      foundedAt: (save.state as GameState & { pilot?: { name?: string; birthdate?: number; foundedAt?: number } }).pilot?.foundedAt
+        ?? (save.state as GameState & { pilot?: { birthdate?: number } }).pilot?.birthdate
+        ?? defaults.corp.foundedAt,
+    };
+
     const patchedState: GameState = {
       ...save.state,
+      corp:      migratedCorp,
       systems:   patchedSystems,
       unlocks:   { ...patchedUnlocks,  ...recomputedUnlocks },
       modifiers: { ...save.state.modifiers, ...recomputedModifiers },

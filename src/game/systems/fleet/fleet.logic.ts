@@ -1,8 +1,28 @@
 import type { GameState, ShipInstance, FleetActivity, PlayerFleet, ShipRole, FleetDoctrine } from '@/types/game.types';
 import { HULL_DEFINITIONS, MODULE_DEFINITIONS, DOCTRINE_DEFINITIONS } from './fleet.config';
 import { getPilotMiningBonus, getPilotCombatBonus, getPilotHaulingBonus, getPilotMoraleMultiplier, canPilotFlyShip } from './pilot.logic';
+import { BASE_SHIP_CARGO_M3 } from '@/game/balance/constants';
 
 // ─── Ship deployment ───────────────────────────────────────────────────────
+
+/**
+ * Total cargo capacity in m³ for a fleet, summed from each ship's hull.
+ * Uses BASE_SHIP_CARGO_M3 × hull.baseCargoMultiplier per ship.
+ */
+export function computeFleetCargoCapacity(
+  fleet: PlayerFleet,
+  ships: Record<string, ShipInstance>,
+): number {
+  let total = 0;
+  for (const shipId of fleet.shipIds) {
+    const ship = ships[shipId];
+    if (!ship) continue;
+    const hull = HULL_DEFINITIONS[ship.shipDefinitionId];
+    if (!hull) continue;
+    total += BASE_SHIP_CARGO_M3 * hull.baseCargoMultiplier;
+  }
+  return total;
+}
 
 /**
  * Deploy a ship from resources into the active fleet.
@@ -406,6 +426,7 @@ export function createPlayerFleet(
     isScanning: false,
     maxJumpRangeLY: computeFleetJumpRange(state, shipIds),
     doctrine: 'balanced',
+    cargoHold: {},
   };
 
   // Tag all ships with the fleet IDI wan

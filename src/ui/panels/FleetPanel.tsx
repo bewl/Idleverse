@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useGameStore } from '@/stores/gameStore';
 import type { PilotInstance, ShipInstance, PilotTrainingFocus, ShipRole, FleetDoctrine } from '@/types/game.types';
 import { HULL_DEFINITIONS, PILOT_SKILL_FOCUS_TREES, DOCTRINE_DEFINITIONS, MODULE_DEFINITIONS } from '@/game/systems/fleet/fleet.config';
@@ -8,12 +8,15 @@ import {
   getPilotMoraleMultiplier, pilotTrainingEta, canPilotFlyShip, getPilotDisplayState,
 } from '@/game/systems/fleet/pilot.logic';
 import { formatTrainingEta } from '@/game/systems/skills/skills.logic';
-import { getTotalFleetPayroll, suggestDoctrine, getDoctrineRequirementsMet } from '@/game/systems/fleet/fleet.logic';
+import { getTotalFleetPayroll, suggestDoctrine, getDoctrineRequirementsMet, computeFleetCargoCapacity } from '@/game/systems/fleet/fleet.logic';
 import { getAliveNpcGroupsInSystem } from '@/game/systems/combat/combat.logic';
 import { StarfieldBackground } from '@/ui/effects/StarfieldBackground';
 import { generateGalaxy } from '@/game/galaxy/galaxy.gen';
 import type { RouteSecurityFilter } from '@/types/faction.types';
 import { NavTag } from '@/ui/components/NavTag';
+import { useUiStore } from '@/stores/uiStore';
+
+const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V'];
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -97,6 +100,7 @@ function FleetCard({
   const cancelCombat     = useGameStore(s => s.cancelCombatOrder);
   const issueGroupOrder  = useGameStore(s => s.issueFleetGroupOrder);
   const cancelGroupOrder = useGameStore(s => s.cancelFleetGroupOrder);
+  const setFleetScanning = useGameStore(s => s.setFleetScanning);
 
   const [editingName,  setEditingName]  = useState(false);
   const [nameInput,    setNameInput]    = useState('');
@@ -119,7 +123,21 @@ function FleetCard({
   const fleetColor = FLEET_COLOURS[fleetIdx % FLEET_COLOURS.length];
 
   const isMoving   = fleet.fleetOrder !== null;
-  const dotColor   = isMoving ? 'bg-cyan-400 animate-pulse' : (fleet.combatOrder ? 'bg-red-400 animate-pulse' : 'bg-emerald-400');
+
+  // Cargo hold
+  const cargoCapacity = computeFleetCargoCapacity(fleet, allShips);
+  const cargoUsed     = Object.values(fleet.cargoHold).reduce((a, v) => a + v, 0);
+  const cargoPct      = cargoCapacity > 0 ? Math.min(1, cargoUsed / cargoCapacity) : 0;
+  const hqSystemId    = state.systems.factions.homeStationSystemId;
+  const canHaulNow    = !isMoving && hqSystemId !== null && hqSystemId !== fleet.currentSystemId && cargoUsed > 0;
+
+  const dotColor   = isMoving
+    ? 'bg-cyan-400 animate-pulse'
+    : fleet.combatOrder
+      ? 'bg-red-400 animate-pulse'
+      : fleet.isScanning
+        ? 'bg-violet-400 animate-pulse'
+        : 'bg-emerald-400';
 
   // Ships in same system that can join
   const joinableShips = Object.values(allShips).filter(
@@ -174,7 +192,25 @@ function FleetCard({
             </div>
           )}
           <div className="flex gap-2 mt-0.5">
-            <NavTag entityType="system" entityId={fleet.currentSystemId} label={galaxy.find(s => s.id === fleet.currentSystemId)?.name ?? fleet.currentSystemId} />
+            <span
+              className="entity-tag"
+              style={{ '--tag-color': '#ffe47a' } as React.CSSProperties}
+              role="button"
+              tabIndex={0}
+              onClick={e => {
+                e.stopPropagation();
+                useUiStore.getState().navigate('system', { entityType: 'fleet', entityId: fleetId });
+              }}
+              onKeyDown={e => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.stopPropagation();
+                  useUiStore.getState().navigate('system', { entityType: 'fleet', entityId: fleetId });
+                }
+              }}
+              title="View fleet in star system"
+            >
+              {galaxy.find(s => s.id === fleet.currentSystemId)?.name ?? fleet.currentSystemId}
+            </span>
             <span className="text-[9px] text-slate-600">·</span>
             <span className="text-[9px] text-slate-500">{fleetShips.length} ship{fleetShips.length !== 1 ? 's' : ''}</span>
             {isMoving && <span className="text-[9px] text-cyan-400/70">· In transit</span>}
@@ -182,6 +218,9 @@ function FleetCard({
               <span className={`text-[9px] ${fleet.combatOrder.type === 'patrol' ? 'text-amber-400/70' : 'text-red-400/70'}`}>
                 · {fleet.combatOrder.type === 'patrol' ? '⚔ Patrol' : '🎯 Raid'}
               </span>
+            )}
+            {!isMoving && !fleet.combatOrder && fleet.isScanning && (
+              <span className="text-[9px] text-violet-400/80">· ◉ Scanning</span>
             )}
           </div>
         </div>
@@ -209,6 +248,89 @@ function FleetCard({
           style={{ borderColor: fleetColor + '22' }}
           onClick={e => e.stopPropagation()}
         >
+          {/* Cargo hold */}
+          {cargoCapacity > 0 && (
+            <div className="flex flex-col gap-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[8px] uppercase tracking-widest text-slate-500">Cargo Hold</span>
+                <span className="text-[9px] font-mono text-slate-400">
+                  {Math.round(cargoUsed).toLocaleString()} / {Math.round(cargoCapacity).toLocaleString()} m³
+                </span>
+              </div>
+              <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all ${
+                    cargoPct >= 1 ? 'bg-rose-500' : cargoPct >= 0.8 ? 'bg-amber-400' : 'bg-emerald-500'
+                  }`}
+                  style={{ width: `${cargoPct * 100}%` }}
+                />
+              </div>
+              {Object.entries(fleet.cargoHold).filter(([, v]) => v > 0).length > 0 && (
+                <div className="flex flex-wrap gap-x-3 gap-y-0.5">
+                  {Object.entries(fleet.cargoHold)
+                    .filter(([, v]) => v > 0)
+                    .map(([resId, qty]) => (
+                      <span key={resId} className="text-[9px] text-slate-400">
+                        <span className="text-slate-300">{Math.round(qty).toLocaleString()}</span> {resId}
+                      </span>
+                    ))}
+                </div>
+              )}
+              {canHaulNow && (
+                <button
+                  onClick={() => {
+                    if (hqSystemId) issueGroupOrder(fleetId, hqSystemId);
+                  }}
+                  className="text-[9px] px-2 py-0.5 rounded border border-amber-400/40 text-amber-300/80 hover:border-amber-300 hover:text-amber-200 self-start"
+                >
+                  ↵ Haul to HQ
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Current Activity */}
+          <div className="flex flex-col gap-1.5">
+            <span className="text-[8px] uppercase tracking-widest text-slate-500">Current Activity</span>
+            <div className="flex items-center gap-2 flex-wrap">
+              {isMoving && (
+                <span className="text-[9px] px-2 py-0.5 rounded bg-cyan-900/40 text-cyan-300 border border-cyan-400/25">
+                  ▶ In transit → <NavTag entityType="system" entityId={fleet.fleetOrder?.destinationSystemId ?? ''} label={galaxy.find(s => s.id === fleet.fleetOrder?.destinationSystemId)?.name ?? fleet.fleetOrder?.destinationSystemId ?? ''} />
+                </span>
+              )}
+              {!isMoving && fleet.combatOrder && (
+                <span className={`text-[9px] px-2 py-0.5 rounded border ${
+                  fleet.combatOrder.type === 'patrol'
+                    ? 'bg-amber-900/40 text-amber-300 border-amber-400/25'
+                    : 'bg-red-900/40 text-red-300 border-red-400/25'
+                }`}>
+                  {fleet.combatOrder.type === 'patrol' ? '⚔ Patrolling' : '🎯 Raiding'}
+                </span>
+              )}
+              {!isMoving && !fleet.combatOrder && fleet.isScanning && (
+                <span className="text-[9px] px-2 py-0.5 rounded bg-violet-900/40 text-violet-300 border border-violet-400/25">
+                  ◉ Scanning <NavTag entityType="system" entityId={fleet.currentSystemId} label={galaxy.find(s => s.id === fleet.currentSystemId)?.name ?? fleet.currentSystemId} />
+                </span>
+              )}
+              {!isMoving && !fleet.combatOrder && !fleet.isScanning && (
+                <span className="text-[9px] text-slate-500">Idle</span>
+              )}
+            </div>
+            {/* Scan toggle */}
+            {!isMoving && (
+              <button
+                onClick={() => setFleetScanning(fleetId, !fleet.isScanning)}
+                className={`text-[9px] px-2 py-0.5 rounded border self-start transition-all ${
+                  fleet.isScanning
+                    ? 'border-violet-400/30 text-violet-300/80 hover:text-violet-200 hover:border-violet-300'
+                    : 'border-slate-600 text-slate-400 hover:border-violet-400/40 hover:text-violet-300'
+                }`}
+              >
+                {fleet.isScanning ? '▫ Stop Scanning' : '◉ Start Scanning'}
+              </button>
+            )}
+          </div>
+
           {/* Doctrine selector */}
           <div className="flex flex-col gap-1">
             <span className="text-[8px] uppercase tracking-widest text-slate-500">Doctrine</span>
@@ -479,8 +601,12 @@ function FleetCard({
 
 // ─── Fleets tab ─────────────────────────────────────────────────────────────
 
-function FleetsTab({ state }: { state: ReturnType<typeof useGameStore.getState>['state'] }) {
+function FleetsTab({ state, focusId }: { state: ReturnType<typeof useGameStore.getState>['state']; focusId?: string | null }) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (focusId) setExpandedId(focusId);
+  }, [focusId]);
   const createFleet = useGameStore(s => s.createPlayerFleet);
 
   const allShips  = state.systems.fleet.ships;
@@ -797,15 +923,57 @@ function PilotCard({
             )}
           </div>
 
-          {/* Unassign button */}
-          {pilot.assignedShipId && (
-            <button
-              onClick={unassignShip}
-              className="mt-1 text-[9px] text-red-400/70 hover:text-red-300 border border-red-400/20 rounded px-2 py-0.5 self-start"
-            >
-              Unassign from ship
-            </button>
-          )}
+          {/* Pilot ↔ Ship assignment */}
+          {pilot.assignedShipId ? (() => {
+            const assignedShip = state.systems.fleet.ships[pilot.assignedShipId];
+            const assignedHull = assignedShip ? HULL_DEFINITIONS[assignedShip.shipDefinitionId] : null;
+            return (
+              <div className="flex items-center gap-2">
+                <span className="text-[9px] text-slate-400">
+                  Piloting: <span className="text-slate-200">{assignedShip?.customName ?? assignedHull?.name ?? pilot.assignedShipId}</span>
+                </span>
+                <button
+                  onClick={unassignShip}
+                  className="text-[9px] text-red-400/70 hover:text-red-300 border border-red-400/20 rounded px-2 py-0.5"
+                >
+                  Unassign
+                </button>
+              </div>
+            );
+          })() : (() => {
+            const flyableShips = Object.values(state.systems.fleet.ships).filter(s => {
+              if (s.assignedPilotId) return false;
+              const hull = HULL_DEFINITIONS[s.shipDefinitionId];
+              return canPilotFlyShip(pilot, hull?.requiredPilotSkill);
+            });
+            const allUnpilotedShips = Object.values(state.systems.fleet.ships).filter(s => !s.assignedPilotId);
+            return (
+              <div className="flex flex-col gap-1">
+                <span className="text-[8px] uppercase tracking-widest text-slate-500">Assign to Ship</span>
+                {flyableShips.length > 0 ? (
+                  <div className="flex flex-col gap-1">
+                    {flyableShips.map(s => {
+                      const hull = HULL_DEFINITIONS[s.shipDefinitionId];
+                      return (
+                        <button
+                          key={s.id}
+                          onClick={() => assignShip(pilot.id, s.id)}
+                          className="flex items-center gap-2 text-[9px] text-slate-300 hover:text-cyan-300 px-2 py-0.5 rounded border border-slate-700/30 hover:border-cyan-400/30 bg-slate-800/30 text-left"
+                        >
+                          <span className="text-[8px] px-1 rounded border border-violet-400/30 text-violet-400">{hull?.shipClass ?? '?'}</span>
+                          {s.customName ?? hull?.name ?? s.shipDefinitionId}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : allUnpilotedShips.length > 0 ? (
+                  <span className="text-[9px] text-amber-400/60">No ships meet this pilot's skill requirements</span>
+                ) : (
+                  <span className="text-[9px] text-slate-600">No unpiloted ships available</span>
+                )}
+              </div>
+            );
+          })()}
         </div>
       )}
     </div>
@@ -877,9 +1045,19 @@ function ShipCard({ ship, state, expanded, onToggle }: {
               </span>
             )}
           </div>
-          <span className="text-[9px] text-slate-500">
-            {assignedPilot ? assignedPilot.name : 'No pilot'} · {ship.activity}
-          </span>
+          <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
+            <span className="text-[9px] text-slate-500">
+              {assignedPilot ? assignedPilot.name : <span className="text-amber-400/70">No pilot</span>} · {ship.activity}
+            </span>
+            {hull?.requiredPilotSkill && (
+              <span
+                className="text-[8px] px-1 rounded border border-slate-700/40 text-slate-600"
+                title={`Requires ${SKILL_DEFINITIONS[hull.requiredPilotSkill.skillId]?.name ?? hull.requiredPilotSkill.skillId} ${ROMAN[hull.requiredPilotSkill.minLevel]}`}
+              >
+                🎓 {SKILL_DEFINITIONS[hull.requiredPilotSkill.skillId]?.name ?? hull.requiredPilotSkill.skillId} {ROMAN[hull.requiredPilotSkill.minLevel]}
+              </span>
+            )}
+          </div>
         </div>
         <div className="text-right">
           <div className="text-[9px] text-slate-500">
@@ -1018,19 +1196,28 @@ function ShipCard({ ship, state, expanded, onToggle }: {
           )}
 
           {/* Pilot assignment */}
-          {!assignedPilot && availablePilots.length > 0 && (
+          {!assignedPilot && (
             <div className="flex flex-col gap-1">
               <span className="text-[8px] uppercase tracking-widest text-slate-500">Assign Pilot</span>
-              {availablePilots.map(p => (
-                <button
-                  key={p.id}
-                  onClick={() => assignPilot(p.id, ship.id)}
-                  className="flex items-center gap-2 text-[9px] text-slate-300 hover:text-cyan-300 px-2 py-0.5 rounded border border-slate-700/30 hover:border-cyan-400/30 bg-slate-800/30 text-left"
-                >
-                  <PilotPortrait seed={p.portraitSeed} size={16} />
-                  {p.name}
-                </button>
-              ))}
+              {hull?.requiredPilotSkill && (
+                <span className="text-[9px] text-slate-600">
+                  Requires: <NavTag entityType="skill" entityId={hull.requiredPilotSkill.skillId} label={`${SKILL_DEFINITIONS[hull.requiredPilotSkill.skillId]?.name ?? hull.requiredPilotSkill.skillId} ${ROMAN[hull.requiredPilotSkill.minLevel]}`} />
+                </span>
+              )}
+              {availablePilots.length > 0 ? (
+                availablePilots.map(p => (
+                  <button
+                    key={p.id}
+                    onClick={() => assignPilot(p.id, ship.id)}
+                    className="flex items-center gap-2 text-[9px] text-slate-300 hover:text-cyan-300 px-2 py-0.5 rounded border border-slate-700/30 hover:border-cyan-400/30 bg-slate-800/30 text-left"
+                  >
+                    <PilotPortrait seed={p.portraitSeed} size={16} />
+                    {p.name}
+                  </button>
+                ))
+              ) : (
+                <span className="text-[9px] text-amber-400/60">No pilots meet the skill requirement</span>
+              )}
             </div>
           )}
 
@@ -1241,7 +1428,26 @@ function OperationsTab({ state }: { state: ReturnType<typeof useGameStore.getSta
 export function FleetPanel() {
   const [activeTab, setActiveTab] = useState<Tab>('fleets');
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [focusFleetId, setFocusFleetId] = useState<string | null>(null);
   const state = useGameStore(s => s.state);
+
+  const focusTarget = useUiStore(s => s.focusTarget);
+  const clearFocus  = useUiStore(s => s.clearFocus);
+
+  useEffect(() => {
+    if (!focusTarget) return;
+    if (focusTarget.entityType === 'fleet') {
+      setActiveTab('fleets');
+      setFocusFleetId(focusTarget.entityId);
+    } else if (focusTarget.entityType === 'pilot') {
+      setActiveTab('pilots');
+      setExpandedId(focusTarget.entityId);
+    } else if (focusTarget.entityType === 'ship') {
+      setActiveTab('ships');
+      setExpandedId(focusTarget.entityId);
+    } else { return; }
+    clearFocus();
+  }, [focusTarget, clearFocus]);
   const fleet = state.systems.fleet;
 
   const pilots = Object.values(fleet.pilots);
@@ -1292,7 +1498,7 @@ export function FleetPanel() {
 
       {/* Content */}
       <div className="relative z-10 flex-1 overflow-y-auto p-3 flex flex-col gap-2">
-        {activeTab === 'fleets' && <FleetsTab state={state} />}
+        {activeTab === 'fleets' && <FleetsTab state={state} focusId={focusFleetId} />}
 
         {activeTab === 'pilots' && (
           <>

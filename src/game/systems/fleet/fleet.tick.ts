@@ -2,12 +2,17 @@ import type { GameState, PilotInstance, FleetState } from '@/types/game.types';
 import { HULL_DEFINITIONS, MODULE_DEFINITIONS } from './fleet.config';
 import { tickPilotSkillTraining, tickMorale, getPilotMoraleMultiplier, getPilotMiningBonus } from './pilot.logic';
 import { IDLE_REPAIR_RATE_PER_SEC } from '@/game/balance/constants';
+import { ORE_BELTS } from '@/game/systems/mining/mining.config';
 
 // ─── Tick result ───────────────────────────────────────────────────────────
 
 export interface FleetTickResult {
-  /** Additional ore deltas accumulated from fleet mining ships this tick (resourceId → units). */
-  oreDeltas: Record<string, number>;
+  /**
+   * Ore deltas from fleet mining ships this tick.
+   * Outer key = fleetId, inner key = resourceId → ore units produced.
+   * Apply each fleet's deltas to its cargoHold in tickRunner.
+   */
+  oreDeltas: Record<string, Record<string, number>>;
   /** Updated fleet state (pilot skills, morale, statuses). */
   newFleetState: FleetState;
 }
@@ -38,7 +43,10 @@ function getModuleBonus(ship: import('@/types/game.types').ShipInstance, effectK
  */
 export function tickFleet(state: GameState, deltaSeconds: number): FleetTickResult {
   const fleet = state.systems.fleet;
-  const oreDeltas: Record<string, number> = {};
+  const oreDeltas: Record<string, Record<string, number>> = {};
+
+  // Corp-wide mining skill multiplier (Mining, Astrogeology skills etc.)
+  const corpSkillMult = 1 + (state.modifiers['mining-yield'] ?? 0);
 
   const newPilots: Record<string, PilotInstance> = {};
 
@@ -89,19 +97,26 @@ export function tickFleet(state: GameState, deltaSeconds: number): FleetTickResu
     // otherwise contribute to nothing (belt assignment required for fleet ships).
     if (!ship.assignedBeltId) continue;
 
+    const beltDef = ORE_BELTS[ship.assignedBeltId];
+    if (!beltDef) continue;
+
     const hullMining   = hull.baseMiningBonus;
     const moduleMining = getModuleBonus(ship, 'mining-yield');
     const pilotMining  = getPilotMiningBonus(pilot);
     const moraleMult   = getPilotMoraleMultiplier(pilot);
 
-    // Fleet mining yield expressed as a fractional unit scalar per second.
-    // The actual ore resource IDs are resolved by the belt definitions in mining.tick;
-    // this value will be integrated there. We use a synthetic key based on beltId
-    // to pass the multiplier through to the mining tick.
-    const yieldPerSecond = (hullMining + moduleMining + pilotMining) * moraleMult * deltaSeconds;
+    // Total yield multiplier for this ship this tick
+    const yieldMultiplier = (hullMining + moduleMining + pilotMining) * moraleMult * corpSkillMult * deltaSeconds;
 
-    const key = `fleet:${ship.assignedBeltId}`;
-    oreDeltas[key] = (oreDeltas[key] ?? 0) + yieldPerSecond;
+    // Resolve actual ore outputs from belt definition
+    const fleetId = ship.fleetId ?? 'standalone';
+    if (!oreDeltas[fleetId]) oreDeltas[fleetId] = {};
+    for (const output of beltDef.outputs) {
+      const amount = output.baseRate * yieldMultiplier;
+      if (amount > 0) {
+        oreDeltas[fleetId][output.resourceId] = (oreDeltas[fleetId][output.resourceId] ?? 0) + amount;
+      }
+    }
   }
 
   // ── Passive idle repair — ships on idle slowly recover hull damage ────────
