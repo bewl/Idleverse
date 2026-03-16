@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useGameStore } from '@/stores/gameStore';
 import type { PilotInstance, ShipInstance, PilotTrainingFocus, ShipRole, FleetDoctrine } from '@/types/game.types';
-import { HULL_DEFINITIONS, PILOT_SKILL_FOCUS_TREES, DOCTRINE_DEFINITIONS } from '@/game/systems/fleet/fleet.config';
+import { HULL_DEFINITIONS, PILOT_SKILL_FOCUS_TREES, DOCTRINE_DEFINITIONS, MODULE_DEFINITIONS } from '@/game/systems/fleet/fleet.config';
 import { SKILL_DEFINITIONS } from '@/game/systems/skills/skills.config';
 import {
   getPilotMiningBonus, getPilotCombatBonus, getPilotHaulingBonus,
@@ -11,6 +11,8 @@ import { formatTrainingEta } from '@/game/systems/skills/skills.logic';
 import { getTotalFleetPayroll, suggestDoctrine, getDoctrineRequirementsMet } from '@/game/systems/fleet/fleet.logic';
 import { getAliveNpcGroupsInSystem } from '@/game/systems/combat/combat.logic';
 import { StarfieldBackground } from '@/ui/effects/StarfieldBackground';
+import { generateGalaxy } from '@/game/galaxy/galaxy.gen';
+import type { RouteSecurityFilter } from '@/types/faction.types';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -91,10 +93,16 @@ function FleetCard({
   const moveFleet       = useGameStore(s => s.movePlayerFleet);
   const issuePatrol     = useGameStore(s => s.issuePatrolOrder);
   const issueRaid       = useGameStore(s => s.issueCombatRaidOrder);
-  const cancelCombat    = useGameStore(s => s.cancelCombatOrder);
+  const cancelCombat     = useGameStore(s => s.cancelCombatOrder);
+  const issueGroupOrder  = useGameStore(s => s.issueFleetGroupOrder);
+  const cancelGroupOrder = useGameStore(s => s.cancelFleetGroupOrder);
 
-  const [editingName, setEditingName] = useState(false);
-  const [nameInput, setNameInput]     = useState('');
+  const [editingName,  setEditingName]  = useState(false);
+  const [nameInput,    setNameInput]    = useState('');
+  const [destSystemId, setDestSystemId] = useState('');
+  const [secFilter,    setSecFilter]    = useState<RouteSecurityFilter>('shortest');
+
+  const galaxy = useMemo(() => generateGalaxy(state.galaxy.seed), [state.galaxy.seed]);
 
   const fleet = state.systems.fleet.fleets[fleetId];
   if (!fleet) return null;
@@ -380,6 +388,58 @@ function FleetCard({
             );
           })()}
 
+          {/* Navigation */}
+          <div className="flex flex-col gap-1.5">
+            <div className="flex items-center justify-between">
+              <span className="text-[8px] uppercase tracking-widest text-slate-500">Navigation</span>
+              {isMoving && (
+                <span className="text-[8px] font-mono text-cyan-400/70">
+                  → {galaxy.find(s => s.id === fleet.fleetOrder?.destinationSystemId)?.name ?? fleet.fleetOrder?.destinationSystemId}
+                </span>
+              )}
+            </div>
+            {isMoving ? (
+              <button
+                onClick={() => cancelGroupOrder(fleetId)}
+                className="text-[9px] px-2 py-0.5 rounded border border-red-400/30 text-red-300/70 hover:border-red-300 hover:text-red-200 self-start"
+              >
+                ✕ Cancel movement
+              </button>
+            ) : (
+              <div className="flex flex-col gap-1">
+                <div className="flex gap-1">
+                  <select
+                    value={destSystemId}
+                    onChange={e => setDestSystemId(e.target.value)}
+                    className="flex-1 text-[9px] bg-slate-900/60 border border-slate-700/40 rounded px-1.5 py-0.5 text-slate-400"
+                  >
+                    <option value="">— destination —</option>
+                    {galaxy.filter(s => s.id !== fleet.currentSystemId).map(sys => (
+                      <option key={sys.id} value={sys.id}>{sys.name} [{sys.security}]</option>
+                    ))}
+                  </select>
+                  <select
+                    value={secFilter}
+                    onChange={e => setSecFilter(e.target.value as RouteSecurityFilter)}
+                    className="text-[9px] bg-slate-900/60 border border-slate-700/40 rounded px-1.5 py-0.5 text-slate-400"
+                  >
+                    <option value="shortest">Shortest</option>
+                    <option value="safest">Safest</option>
+                    <option value="avoid-null">Avoid null</option>
+                    <option value="avoid-low">Avoid low</option>
+                  </select>
+                </div>
+                <button
+                  disabled={!destSystemId}
+                  onClick={() => { issueGroupOrder(fleetId, destSystemId, secFilter); setDestSystemId(''); }}
+                  className="text-[9px] px-2 py-0.5 rounded border border-cyan-400/30 text-cyan-300/70 hover:border-cyan-300 hover:text-cyan-200 disabled:opacity-30 disabled:cursor-not-allowed self-start"
+                >
+                  ▶ Move Fleet
+                </button>
+              </div>
+            )}
+          </div>
+
           {/* Add ship */}
           {joinableShips.length > 0 && fleet.fleetOrder === null && (
             <div className="flex flex-col gap-1">
@@ -547,9 +607,14 @@ function PilotCard({
   onToggle: () => void;
   state: ReturnType<typeof useGameStore.getState>['state'];
 }) {
-  const setFocus = useGameStore(s => s.setPilotTrainingFocus);
-  const assignShip = useGameStore(s => s.assignPilotToShip);
+  const setFocus             = useGameStore(s => s.setPilotTrainingFocus);
+  const assignShip           = useGameStore(s => s.assignPilotToShip);
+  const renamePilot          = useGameStore(s => s.renamePilotCharacter);
+  const removeSkillFromQueue = useGameStore(s => s.removePilotSkillFromQueue);
   const unassignShip = () => assignShip(pilot.id, null);
+
+  const [editingPilotName, setEditingPilotName] = useState(false);
+  const [pilotNameInput,   setPilotNameInput]   = useState('');
 
   const displayState = getPilotDisplayState(pilot, state);
   const eta = pilotTrainingEta(pilot.skills);
@@ -594,6 +659,35 @@ function PilotCard({
           className="px-3 pb-3 border-t border-slate-700/30 pt-2 flex flex-col gap-2"
           onClick={e => e.stopPropagation()}
         >
+          {/* Rename pilot */}
+          <div className="flex items-center gap-2">
+            {editingPilotName ? (
+              <input
+                autoFocus
+                value={pilotNameInput}
+                onChange={e => setPilotNameInput(e.target.value)}
+                onBlur={() => { renamePilot(pilot.id, pilotNameInput.trim() || pilot.name); setEditingPilotName(false); }}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') { renamePilot(pilot.id, pilotNameInput.trim() || pilot.name); setEditingPilotName(false); }
+                  if (e.key === 'Escape') setEditingPilotName(false);
+                }}
+                className="flex-1 text-[11px] font-semibold bg-transparent border-b border-slate-600 focus:outline-none focus:border-cyan-500 text-slate-200"
+                maxLength={32}
+              />
+            ) : (
+              <span
+                className="text-[11px] font-semibold text-slate-200 flex-1 cursor-text hover:text-cyan-300 transition-colors"
+                title="Click to rename"
+                onClick={() => { setPilotNameInput(pilot.name); setEditingPilotName(true); }}
+              >
+                {pilot.name}
+              </span>
+            )}
+            {pilot.isPlayerPilot && (
+              <span className="text-[8px] uppercase tracking-widest text-amber-400/80 border border-amber-400/30 px-1 rounded shrink-0">Dir.</span>
+            )}
+          </div>
+
           <MoraleBar morale={pilot.morale} />
 
           {/* Backstory */}
@@ -625,6 +719,40 @@ function PilotCard({
                     <SkillPips level={level} />
                   </div>
                 ))}
+            </div>
+          )}
+
+          {/* Training queue */}
+          {(pilot.skills.activeSkillId || pilot.skills.queue.length > 0) && (
+            <div className="flex flex-col gap-1">
+              <span className="text-[8px] uppercase tracking-widest text-slate-500">Training Queue</span>
+              {pilot.skills.activeSkillId && (
+                <div className="flex items-center justify-between px-2 py-1 rounded bg-slate-800/40 border border-cyan-400/20">
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse shrink-0" />
+                    <span className="text-[9px] text-cyan-400">
+                      {SKILL_DEFINITIONS[pilot.skills.activeSkillId]?.name ?? pilot.skills.activeSkillId}
+                    </span>
+                  </div>
+                  <span className="text-[8px] font-mono text-cyan-300/60">{formatTrainingEta(pilotTrainingEta(pilot.skills))}</span>
+                </div>
+              )}
+              {pilot.skills.queue.map((entry, i) => (
+                <div key={i} className="flex items-center justify-between px-2 py-1 rounded bg-slate-800/30 border border-violet-400/10">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[8px] text-violet-400/60 w-4 font-mono">{i + 1}.</span>
+                    <span className="text-[9px] text-slate-400">
+                      {SKILL_DEFINITIONS[entry.skillId]?.name ?? entry.skillId}
+                    </span>
+                    <span className="text-[8px] text-slate-600 font-mono">→ {entry.targetLevel}</span>
+                  </div>
+                  <button
+                    onClick={e => { e.stopPropagation(); removeSkillFromQueue(pilot.id, i); }}
+                    className="text-[10px] text-red-500/40 hover:text-red-300 pl-2 transition-colors"
+                    title="Remove from queue"
+                  >✕</button>
+                </div>
+              ))}
             </div>
           )}
 
@@ -696,6 +824,8 @@ function ShipCard({ ship, state, expanded, onToggle }: {
   const addToFleet       = useGameStore(s => s.addShipToFleet);
   const removeFromFleet  = useGameStore(s => s.removeShipFromFleet);
   const createFleet      = useGameStore(s => s.createPlayerFleet);
+  const fitMod           = useGameStore(s => s.fitModule);
+  const removeMod        = useGameStore(s => s.removeModule);
 
   const hull = HULL_DEFINITIONS[ship.shipDefinitionId];
   const assignedPilot = ship.assignedPilotId ? state.systems.fleet.pilots[ship.assignedPilotId] : null;
@@ -777,21 +907,48 @@ function ShipCard({ ship, state, expanded, onToggle }: {
           <div className="flex flex-col gap-1">
             <span className="text-[8px] uppercase tracking-widest text-slate-500">Fitted Modules</span>
             {(['high', 'mid', 'low'] as const).map(slot => {
-              const slots = ship.fittedModules[slot];
+              const filled = ship.fittedModules[slot];
               const maxSlots = hull?.moduleSlots[slot] ?? 0;
+              const availableForSlot = Object.values(MODULE_DEFINITIONS).filter(
+                m => m.slotType === slot && (state.resources[m.id] ?? 0) > 0,
+              );
               return (
-                <div key={slot} className="flex items-center gap-2">
-                  <span className="text-[9px] text-slate-600 w-7 uppercase">{slot}</span>
-                  <div className="flex gap-1">
-                    {Array.from({ length: maxSlots }, (_, i) => (
-                      <div
-                        key={i}
-                        className="text-[8px] px-1.5 py-0.5 rounded border border-slate-700/40 bg-slate-800/30"
-                        style={slots[i] ? { color: '#a78bfa', borderColor: '#a78bfa44' } : {}}
-                      >
-                        {slots[i]?.replace(/-/g, ' ').replace(/\bi\b/, 'I') ?? '—'}
-                      </div>
-                    ))}
+                <div key={slot} className="flex items-start gap-2">
+                  <span className="text-[9px] text-slate-600 w-7 uppercase shrink-0 pt-0.5">{slot}</span>
+                  <div className="flex flex-wrap gap-1">
+                    {Array.from({ length: maxSlots }, (_, i) => {
+                      const modId = filled[i];
+                      return modId ? (
+                        <div
+                          key={i}
+                          className="flex items-center gap-0.5 text-[8px] px-1.5 py-0.5 rounded border border-violet-400/20 bg-slate-800/30"
+                        >
+                          <span className="text-violet-300">
+                            {MODULE_DEFINITIONS[modId]?.name ?? modId.replace(/-/g, ' ')}
+                          </span>
+                          <button
+                            onClick={() => removeMod(ship.id, slot, i)}
+                            className="text-red-500/40 hover:text-red-300 pl-0.5 transition-colors"
+                            title="Remove module"
+                          >✕</button>
+                        </div>
+                      ) : (
+                        <select
+                          key={i}
+                          defaultValue=""
+                          onChange={e => { if (e.target.value) { fitMod(ship.id, slot, e.target.value); e.currentTarget.value = ''; } }}
+                          className="text-[8px] px-1 py-0.5 rounded border border-slate-700/30 bg-slate-800/40 text-slate-500 cursor-pointer"
+                          title="Fit module"
+                        >
+                          <option value="">+ fit…</option>
+                          {availableForSlot.map(m => (
+                            <option key={m.id} value={m.id}>
+                              {m.name} ×{Math.floor(state.resources[m.id] ?? 0)}
+                            </option>
+                          ))}
+                        </select>
+                      );
+                    })}
                   </div>
                 </div>
               );

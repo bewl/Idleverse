@@ -473,20 +473,20 @@ n-levels deep with their own clickable tags.
 | A6 | `src/ui/panels/ResourceBar.tsx` | Replace private `Tooltip`/`HoverCard` with `GameTooltip` + `TT.*`; resource name chips → `NavTag` |
 | A7 | `src/index.css` | Add `.glow-{cyan|amber|violet|emerald|rose}`, `.entity-tag`, `@keyframes focus-pulse`; widen `.tooltip-popup` to 320px |
 
-### Stream B — Missing Action Buttons  *(parallel with Stream A)*
+### Stream B — Missing Action Buttons  ✅ Shipped — March 2026
 
-Store audit identified 8 actions with no UI access:
+> **Files changed:** `src/ui/panels/FleetPanel.tsx`
 
-| # | Action | Panel | Fix |
+| # | Action | Panel | Status |
 |---|---|---|---|
-| B1 | `prioritizeManufacturingJob(index)` | ManufacturingPanel | ↑ button on queue items |
-| B2 | `repairShip(shipId)` | FleetPanel ships | Hull % bar + Repair button |
-| B3 | `setPilotTrainingFocus(pilotId, focus)` | FleetPanel pilots | Focus selector chip per pilot |
-| B4 | `fitModule` / `removeModule` | FleetPanel ships | Slot grid per ship + module selector + ✕ |
-| B5 | `issueFleetGroupOrder` / `cancelFleetGroupOrder` | FleetPanel fleets | Move Fleet button + Cancel in transit |
-| B6 | `removePilotSkillFromQueue` / `renamePilotCharacter` | FleetPanel pilots | ✕ on queue items + inline rename |
-| B7 | `dockAtStation` / `undockFromStation` | SystemPanel | Dock/Undock button when station present |
-| B8 | `refreshRecruitmentOffers()` | FleetPanel pilots | Refresh Offers button |
+| B1 | `prioritizeManufacturingJob(index)` | ManufacturingPanel | ⬜ Deferred to ManufacturingPanel renovation |
+| B2 | `repairShip(shipId)` | FleetPanel ships | ✅ Hull bar + Repair button in ShipCard expanded |
+| B3 | `setPilotTrainingFocus(pilotId, focus)` | FleetPanel pilots | ✅ Focus selector chips in PilotCard expanded |
+| B4 | `fitModule` / `removeModule` | FleetPanel ships | ✅ Slot grid with + fit select and ✕ per module |
+| B5 | `issueFleetGroupOrder` / `cancelFleetGroupOrder` | FleetPanel fleets | ✅ Navigation section: destination + route filter + Move/Cancel |
+| B6 | `removePilotSkillFromQueue` / `renamePilotCharacter` | FleetPanel pilots | ✅ Training queue with ✕ rows + click-to-rename |
+| B7 | `dockAtStation` / `undockFromStation` | SystemPanel | ⬜ Deferred to SystemPanel renovation |
+| B8 | `refreshRecruitmentOffers()` | FleetPanel pilots | ✅ Refresh Offers button in Operations tab |
 
 ### Stream C — DevPanel Complete Overhaul  ✅ Shipped — March 2026
 
