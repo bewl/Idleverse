@@ -89,7 +89,7 @@ function QtySelector({ qty, maxQty, onChange }: { qty: number; maxQty: number; o
               ? 'bg-cyan-800/60 border-cyan-500/70 text-cyan-200'
               : 'bg-slate-800 border-slate-600/50 text-slate-400 hover:border-slate-500 hover:text-slate-300'
           }`}
-        >×{p}</button>
+        >ï¿½{p}</button>
       ))}
       <button
         onClick={() => { const m = Math.max(1, maxQty); onChange(m); setInputVal(String(m)); }}
@@ -234,7 +234,7 @@ function RecipeCard({ recipeId }: { recipeId: string }) {
               : 'bg-slate-800/40 border-slate-700/40 text-slate-600 cursor-not-allowed'
           }`}
         >
-          {isLocked ? 'Locked' : queueLen >= 50 ? 'Queue Full' : `Queue ×${qty}`}
+          {isLocked ? 'Locked' : queueLen >= 50 ? 'Queue Full' : `Queue ï¿½${qty}`}
         </button>
       </div>
     </div>
@@ -282,7 +282,7 @@ function ActiveJobCard({
           <span className={`w-1.5 h-1.5 rounded-full animate-pulse shrink-0 ${isTech2 ? 'bg-orange-400' : 'bg-cyan-400'}`} />
           {isTech2 && <span className="text-[9px] text-orange-400 bg-orange-900/20 border border-orange-700/30 px-1.5 py-0.5 rounded font-mono uppercase">T2</span>}
           <span className={`text-sm font-bold truncate ${isTech2 ? 'text-orange-200' : 'text-cyan-200'}`}>{recipe.name}</span>
-          <span className="text-xs text-slate-600 font-mono shrink-0">×{job.quantity}</span>
+          <span className="text-xs text-slate-600 font-mono shrink-0">ï¿½{job.quantity}</span>
           {job.quantity > 1 && (
             <span className="text-xs text-slate-500 font-mono">{unitsDone}/{job.quantity} done</span>
           )}
@@ -375,7 +375,7 @@ function CopyJobCard({ job, researchSpeed }: { job: CopyJob; researchSpeed: numb
         <div className="flex items-center gap-2 min-w-0">
           <span className="w-1.5 h-1.5 rounded-full bg-teal-400 animate-pulse shrink-0" />
           <span className="text-xs font-bold text-teal-200 truncate">Copying: {recipeName}</span>
-          <span className="text-[9px] text-slate-500 font-mono shrink-0">×{job.runs} runs BPC</span>
+          <span className="text-[9px] text-slate-500 font-mono shrink-0">ï¿½{job.runs} runs BPC</span>
         </div>
         <button
           onClick={() => cancelCopyJob(job.id)}
@@ -491,19 +491,19 @@ function BlueprintCard({ blueprint }: { blueprint: Blueprint }) {
           {researchingThis && (
             <div className="flex items-center gap-2 text-xs text-violet-300/70">
               <span className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse shrink-0" />
-              <span className="font-mono">Research in progress — {Math.round((researchingThis.progress / researchingThis.totalTime) * 100)}%</span>
+              <span className="font-mono">Research in progress ï¿½ {Math.round((researchingThis.progress / researchingThis.totalTime) * 100)}%</span>
             </div>
           )}
           {copyingThis && (
             <div className="flex items-center gap-2 text-xs text-teal-300/70 mt-0.5">
               <span className="w-1.5 h-1.5 rounded-full bg-teal-400 animate-pulse shrink-0" />
-              <span className="font-mono">Copy in progress — {Math.round((copyingThis.progress / copyingThis.totalTime) * 100)}%</span>
+              <span className="font-mono">Copy in progress ï¿½ {Math.round((copyingThis.progress / copyingThis.totalTime) * 100)}%</span>
             </div>
           )}
         </div>
       )}
 
-      {/* Actions — originals only */}
+      {/* Actions ï¿½ originals only */}
       {isOriginal && (
         <div className="px-3 py-2 flex items-center gap-2 flex-wrap" style={{ background: 'rgba(0,0,0,0.1)' }}>
           {/* Research button */}
@@ -513,7 +513,7 @@ function BlueprintCard({ blueprint }: { blueprint: Blueprint }) {
               onClick={() => researchBp(blueprint.id)}
               title={
                 scienceLevel < 1 ? 'Science I required' :
-                !hasDatacore ? `Need 1× ${RESOURCE_REGISTRY[datacoreId ?? '']?.name ?? 'datacore'}` :
+                !hasDatacore ? `Need 1ï¿½ ${RESOURCE_REGISTRY[datacoreId ?? '']?.name ?? 'datacore'}` :
                 !hasSlot ? 'No research slot available' :
                 atMaxLevel ? 'Max research level reached' :
                 blueprint.isLocked ? 'Blueprint is locked' : ''
@@ -605,7 +605,7 @@ function JobsTab() {
       <div className="flex gap-2">
         <div className="flex flex-col items-center px-2.5 py-1.5 rounded border border-slate-700/40 bg-slate-900/80">
           <StatTooltip modifierKey="manufacturing-speed">
-            <span className="text-xs font-bold font-mono text-cyan-300">×{speedMult.toFixed(2)}</span>
+            <span className="text-xs font-bold font-mono text-cyan-300">ï¿½{speedMult.toFixed(2)}</span>
           </StatTooltip>
           <span className="text-[10px] text-slate-600">Speed</span>
         </div>
@@ -644,8 +644,8 @@ function JobsTab() {
                   {isTech2 && <span className="text-[8px] text-orange-400 bg-orange-900/20 border border-orange-700/25 rounded px-1 py-0.5 font-mono">T2</span>}
                   <div className="flex-1 min-w-0">
                     <span className="text-slate-300 font-bold">{recipe?.name ?? job.recipeId}</span>
-                    <span className="text-slate-600 font-mono ml-2">×{job.quantity}</span>
-                    <span className="text-slate-600 ml-2">? {fmtSeconds(jobTime)} · starts {fmtSeconds(startsIn)}</span>
+                    <span className="text-slate-600 font-mono ml-2">ï¿½{job.quantity}</span>
+                    <span className="text-slate-600 ml-2">? {fmtSeconds(jobTime)} ï¿½ starts {fmtSeconds(startsIn)}</span>
                   </div>
                   <div className="flex gap-1 shrink-0">
                     <button
@@ -752,7 +752,7 @@ function BlueprintsTab() {
           <span className="text-[10px] text-slate-500 font-mono">{usedSlots}/{maxSlots} in use</span>
         </div>
         <StatTooltip modifierKey="blueprint-research-speed">
-          <span className="text-xs font-bold font-mono text-violet-300">×{researchSpeed.toFixed(2)} speed</span>
+          <span className="text-xs font-bold font-mono text-violet-300">ï¿½{researchSpeed.toFixed(2)} speed</span>
         </StatTooltip>
       </div>
 

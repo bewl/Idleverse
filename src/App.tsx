@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { useGameStore } from '@/stores/gameStore';
+import { useUiStore } from '@/stores/uiStore';
 import { GameLayout } from '@/ui/layouts/GameLayout';
 
 function App() {
@@ -14,9 +15,12 @@ function App() {
     loadFromStorage();
   }, [loadFromStorage]);
 
-  // 1-second simulation tick
+  // 1-second simulation tick (DEV: scaled by devTimeScale)
   useEffect(() => {
-    const id = setInterval(() => tick(1), 1000);
+    const id = setInterval(() => {
+      const scale = import.meta.env.DEV ? useUiStore.getState().devTimeScale : 1;
+      tick(scale);
+    }, 1000);
     return () => clearInterval(id);
   }, [tick]);
 

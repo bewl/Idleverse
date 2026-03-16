@@ -1,5 +1,4 @@
-﻿import { useState, useRef, useCallback, useEffect, type ReactNode, type CSSProperties } from 'react';
-import { createPortal } from 'react-dom';
+﻿import { type ReactNode, type CSSProperties } from 'react';
 import { useGameStore } from '@/stores/gameStore';
 import { RESOURCES_BY_TIER, RESOURCE_REGISTRY, formatResourceAmount, formatCredits } from '@/game/resources/resourceRegistry';
 import { useResourceRates } from '@/game/hooks/useResourceRates';
@@ -8,6 +7,7 @@ import { getManufacturingSpeedMultiplier } from '@/game/systems/manufacturing/ma
 import { SKILL_DEFINITIONS } from '@/game/systems/skills/skills.config';
 import { activeTrainingEta, formatTrainingEta } from '@/game/systems/skills/skills.logic';
 import { skillTrainingSeconds } from '@/game/balance/constants';
+import { GameTooltip } from '@/ui/components/GameTooltip';
 
 // ─── Design tokens ─────────────────────────────────────────────────────────
 
@@ -47,98 +47,6 @@ function fmtSec(s: number): string {
   return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
 }
 
-// ─── Tooltip ─────────────────────────────────────────────────────────────────
-
-interface TooltipProps { content: ReactNode; children: ReactNode; delay?: number; }
-
-function Tooltip({ content, children, delay = 100 }: TooltipProps) {
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
-  const ref   = useRef<HTMLDivElement>(null);
-  const timer = useRef<ReturnType<typeof setTimeout>>();
-
-  const open = useCallback(() => {
-    timer.current = setTimeout(() => {
-      if (!ref.current) return;
-      const r    = ref.current.getBoundingClientRect();
-      const left = Math.max(110, Math.min(r.left + r.width / 2, window.innerWidth - 110));
-      setPos({ top: r.bottom + 9, left });
-    }, delay);
-  }, [delay]);
-
-  const close = useCallback(() => { clearTimeout(timer.current); setPos(null); }, []);
-  useEffect(() => () => clearTimeout(timer.current), []);
-
-  return (
-    <>
-      <div ref={ref} onMouseEnter={open} onMouseLeave={close} className="inline-flex">
-        {children}
-      </div>
-      {pos && createPortal(
-        <div className="tooltip-popup" style={{ top: pos.top, left: pos.left, transform: 'translateX(-50%)' }}>
-          {content}
-        </div>,
-        document.body,
-      )}
-    </>
-  );
-}
-
-// ─── HoverCard ───────────────────────────────────────────────────────────────
-
-interface HoverCardProps { trigger: ReactNode; children: ReactNode; width?: number; accentColor?: string; }
-
-function HoverCard({ trigger, children, width = 300, accentColor = 'rgba(34,211,238,0.5)' }: HoverCardProps) {
-  const [open, setOpen] = useState(false);
-  const [pos,  setPos]  = useState({ top: 0, left: 0 });
-  const trigRef = useRef<HTMLDivElement>(null);
-  const cardRef = useRef<HTMLDivElement>(null);
-
-  const toggle = useCallback(() => {
-    if (!trigRef.current) return;
-    const r = trigRef.current.getBoundingClientRect();
-    setPos({ top: r.bottom + 6, left: Math.max(8, Math.min(r.left, window.innerWidth - width - 16)) });
-    setOpen(o => !o);
-  }, [width]);
-
-  useEffect(() => {
-    if (!open) return;
-    const outside = (e: MouseEvent) => {
-      const t = e.target as Node;
-      if (!cardRef.current?.contains(t) && !trigRef.current?.contains(t)) setOpen(false);
-    };
-    const onScroll = (e: Event) => {
-      if (cardRef.current?.contains(e.target as Node)) return;
-      setOpen(false);
-    };
-    const tid = setTimeout(() => document.addEventListener('mousedown', outside), 50);
-    window.addEventListener('scroll', onScroll, true);
-    window.addEventListener('resize', () => setOpen(false));
-    return () => {
-      clearTimeout(tid);
-      document.removeEventListener('mousedown', outside);
-      window.removeEventListener('scroll', onScroll, true);
-    };
-  }, [open]);
-
-  return (
-    <>
-      <div ref={trigRef} onClick={toggle} className="inline-flex">
-        {trigger}
-      </div>
-      {open && createPortal(
-        <div
-          ref={cardRef}
-          className="hovercard-popup"
-          style={{ top: pos.top, left: pos.left, width, borderTopColor: accentColor, borderTopWidth: '2px' } as CSSProperties}
-        >
-          {children}
-        </div>,
-        document.body,
-      )}
-    </>
-  );
-}
-
 // ─── Inline mini-bar ─────────────────────────────────────────────────────────
 
 function MiniBar({ pct, color }: { pct: number; color: string }) {
@@ -169,7 +77,7 @@ function ResChip({ name, amount, rate, tier, precision, description }: ResChipPr
   const tc = TIER_COLOR[tier] ?? TIER_COLOR[1];
 
   return (
-    <Tooltip content={
+    <GameTooltip content={
       <div className="flex flex-col gap-0">
         <div
           className="flex items-center gap-2 -mx-2.5 -mt-2 mb-2.5 px-3 py-2 rounded-t"
@@ -209,7 +117,7 @@ function ResChip({ name, amount, rate, tier, precision, description }: ResChipPr
           </span>
         )}
       </div>
-    </Tooltip>
+    </GameTooltip>
   );
 }
 
@@ -254,17 +162,7 @@ function ActiveSkillPill() {
   const eta   = activeTrainingEta(skillsState);
 
   return (
-    <HoverCard accentColor="rgba(34,211,238,0.6)" width={270} trigger={
-      <div className="hud-pill" style={{ '--pill-accent': 'rgba(34,211,238,0.6)' } as CSSProperties}>
-        <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-cyan-400 animate-pulse" />
-        <span className="text-[8px] text-slate-500 uppercase tracking-[0.14em] select-none">Training</span>
-        <span className="text-slate-700/50 text-[8px] mx-0.5 select-none">·</span>
-        <span className="font-mono text-[10px] text-cyan-200 truncate max-w-[72px]">{def?.name ?? skillsState.activeSkillId}</span>
-        <MiniBar pct={pct} color="#06b6d4" />
-        <span className="font-mono text-[10px] tabular-nums text-cyan-300">{pct}%</span>
-        <span className="text-slate-700 text-[8px] ml-0.5 select-none">▾</span>
-      </div>
-    }>
+    <GameTooltip pinnable width={270} content={
       <div className="flex flex-col gap-3">
         <div className="flex items-center gap-2 pb-2" style={{ borderBottom: '1px solid rgba(30,41,59,0.6)' }}>
           <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
@@ -303,7 +201,17 @@ function ActiveSkillPill() {
           </div>
         )}
       </div>
-    </HoverCard>
+    }>
+      <div className="hud-pill" style={{ '--pill-accent': 'rgba(34,211,238,0.6)' } as CSSProperties}>
+        <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-cyan-400 animate-pulse" />
+        <span className="text-[8px] text-slate-500 uppercase tracking-[0.14em] select-none">Training</span>
+        <span className="text-slate-700/50 text-[8px] mx-0.5 select-none">·</span>
+        <span className="font-mono text-[10px] text-cyan-200 truncate max-w-[72px]">{def?.name ?? skillsState.activeSkillId}</span>
+        <MiniBar pct={pct} color="#06b6d4" />
+        <span className="font-mono text-[10px] tabular-nums text-cyan-300">{pct}%</span>
+        <span className="text-slate-700 text-[8px] ml-0.5 select-none">▾</span>
+      </div>
+    </GameTooltip>
   );
 }
 
@@ -324,18 +232,7 @@ function ManufacturingPill() {
   const queueRest = mfg.queue.slice(1, 5);
 
   return (
-    <HoverCard accentColor="rgba(167,139,250,0.5)" width={300} trigger={
-      <div className="hud-pill" style={{ '--pill-accent': 'rgba(167,139,250,0.5)' } as CSSProperties}>
-        <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-violet-400" />
-        <span className="text-[8px] text-slate-500 uppercase tracking-[0.14em] select-none">Manuf</span>
-        <span className="text-slate-700/50 text-[8px] mx-0.5 select-none">·</span>
-        <span className="font-mono text-[10px] text-violet-200 truncate max-w-[68px]">{recipe.name}</span>
-        <span className="text-slate-600 text-[9px] shrink-0">×{job.quantity}</span>
-        <MiniBar pct={pct} color="#8b5cf6" />
-        <span className="font-mono text-[10px] tabular-nums text-violet-300">{pct}%</span>
-        <span className="text-slate-700 text-[8px] ml-0.5 select-none">▾</span>
-      </div>
-    }>
+    <GameTooltip pinnable width={300} content={
       <div className="flex flex-col gap-3">
         <div className="flex items-center gap-2 pb-2" style={{ borderBottom: '1px solid rgba(30,41,59,0.6)' }}>
           <span className="w-2 h-2 rounded-full bg-violet-400" />
@@ -374,7 +271,56 @@ function ManufacturingPill() {
           </div>
         )}
       </div>
-    </HoverCard>
+    }>
+      <div className="hud-pill" style={{ '--pill-accent': 'rgba(167,139,250,0.5)' } as CSSProperties}>
+        <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-violet-400" />
+        <span className="text-[8px] text-slate-500 uppercase tracking-[0.14em] select-none">Manuf</span>
+        <span className="text-slate-700/50 text-[8px] mx-0.5 select-none">·</span>
+        <span className="font-mono text-[10px] text-violet-200 truncate max-w-[68px]">{recipe.name}</span>
+        <span className="text-slate-600 text-[9px] shrink-0">×{job.quantity}</span>
+        <MiniBar pct={pct} color="#8b5cf6" />
+        <span className="font-mono text-[10px] tabular-nums text-violet-300">{pct}%</span>
+        <span className="text-slate-700 text-[8px] ml-0.5 select-none">▾</span>
+      </div>
+      <div className="flex flex-col gap-3">
+        <div className="flex items-center gap-2 pb-2" style={{ borderBottom: '1px solid rgba(30,41,59,0.6)' }}>
+          <span className="w-2 h-2 rounded-full bg-violet-400" />
+          <span className="text-slate-100 font-bold text-[11px] uppercase tracking-wider">Manufacturing</span>
+          <span className="ml-auto text-violet-300/60 font-mono text-[10px]">{mfg.queue.length} job{mfg.queue.length !== 1 ? 's' : ''}</span>
+        </div>
+        <div>
+          <div className="flex justify-between text-xs mb-1">
+            <span className="text-slate-500">Producing</span>
+            <span className="text-violet-200">{recipe.name} <span className="text-slate-500">×{job.quantity}</span></span>
+          </div>
+          <div className="w-full bg-slate-800/80 rounded-full h-1.5 overflow-hidden">
+            <div className="h-full rounded-full bg-violet-500 transition-all duration-500" style={{ width: `${pct}%` }} />
+          </div>
+          <div className="flex justify-between text-[10px] mt-1">
+            <span className="text-violet-300 font-mono">{pct}%</span>
+            <span className="text-slate-500">{fmtSec(remaining)} left</span>
+          </div>
+        </div>
+        {queueRest.length > 0 && (
+          <div className="pt-1" style={{ borderTop: '1px solid rgba(30,41,59,0.5)' }}>
+            <div className="text-[8px] text-slate-600 uppercase tracking-widest mb-1.5">Up Next</div>
+            {queueRest.map((qj, i) => {
+              const qr = MANUFACTURING_RECIPES[qj.recipeId];
+              return (
+                <div key={i} className="flex items-center gap-2 text-xs">
+                  <span className="text-slate-600 font-mono w-4">{i + 2}.</span>
+                  <span className="text-slate-400 flex-1 truncate">{qr?.name ?? qj.recipeId}</span>
+                  <span className="text-slate-600 shrink-0 font-mono">×{qj.quantity}</span>
+                </div>
+              );
+            })}
+            {mfg.queue.length > 5 && (
+              <div className="text-slate-600 text-[10px] text-center mt-1">+{mfg.queue.length - 5} more</div>
+            )}
+          </div>
+        )}
+      </div>
+    </GameTooltip>
   );
 }
 

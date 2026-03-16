@@ -518,6 +518,128 @@ Step 8c in `tickRunner.ts` (gated by `unlocks['system-exploration']`):
 
 ---
 
+# System 13 — Navigation, Tooltip & UI Framework
+
+## Role
+
+Horizontal UI infrastructure layer providing content-aware navigation, composable nested
+tolltips, and a consistent visual language of glows, entity tags, and data-rich panel layouts
+across all 9 game panels.
+
+## Components
+
+### `useUiStore` — UI State Store
+
+`src/stores/uiStore.ts`
+
+```ts
+interface UiStore {
+  activePanel: PanelId;          // which panel is visible
+  focusTarget: FocusTarget | null; // entity to highlight after navigation
+  devTimeScale: number;          // DEV only — tick speed multiplier
+
+  navigate(panelId: PanelId, focus?: FocusTarget): void;
+  clearFocus(): void;
+  setDevTimeScale(scale: number): void;
+}
+
+type PanelId = 'overview' | 'skills' | 'fleet' | 'starmap' | 'system'
+             | 'mining' | 'manufacturing' | 'reprocessing' | 'market';
+
+type EntityType = 'fleet' | 'pilot' | 'ship' | 'skill' | 'resource' | 'system' | 'anomaly';
+
+type FocusTarget = { entityType: EntityType; entityId: string };
+```
+
+Held in its own Zustand store (separate from `gameStore`) so that navigation calls from inside
+portal-rendered tooltips work without being in the React component tree.
+
+### `<GameTooltip>` — Behavioral Shell
+
+`src/ui/components/GameTooltip.tsx`
+
+Props: `content: ReactNode`, `pinnable?: boolean`, `delay?: number`, `width?: number | 'auto'`
+
+- Uses `TooltipDepthContext` (React Context) to track nesting depth
+- z-index formula: `9998 + depth × 4` (supports tooltips inside tooltips)
+- 80ms hover delay with **smart close**: fires only after mouse leaves both trigger AND tooltip body
+- Optional `pinnable`: click-to-pin, ESC or second click to close
+- Viewport-clamped position via `getBoundingClientRect()`
+- Renders via `createPortal(…, document.body)`
+- **Zero layout opinions** — content is 100% caller-defined
+
+### `TT.*` — Composable Tooltip Primitives
+
+Named export from the same file as `GameTooltip`. Stateless presentational building blocks
+for assembling rich tooltip layouts. All accept `ReactNode` children.
+
+| Primitive | Purpose |
+|---|---|
+| `TT.Header` | Accent-colored header bar with icon, title, subtitle, badge slots |
+| `TT.Section` | Labeled section with optional right-side adornment |
+| `TT.Grid` | 2–4-column key/value data grid |
+| `TT.Row` | Single label/value row with optional accent color |
+| `TT.Divider` | Thin separator with optional centered label |
+| `TT.ProgressBar` | Labeled inline mini progress bar |
+| `TT.BadgeRow` | Horizontal row of colored status badges |
+| `TT.Footer` | Muted hint/tip text section |
+| `TT.Spacer` | Fixed vertical gap |
+
+Design principle: primitives compose freely. A fleet tooltip uses `TT.Header` + `TT.Grid` +
+`TT.BadgeRow` + inline `NavTag`s — no structure is imposed.
+
+### `<NavTag>` — Content-Aware Navigation Chip
+
+`src/ui/components/NavTag.tsx`
+
+Props: `entityType: EntityType`, `entityId: string`, `label: string`, `tooltip?: ReactNode`
+
+- On click: calls `useUiStore.getState().navigate(PANEL_FOR_TYPE[entityType], { entityType, entityId })`
+- Routing table: `fleet/pilot/ship → 'fleet'`, `skill → 'skills'`, `resource → 'mining'`, `system/anomaly → 'system'`
+- If `tooltip` provided, wraps in `<GameTooltip content={tooltip}>` — enabling NavTags inside tooltips that have their own tooltip (n-level nesting)
+- Color by entity type: fleet=cyan, pilot/ship=violet, skill/resource=amber, system=`#ffe47a`, anomaly=rose
+- Styled with `.entity-tag` CSS base class + per-type color overrides
+
+### Focus Handling in Panels
+
+When `focusTarget` is set after navigation, the target panel should:
+1. Read `useUiStore(s => s.focusTarget)` on mount + on change
+2. Find the matching entity card, expand it if collapsed
+3. Scroll it into view (`scrollIntoView({ behavior: 'smooth' })`)
+4. Apply `.focus-pulse` class for ~3s (CSS keyframe: 3-cycle cyan glow then fade)
+5. Call `useUiStore.getState().clearFocus()` after consuming
+
+## CSS Utilities Added
+
+`src/index.css`
+
+| Class | Effect |
+|---|---|
+| `.glow-cyan` | `box-shadow: 0 0 10px rgba(34,211,238,0.18), 0 0 20px rgba(34,211,238,0.08)` |
+| `.glow-amber` | Same pattern, amber RGB |
+| `.glow-violet` | Same pattern, violet RGB |
+| `.glow-emerald` | Same pattern, emerald RGB |
+| `.glow-rose` | Same pattern, rose RGB |
+| `.entity-tag` | Base chip style: `rounded-sm px-1.5 py-0.5 text-[9px] font-mono uppercase tracking-wide border cursor-pointer transition-colors` |
+| `.focus-pulse` | Keyframe: 3-cycle cyan glow pulse fading to 0 over ~3s |
+
+## Dependencies
+
+- All 9 panels: import `NavTag`, use `useUiStore`
+- `StatTooltip`: thin wrapper over `GameTooltip` — external API unchanged
+- `ResourceBar`: private `Tooltip`/`HoverCard` replaced by `GameTooltip` + `TT.*`
+- `DevPanel`: `devTimeScale` field from `useUiStore`; game loop multiplies `delta` in DEV guard
+
+## Files
+
+- `src/stores/uiStore.ts` — store
+- `src/ui/components/GameTooltip.tsx` — shell + TT.* primitives
+- `src/ui/components/NavTag.tsx` — entity navigation chip
+- `src/ui/components/StatTooltip.tsx` — refactored to use GameTooltip
+- `src/index.css` — glow utilities + entity-tag + focus-pulse
+
+---
+
 # Planned Future Systems
 
 See `Idleverse_DESIGN_PLAN.md` for detailed specs on:

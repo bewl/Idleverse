@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useGameStore } from '@/stores/gameStore';
+import { useUiStore, type PanelId } from '@/stores/uiStore';
 import { StarField } from '@/ui/effects/StarField';
 import { ResourceBar } from '@/ui/panels/ResourceBar';
 import { MiningPanel } from '@/ui/panels/MiningPanel';
@@ -13,8 +14,6 @@ import { DevPanel } from '@/ui/dev/DevPanel';
 import StarMapPanel from '@/ui/panels/StarMapPanel';
 import { SystemPanel } from '@/ui/panels/SystemPanel';
 import { formatResourceAmount } from '@/game/resources/resourceRegistry';
-
-type PanelId = 'overview' | 'skills' | 'mining' | 'manufacturing' | 'reprocessing' | 'market' | 'fleet' | 'starmap' | 'system';
 
 interface NavEntry {
   id: PanelId;
@@ -49,7 +48,8 @@ const PANELS: Record<PanelId, React.ReactNode> = {
 };
 
 export function GameLayout() {
-  const [activePanel, setActivePanel]   = useState<PanelId>('overview');
+  const activePanel = useUiStore(s => s.activePanel);
+  const navigate    = useUiStore(s => s.navigate);
   const [sidebarOpen, setSidebarOpen]   = useState(true);
   const [devOpen,     setDevOpen]       = useState(false);
   const unlocks             = useGameStore(s => s.state.unlocks);
@@ -156,7 +156,7 @@ export function GameLayout() {
                 <button
                   key={n.id}
                   className={isActive ? 'nav-btn-active' : 'nav-btn'}
-                  onClick={() => setActivePanel(n.id)}
+                  onClick={() => navigate(n.id)}
                 >
                   <span className="mr-2 text-sm">{n.icon}</span>
                   <span className="flex-1 text-left">{n.label}</span>
@@ -190,7 +190,7 @@ export function GameLayout() {
             <button
               key={n.id}
               className={isActive ? 'mob-nav-btn mob-nav-active' : 'mob-nav-btn'}
-              onClick={() => setActivePanel(n.id)}
+              onClick={() => navigate(n.id)}
             >
               <span className="text-lg leading-none">{n.icon}</span>
               <span

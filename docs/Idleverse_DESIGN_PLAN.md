@@ -37,6 +37,7 @@ impact. Each phase is independently shippable and leaves the game in a playable,
 | Fleet combat | ✅ Complete | NPC groups, patrol/raid orders, hull damage, bounty/loot, combat log |
 | Blueprint research & T2 manufacturing | ✅ Complete | Phase 3 shipped — research queue, BPC copies, T2 recipes |
 | Exploration & anomalies | ✅ Complete | Phase 4 shipped — anomaly scanning, discovery feed, Astrometrics/Archaeology/Hacking skills |
+| UI Overhaul — navigation, tooltips, data density | 🔄 In Progress | GameTooltip + NavTag + useUiStore + DevPanel overhaul + 9-panel renovation |
 | Factions & missions | ⬜ Phase 5 | Rep tracking exists, no consequences |
 | Dynamic economy & trade routes | ✅ Complete | Phase 1 shipped — dynamic prices + trade route automation |
 | Structures & player outposts | ⬜ Phase 6 | Type stub exists |
@@ -441,6 +442,110 @@ Scan strength improved by:
 ## Files
 
 `galaxy.gen.ts`, `fleet.tick.ts`, `galaxy.types.ts`, `game.types.ts`, `StarMapPanel.tsx`, `SystemPanel.tsx`, `OverviewPanel.tsx`
+
+---
+
+---
+
+# UI Overhaul — Data Density, Navigation & Developer Tooling
+
+> **Status:** 🔄 In Progress — March 2026
+> **Type:** Horizontal UI renovation — not a gameplay phase; no gameplay mechanics changed.
+
+## Goal
+
+Every panel should look **busy with data**. Important values should pop visually. Any entity
+referenced in a panel — a fleet name, a pilot, a skill, a resource — should be a clickable tag
+that navigates directly to that entity. Tooltips should support arbitrary rich layouts and can nest
+n-levels deep with their own clickable tags.
+
+## Four Parallel Workstreams
+
+### Stream A — Core Infrastructure  *(sequential first; others depend on this)*
+
+| Step | File | Change |
+|---|---|---|
+| A1 | `src/stores/uiStore.ts` *(new)* | Zustand store: `activePanel`, `focusTarget`, `devTimeScale`; actions: `navigate(panel, focus?)`, `clearFocus()`, `setDevTimeScale(n)` |
+| A2 | `src/ui/layouts/GameLayout.tsx` | Use `useUiStore` for `activePanel`; game loop multiplies `delta` by `devTimeScale` (DEV guard) |
+| A3 | `src/ui/components/GameTooltip.tsx` *(new)* | Pure behavioral shell: depth-aware z-index (`9998 + depth×4`), 80ms hover delay, smart close (leaves trigger AND body), optional pin; + `TT.*` composable content primitives |
+| A4 | `src/ui/components/NavTag.tsx` *(new)* | Clickable entity chip; routes to correct panel + sets `focusTarget` on click; optional nested tooltip |
+| A5 | `src/ui/components/StatTooltip.tsx` | Refactor: thin wrapper over `<GameTooltip pinnable content={<StatSheet>}>` — API unchanged |
+| A6 | `src/ui/panels/ResourceBar.tsx` | Replace private `Tooltip`/`HoverCard` with `GameTooltip` + `TT.*`; resource name chips → `NavTag` |
+| A7 | `src/index.css` | Add `.glow-{cyan|amber|violet|emerald|rose}`, `.entity-tag`, `@keyframes focus-pulse`; widen `.tooltip-popup` to 320px |
+
+### Stream B — Missing Action Buttons  *(parallel with Stream A)*
+
+Store audit identified 8 actions with no UI access:
+
+| # | Action | Panel | Fix |
+|---|---|---|---|
+| B1 | `prioritizeManufacturingJob(index)` | ManufacturingPanel | ↑ button on queue items |
+| B2 | `repairShip(shipId)` | FleetPanel ships | Hull % bar + Repair button |
+| B3 | `setPilotTrainingFocus(pilotId, focus)` | FleetPanel pilots | Focus selector chip per pilot |
+| B4 | `fitModule` / `removeModule` | FleetPanel ships | Slot grid per ship + module selector + ✕ |
+| B5 | `issueFleetGroupOrder` / `cancelFleetGroupOrder` | FleetPanel fleets | Move Fleet button + Cancel in transit |
+| B6 | `removePilotSkillFromQueue` / `renamePilotCharacter` | FleetPanel pilots | ✕ on queue items + inline rename |
+| B7 | `dockAtStation` / `undockFromStation` | SystemPanel | Dock/Undock button when station present |
+| B8 | `refreshRecruitmentOffers()` | FleetPanel pilots | Refresh Offers button |
+
+### Stream C — DevPanel Complete Overhaul  *(parallel with Stream A; needs uiStore first)*
+
+- **C1** — Fix: add `'system-exploration'` to `ALL_SYSTEM_UNLOCKS`; audit T2 recipe list; Omega scenario uses dynamic unlock arrays
+- **C2** — Time controls header: speed toggles **0.1× 0.5× 1× 2× 5× 10× 50×** + **+60s** / **+1hr** instant tick buttons
+- **C3** — New **Galaxy** tab: reactive current system, warp bar, Teleport select, Scan System, Inject Anomaly
+- **C4** — New **Manufacturing** tab: reactive blueprint list, Add Blueprint, research level stepper, Complete All Jobs
+- **C5** — New **Factions** tab: per-faction rep (reactive) + ±10/±100 buttons + Dock/Undock
+- **C6** — New **State** tab: key metrics grid (reactive), Dump to Console, read-only JSON tree
+- **C7** — Fleet tab: hull % bars, Repair button, Quick Assign pilot dropdowns
+
+### Stream D — Panel Renovations  *(after Stream A ships)*
+
+All 9 panels renovated with: data density additions, `NavTag` links on every entity reference, `GameTooltip` + `TT.*` for hover cards, and accent-color `.glow-*` on active/state elements.
+
+| Panel | Key Data Additions | Notable NavTags |
+|---|---|---|
+| OverviewPanel | FleetStatusRow card, ResourceIncomeCard, belt depletion ETA, MFG ISK/hr | pilot→Fleet, skill→Skills, system→System |
+| FleetPanel | Combat readiness %, hull bars (B2), training focus (B3), fitting grid (B4), group orders (B5), pilot rename+queue (B6), refresh offers (B8), doctrine compliance bar | pilot→Skills, hull→hull-stats tooltip, doctrine→requirements tooltip |
+| MiningPanel | Belt depletion ETA, efficiency %, 20-tick CSS sparkline, ship-to-belt assignment | skills→Skills, fleet→Fleet |
+| ManufacturingPanel | Queue utilization bar, material grid, ISK/margin, bottleneck indicator, ↑ button (B1) | ship→Fleet, minerals→Mining, bottleneck→Market |
+| ReprocessingPanel | Efficiency grade badge (S/A/B/C), output yield table, throughput/hr | skills→Skills |
+| MarketPanel | Trade volume, trend arrows ↑↓, inflow/outflow row, margin % | — |
+| SkillsPanel | Queue total ETA, affects-system NavTags, next-level preview, category pill row | systems→panels |
+| StarMapPanel | Fleet position dots, anomaly density heat, fleet dot click | system→System, fleet dot→Fleet+focus |
+| SystemPanel | Belt ore composition bars, fleet assignment section, anomaly counts by type, Dock/Undock (B7) | fleet→Fleet |
+
+## Key Technical Decisions
+
+- `activePanel` lives in `useUiStore` (Zustand), **not** local component state or React Context — NavTags inside tooltip portals need to navigate without being in the component tree
+- `GameTooltip` is a **behavioral shell only** — content layout is 100% caller-defined via `TT.*` primitives or arbitrary JSX
+- `TT.*` primitives: `TT.Header`, `TT.Section`, `TT.Grid`, `TT.Row`, `TT.Divider`, `TT.ProgressBar`, `TT.BadgeRow`, `TT.Footer`, `TT.Spacer` — stateless, freely composable
+- Focus behavior on NavTag navigation: **auto-expand + scroll into view + 3s `.focus-pulse` glow**, then `clearFocus()`
+- Nested tooltip depth tracked via `TooltipDepthContext`; z-index formula `9998 + depth × 4`
+- Mini charts: **inline SVG or CSS flex bars only** — no chart library dependency
+
+## Files
+
+| File | Stream | Action |
+|---|---|---|
+| `src/stores/uiStore.ts` | A1 | CREATE |
+| `src/ui/layouts/GameLayout.tsx` | A2 | MODIFY |
+| `src/ui/components/GameTooltip.tsx` | A3 | CREATE |
+| `src/ui/components/NavTag.tsx` | A4 | CREATE |
+| `src/ui/components/StatTooltip.tsx` | A5 | REFACTOR |
+| `src/ui/panels/ResourceBar.tsx` | A6 | REFACTOR + NavTags |
+| `src/index.css` | A7 | MODIFY |
+| `src/ui/panels/ManufacturingPanel.tsx` | B1 + D | Missing ↑ button + renovation |
+| `src/ui/panels/FleetPanel.tsx` | B2–B6 + B8 + D | All missing buttons + renovation |
+| `src/ui/panels/SystemPanel.tsx` | B7 + D | Dock/Undock + renovation |
+| `src/ui/dev/DevPanel.tsx` | C1–C7 | OVERHAUL — fix + 4 new tabs |
+| `src/ui/panels/OverviewPanel.tsx` | D | Renovation |
+| `src/ui/panels/MiningPanel.tsx` | D | Renovation |
+| `src/ui/panels/ReprocessingPanel.tsx` | D | Renovation |
+| `src/ui/panels/MarketPanel.tsx` | D | Renovation |
+| `src/ui/panels/SkillsPanel.tsx` | D | Renovation |
+| `src/ui/panels/StarMapPanel.tsx` | D | Renovation |
+| `docs/Idleverse_AI_Architecture.md` | — | Document UI layer architecture |
+| `docs/Idleverse_SYSTEM_BLUEPRINTS.md` | — | System 13 |
 
 ---
 

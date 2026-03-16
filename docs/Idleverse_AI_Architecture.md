@@ -197,6 +197,128 @@ Examples:
 - expedition encounters
 - colony templates
 
+#### `ui/components`
+
+Reusable UI primitives shared across panels.
+
+Key components:
+
+- `GameTooltip.tsx` — behavioral tooltip shell + `TT.*` composable content primitives
+- `NavTag.tsx` — content-aware navigation chip (entity type → panel routing)
+- `StatTooltip.tsx` — modifier breakdown tooltip (wraps GameTooltip)
+- `UpgradeCard.tsx`, `ProgressBar.tsx`, `FlairProgressBar.tsx` — panel building blocks
+
+#### `ui/dev`
+
+Development-only panel (`DevPanel.tsx`). Gated by `import.meta.env.DEV` — Vite strips it
+entirely from production builds. Toggle with Ctrl+\`.
+
+#### `ui/effects`
+
+Visual-only components with no game logic (e.g., `StarField.tsx`).
+
+#### `ui/layouts`
+
+Top-level layout wrapper (`GameLayout.tsx`). Holds nav sidebar, resource bar, panel switcher.
+Uses `useUiStore` for `activePanel` rather than local state.
+
+#### `ui/panels`
+
+One file per top-level panel. No game simulation logic lives here — panels read from stores
+and call store actions only.
+
+## UI State Model
+
+UI-only state (navigation, focus, dev time scale) is kept in a **separate Zustand store**
+distinct from `gameStore`. This is critical because `NavTag` components rendered inside
+`createPortal` tooltip trees need to trigger navigation without being in the React tree.
+
+```ts
+// src/stores/uiStore.ts
+interface UiStore {
+  activePanel: PanelId;
+  focusTarget: FocusTarget | null;
+  devTimeScale: number;           // DEV only
+
+  navigate(panelId: PanelId, focus?: FocusTarget): void;
+  clearFocus(): void;
+  setDevTimeScale(scale: number): void;
+}
+
+type PanelId = 'overview' | 'skills' | 'fleet' | 'starmap' | 'system'
+             | 'mining' | 'manufacturing' | 'reprocessing' | 'market';
+
+type EntityType = 'fleet' | 'pilot' | 'ship' | 'skill' | 'resource' | 'system' | 'anomaly';
+type FocusTarget = { entityType: EntityType; entityId: string };
+```
+
+**Rule:** never put UI-only transient state (active tab, open/closed panel, highlight state)
+into `gameStore`. `gameStore` is for persistent game simulation state only.
+
+## Tooltip System
+
+All tooltips flow through a single engine: `<GameTooltip>` in `src/ui/components/GameTooltip.tsx`.
+
+### Nesting
+
+Tooltips track depth via `TooltipDepthContext = createContext(0)`. Each rendered popup wraps
+its content in `<TooltipDepthContext.Provider value={depth + 1}>`. z-index formula:
+
+```
+zIndex = 9998 + depth × 4
+```
+
+This supports tooltips inside tooltips without z-index collisions.
+
+### Behavior
+
+- **Hover delay:** 80ms before show
+- **Smart close:** debounce fires only when mouse has left both the trigger element AND the
+  tooltip body — prevents flicker when moving from trigger into the popup
+- **Pin:** click trigger → toggled pin state; ESC or second click → close
+- **Portal:** always rendered via `createPortal(…, document.body)` to escape parent overflow clipping
+- **`pointer-events: auto`:** always set so nested interactive content (NavTags, buttons) works
+
+### Content
+
+`GameTooltip` has **zero layout opinions** — `content` is `ReactNode`. The companion `TT.*`
+export provides composable primitives for building layouts:
+
+```tsx
+// Example — fleet card tooltip
+<GameTooltip width={280} content={
+  <>
+    <TT.Header accentColor="#22d3ee" title="Alpha Fleet" badge="BRAWL" />
+    <TT.Grid items={[
+      { label: 'Ships', value: '4' },
+      { label: 'Readiness', value: '87%', accent: '#4ade80' },
+    ]} />
+    <TT.BadgeRow badges={[
+      { text: 'T1', color: '#4ade80', bg: '#4ade8022' },
+      { text: 'D2', color: '#f87171', bg: '#f8717122' },
+    ]} />
+    <TT.Divider />
+    <TT.Footer>Click to view fleet details</TT.Footer>
+  </>
+}>
+  <span>Alpha Fleet</span>
+</GameTooltip>
+```
+
+## NavTag Routing
+
+`<NavTag>` calls `useUiStore.getState().navigate(...)` on click. The routing table:
+
+| `entityType` | Target panel | Focus behavior |
+|---|---|---|
+| `'fleet'` | `'fleet'` | Expand matching fleet card + scroll + 3s pulse |
+| `'pilot'` | `'fleet'` | Switch to Pilots tab + highlight pilot row |
+| `'ship'` | `'fleet'` | Switch to Ships tab + highlight ship row |
+| `'skill'` | `'skills'` | Scroll to skill in tree |
+| `'resource'` | `'mining'` | Scroll to relevant section |
+| `'system'` | `'system'` | (already on system panel) |
+| `'anomaly'` | `'system'` | Switch to Anomalies tab |
+
 ## State Model
 
 State is managed via **Zustand** with a single `GameState` object. The store lives in
