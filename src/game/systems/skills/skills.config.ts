@@ -198,6 +198,34 @@ export const SKILL_DEFINITIONS: Record<string, SkillDefinition> = {
     pilotTrainable: true,
   },
 
+  'astrometrics': {
+    id: 'astrometrics', name: 'Astrometrics',
+    description: 'Improves deep-space object detection. Each level increases anomaly scanning speed by 10%, enabling faster anomaly discovery in uncharted systems.',
+    category: 'science', rank: 2,
+    effects: [{ modifier: 'scan-speed', valuePerLevel: 0.10 }],
+    prerequisiteSkills: { 'science': 1 },
+    unlocks: ['system-exploration'],
+    pilotTrainable: true,
+  },
+
+  'archaeology': {
+    id: 'archaeology', name: 'Archaeology',
+    description: 'Certifies the operator to access ancient relic sites. Required for looting relic anomalies.',
+    category: 'science', rank: 3,
+    effects: [],
+    prerequisiteSkills: { 'astrometrics': 1 },
+    unlocks: ['loot-relic-sites'],
+  },
+
+  'hacking': {
+    id: 'hacking', name: 'Hacking',
+    description: 'Grants access to encrypted data vaults. Required for looting data site anomalies.',
+    category: 'science', rank: 2,
+    effects: [],
+    prerequisiteSkills: { 'astrometrics': 1 },
+    unlocks: ['loot-data-sites'],
+  },
+
   // ═══════════════════════════ ELECTRONICS ═══════════════════════════════════
 
   'electronics': {
@@ -251,7 +279,7 @@ export const SKILL_CATEGORIES: Record<string, string[]> = {
   mining:       ['mining', 'astrogeology', 'advanced-mining', 'ice-harvesting', 'drone-interfacing', 'mining-barge'],
   spaceship:    ['spaceship-command', 'frigate', 'mining-frigate', 'industrial', 'destroyer', 'cruiser', 'gunnery', 'military-operations'],
   industry:     ['industry', 'advanced-industry', 'reprocessing', 'reprocessing-efficiency'],
-  science:      ['science', 'metallurgy', 'survey'],
+  science:      ['science', 'metallurgy', 'survey', 'astrometrics', 'archaeology', 'hacking'],
   electronics:  ['electronics', 'cpu-management', 'ladar-sensing'],
   trade:        ['trade', 'broker-relations', 'accounting'],
 };

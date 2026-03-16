@@ -1,4 +1,4 @@
-import type { FactionId } from './faction.types';
+import type { FactionId } from './faction.types';\nimport type { Anomaly } from './game.types';
 
 // ─── Galaxy / Travel types ─────────────────────────────────────────────────
 
@@ -126,4 +126,9 @@ export interface GalaxyState {
    * Missing entry = 1.0.
    */
   systemPressure: Record<string, Record<string, number>>;
+  /**
+   * Per-system anomaly lists. Populated lazily on first scan.
+   * Key = systemId, value = array of Anomaly objects.
+   */
+  anomalies: Record<string, Anomaly[]>;
 }

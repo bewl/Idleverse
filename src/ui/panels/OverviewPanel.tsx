@@ -10,6 +10,7 @@ import { formatCredits, formatResourceAmount, RESOURCE_REGISTRY } from '@/game/r
 import { SKILL_DEFINITIONS } from '@/game/systems/skills/skills.config';
 import { activeTrainingEta, formatTrainingEta } from '@/game/systems/skills/skills.logic';
 import { skillTrainingSeconds } from '@/game/balance/constants';
+import type { AnomalyType } from '@/types/game.types';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -366,6 +367,64 @@ function StatsRow() {
   );
 }
 
+// ─── Discoveries card ────────────────────────────────────────────────────────
+
+function anomalyIcon(type: AnomalyType): string {
+  switch (type) {
+    case 'ore-pocket':  return '◆';
+    case 'data-site':   return '⬡';
+    case 'relic-site':  return '⧖';
+    case 'combat-site': return '☩';
+    case 'wormhole':    return '⊕';
+  }
+}
+
+function anomalyColor(type: AnomalyType): string {
+  switch (type) {
+    case 'ore-pocket':  return 'text-cyan-400';
+    case 'data-site':   return 'text-violet-400';
+    case 'relic-site':  return 'text-amber-400';
+    case 'combat-site': return 'text-red-400';
+    case 'wormhole':    return 'text-purple-400';
+  }
+}
+
+function DiscoveriesCard() {
+  const discoveries = useGameStore(s => s.state.systems.fleet.discoveries ?? []);
+  if (discoveries.length === 0) return null;
+
+  const recent = discoveries.slice(0, 8);
+
+  function timeAgo(ms: number): string {
+    const s = Math.floor((Date.now() - ms) / 1000);
+    if (s < 60) return `${s}s ago`;
+    if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+    return `${Math.floor(s / 3600)}h ago`;
+  }
+
+  return (
+    <div className="panel-card">
+      <h3 className="text-[10px] uppercase tracking-widest text-slate-500 mb-2">⊕ Recent Discoveries</h3>
+      <div className="flex flex-col gap-1.5">
+        {recent.map(entry => (
+          <div key={entry.id} className="flex items-center gap-2 py-1 border-b border-slate-800/50 last:border-0">
+            <span className={`text-[10px] shrink-0 ${anomalyColor(entry.anomalyType)}`}>
+              {anomalyIcon(entry.anomalyType)}
+            </span>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-baseline justify-between gap-1">
+                <span className="text-[9px] text-slate-300 truncate">{entry.anomalyName}</span>
+                <span className="text-[8px] text-slate-600 shrink-0">{timeAgo(entry.timestamp)}</span>
+              </div>
+              <span className="text-[8px] text-slate-500">{entry.systemName}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ─── Combat log card ─────────────────────────────────────────────────────────
 
 function CombatLogCard() {
@@ -435,6 +494,7 @@ export function OverviewPanel() {
       </div>
 
       <StatsRow />
+      <DiscoveriesCard />
       <CombatLogCard />
     </div>
   );

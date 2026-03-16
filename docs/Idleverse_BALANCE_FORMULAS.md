@@ -379,6 +379,35 @@ Long term:
 
 ---
 
+# Anomaly Scan Progress Formula
+
+Scan progress per second for an anomaly being scanned by a fleet:
+
+```
+progressPerSecond = fleetScanStrength / anomaly.signatureRadius
+fleetScanStrength = Σ ships × (hull.baseSensorStrength + Σ scan-strength modules) × (1 + scan-speed modifier)
+```
+
+An anomaly is **revealed** when `scanProgress >= 100`.
+
+| Variable | Range | Notes |
+|---|---|---|
+| `hull.baseSensorStrength` | 3 (shuttle) – 15 (covert-ops) | Per hull definition |
+| `scan-strength` module bonus | +0.10 (cargo-scanner-i) … +0.20 (scan-pinpointing-i) | Multiplicative per module |
+| `scan-speed` modifier | +0.10/level via Astrometrics | Applied as `(1 + total_modifier)` |
+| `signatureRadius` | 20–300 AU | Lower = harder; ore-pockets easy, relic-sites hardest |
+
+**Example:** A fleet of 3 Covert Ops (baseSensor 15) each with one `scan-pinpointing-i` (+0.20) and Astrometrics L3 (+0.30 speed):
+```
+fleetScanStrength = 3 × (15 + 0.20) × (1 + 0.30) = 3 × 15.2 × 1.3 = 59.28
+```
+Against a relic site with `signatureRadius = 50`:
+```
+progressPerSecond = 59.28 / 50 = 1.186 %/s → revealed in ~84 seconds
+```
+
+---
+
 # Blueprint Research Time Formula
 
 Research duration grows exponentially with level to create a meaningful mid-game time investment.

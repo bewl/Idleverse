@@ -36,7 +36,7 @@ impact. Each phase is independently shippable and leaves the game in a playable,
 | Fleet ship roles & doctrines | ✅ Complete | ShipRole, FleetDoctrine, FleetPanel Fleets tab, StarMapPanel Intel\|Route |
 | Fleet combat | ✅ Complete | NPC groups, patrol/raid orders, hull damage, bounty/loot, combat log |
 | Blueprint research & T2 manufacturing | ✅ Complete | Phase 3 shipped — research queue, BPC copies, T2 recipes |
-| Exploration & anomalies | ⬜ Phase 4 | Visited flags exist, no scanning |
+| Exploration & anomalies | ✅ Complete | Phase 4 shipped — anomaly scanning, discovery feed, Astrometrics/Archaeology/Hacking skills |
 | Factions & missions | ⬜ Phase 5 | Rep tracking exists, no consequences |
 | Dynamic economy & trade routes | ✅ Complete | Phase 1 shipped — dynamic prices + trade route automation |
 | Structures & player outposts | ⬜ Phase 6 | Type stub exists |
@@ -345,10 +345,26 @@ Advanced Industry L1 (new sub-skill under Industry category).
 
 ---
 
-# Phase 4 — Exploration & Anomaly Scanning
+# ✅ COMPLETED — Phase 4 — Exploration & Anomaly Scanning
 
-> **Status:** Designed, not yet implemented.
-> **Depends on:** Phase 2 (combat sites use combat resolution).
+> **Status:** ✅ Shipped — July 2025
+> **Files changed:** `game.types.ts`, `galaxy.types.ts`, `skills.config.ts`, `fleet.config.ts`, `anomaly.gen.ts` (new), `exploration.logic.ts` (new), `tickRunner.ts`, `initialState.ts`, `gameStore.ts`, `SystemPanel.tsx`, `OverviewPanel.tsx`
+
+## What Was Built
+
+- **5 anomaly types:** `ore-pocket`, `data-site`, `relic-site`, `combat-site`, `wormhole`
+- **Deterministic generation:** `generateAnomalies(systemId, security, daySeed, allSystemIds, nowMs)` — seeded LCG + FNV hash ensures consistent daily anomaly pools per system
+- **Scan mechanics:** Per-tick progress = `fleetScanStrength / signatureRadius`; fleet revealed at 100%
+- **Fleet scanning toggle:** Fleets can set `isScanning: true`; scanning tick runs in step 8c of tickRunner
+- **3 new skills:** Astrometrics (scan-speed +10%/level), Archaeology (loot relic sites), Hacking (loot data sites)
+- **3 T2 hulls:** `assault-frigate` (baseSensor 8), `covert-ops` (baseSensor 15), `command-destroyer` (baseSensor 7)
+- **New module:** `scan-pinpointing-i` (+20% scan-strength, mid-slot)
+- **Store actions:** `setFleetScanning`, `lootSite`, `activateOrePocket`
+- **UI — SystemPanel Anomalies tab:** Scan progress bars, revealed anomaly cards, action buttons, fleet scanner toggle
+- **UI — OverviewPanel Discoveries feed:** `DiscoveriesCard` shows last 8 finds with type icon, system name, timestamp
+- **Save migration:** Old saves patched with `discoveries: []`, `anomalies: {}`, `isScanning: false` on all fleets
+
+---
 
 ## Goal
 

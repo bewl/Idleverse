@@ -110,8 +110,8 @@ export function tickResearch(
   };
 
   if (
-    state.systems.manufacturing.researchJobs.length === 0 &&
-    state.systems.manufacturing.copyJobs.length === 0
+    (state.systems.manufacturing.researchJobs?.length ?? 0) === 0 &&
+    (state.systems.manufacturing.copyJobs?.length ?? 0) === 0
   ) return result;
 
   const speedMultiplier = getResearchSpeedMultiplier(state);

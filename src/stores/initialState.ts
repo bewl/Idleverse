@@ -144,6 +144,7 @@ export function createInitialState(): GameState {
         maxFleets: 5,
         combatLog: [],
         tradeRoutes: [],
+        discoveries: [],
       },
 
       structures: {
@@ -185,6 +186,7 @@ export function createInitialState(): GameState {
       galacticSliceZ: 0.5,
       npcGroupStates: {},
       systemPressure: {},
+      anomalies: {},
     },
   };
 }

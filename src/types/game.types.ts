@@ -2,6 +2,42 @@
 import type { FactionsState, FleetOrder } from '@/types/faction.types';
 import type { CombatOrder, CombatLogEntry } from '@/types/combat.types';
 
+// ─── Exploration ───────────────────────────────────────────────────────────
+
+export type AnomalyType = 'ore-pocket' | 'data-site' | 'relic-site' | 'combat-site' | 'wormhole';
+
+export interface Anomaly {
+  id: string;
+  systemId: string;
+  type: AnomalyType;
+  name: string;
+  /** Lower = harder to scan (takes more fleet sensor-time). */
+  signatureRadius: number;
+  /** 0–100. Scanning fleets advance this each tick. */
+  scanProgress: number;
+  /** true once scanProgress reaches 100. */
+  revealed: boolean;
+  /** true once the site has been looted / mined out / collapsed. */
+  depleted: boolean;
+  /** Ore pocket: unix-ms when the bonus belt expires. null = not yet activated. */
+  bonusExpiresAt: number | null;
+  /** Wormhole: destination system ID. */
+  linkedSystemId: string | null;
+  /** Wormhole: mass units remaining before collapse. */
+  massRemaining: number | null;
+  /** Wormhole / time-limited anomaly expiry (unix-ms). null = does not expire. */
+  expiresAt: number | null;
+}
+
+export interface DiscoveryEntry {
+  id: string;
+  timestamp: number;
+  anomalyType: AnomalyType;
+  anomalyName: string;
+  systemId: string;
+  systemName: string;
+}
+
 // ─── Resource ──────────────────────────────────────────────────────────────
 
 export interface ResourceDefinition {
@@ -283,6 +319,8 @@ export interface PlayerFleet {
   doctrine: FleetDoctrine;
   /** Active combat engagement order. null = fleet is not engaged. */
   combatOrder: CombatOrder | null;
+  /** When true the fleet is actively scanning its current system for anomalies. */
+  isScanning: boolean;
 }
 
 // ─── Pilot ─────────────────────────────────────────────────────────────────
@@ -365,6 +403,8 @@ export interface HullDefinition {
   warpSpeedBonus: number;
   moduleSlots: { high: number; mid: number; low: number };
   requiredPilotSkill?: { skillId: string; minLevel: number };
+  /** Base sensor strength contributed to fleet scanning each tick. */
+  baseSensorStrength: number;
 }
 
 export interface FleetState {
@@ -379,6 +419,8 @@ export interface FleetState {
   combatLog: CombatLogEntry[];
   /** Autonomous inter-system trade routes. */
   tradeRoutes: TradeRoute[];
+  /** Anomaly discoveries log (most recent first, capped at 50). */
+  discoveries: DiscoveryEntry[];
 }
 
 // ─── Structures ────────────────────────────────────────────────────────────

@@ -431,13 +431,99 @@ All players start with 12 T1 BPOs (one per T1 recipe) at `researchLevel 0`.
 
 ---
 
+# System 12 — Exploration & Anomaly Scanning
+
+**Phase:** 4 (Shipped July 2025)
+
+## Purpose
+
+Give unexplored systems a sense of genuine mystery. Fleets equipped with sensor modules can scan down hidden anomalies that yield unique rewards — bonus ore, datacores, relics, and wormhole connections that temporarily reshape the galaxy.
+
+## Anomaly Types
+
+| Type | signatureRadius | Reward |
+|---|---|---|
+| `ore-pocket` | 100–300 AU | `activateOrePocket` awards bonus ferrite; depleted immediately |
+| `data-site` | 40–100 AU | `lootSite` (requires Hacking L1) — datacores & electronic components |
+| `relic-site` | 20–70 AU | `lootSite` (requires Archaeology L1) — advanced alloys & starship datacores |
+| `combat-site` | 30–120 AU | Revealed for manual combat initiation (Phase 2 resolution) |
+| `wormhole` | 60–150 AU | Temporary jump edge; `linkedSystemId`, `massRemaining`, `expiresAt` |
+
+## Scan Formula
+
+```
+progressPerSecond = fleetScanStrength / anomaly.signatureRadius
+fleetScanStrength = Σ ships × (hull.baseSensorStrength + scanStrengthModules) × (1 + scan-speed modifier)
+```
+
+- `scan-speed` modifier: Astrometrics skill (+0.10/level)
+- `scan-strength` from modules: `cargo-scanner-i` (+0.10), `scan-pinpointing-i` (+0.20)
+- Anomaly revealed when `scanProgress >= 100`
+
+## Anomaly Generation
+
+Anomalies are generated lazily when a scanning fleet first ticks in a system:
+
+- Seed: `FNV(systemId) XOR daySeed` where `daySeed = Math.floor(nowMs / 86_400_000)`
+- Pools and count ranges vary by security tier:
+  - Highsec: 0–2, bias ore-pocket/data-site
+  - Lowsec: 1–3, bias combat-site/relic-site
+  - Nullsec: 2–4, bias wormhole/combat-site
+
+## New Skills (Science category)
+
+| Skill | Rank | Effect | Prereq |
+|---|---|---|---|
+| `astrometrics` | 2 | scan-speed +10%/level | science:1 |
+| `archaeology` | 3 | unlocks loot-relic-sites | astrometrics:1 |
+| `hacking` | 2 | unlocks loot-data-sites | astrometrics:1 |
+
+## T2 Hulls Added
+
+| Hull | baseSensorStrength | Role |
+|---|---|---|
+| `assault-frigate` | 8 | T2 combat frigate |
+| `covert-ops` | 15 | Best scanner; exploration specialist |
+| `command-destroyer` | 7 | T2 fleet command destroyer |
+
+## State Shape
+
+```ts
+// GalaxyState
+anomalies: Record<string, Anomaly[]>   // systemId → daily anomaly pool
+
+// FleetState
+discoveries: DiscoveryEntry[]          // last 50 discovery events
+
+// PlayerFleet
+isScanning: boolean                    // scanning mode toggle
+```
+
+## Tick Integration
+
+Step 8c in `tickRunner.ts` (gated by `unlocks['system-exploration']`):
+1. Iterates scanning fleets
+2. Lazily generates anomalies for each fleet's current system
+3. Advances `scanProgress` per anomaly
+4. Emits `DiscoveryEntry` on revelation
+5. Merges results back into `state.galaxy.anomalies` and `state.systems.fleet.discoveries`
+
+## Files
+
+- `src/game/galaxy/anomaly.gen.ts` — deterministic generation
+- `src/game/systems/fleet/exploration.logic.ts` — tick logic + scan strength helper
+- `src/stores/gameStore.ts` — `setFleetScanning`, `lootSite`, `activateOrePocket`
+- `src/ui/panels/SystemPanel.tsx` — Anomalies tab with scan progress bars & action buttons
+- `src/ui/panels/OverviewPanel.tsx` — `DiscoveriesCard` feed
+
+---
+
 # Planned Future Systems
 
 See `Idleverse_DESIGN_PLAN.md` for detailed specs on:
 
 | System | Phase |
 |---|---|
-| Exploration & Anomaly Scanning | Phase 4 |
 | Factions, Stations & Mission Boards | Phase 5 |
 | Structures & Player Outposts | Phase 6 |
 | Prestige / New Game+ | Phase 7 |

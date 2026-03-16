@@ -11,6 +11,7 @@ import { getSystemById, getSystemBeltIds } from '@/game/galaxy/galaxy.gen';
 import { tickFleet } from '@/game/systems/fleet/fleet.tick';
 import { advanceFleetOrders } from '@/game/systems/fleet/fleet.orders';
 import { tickCombat } from '@/game/systems/combat/combat.logic';
+import { tickExploration } from '@/game/systems/fleet/exploration.logic';
 
 export interface TickResult {
   newState: GameState;
@@ -340,7 +341,22 @@ export function runTick(state: GameState, deltaSeconds: number): TickResult {
 
     // ── 8b. Trade route automation (buy/sell + dispatch) ────────────────
     s = tickTradeRoutes(s);
-  }
+    // ── 8c. Exploration: advance scanning progress, reveal anomalies ──────────
+    if (s.unlocks['system-exploration']) {
+      const exploResult = tickExploration(s, deltaSeconds);
+      if (Object.keys(exploResult.updatedAnomalies).length > 0 || exploResult.newDiscoveries.length > 0) {
+        const mergedAnomalies = { ...s.galaxy.anomalies, ...exploResult.updatedAnomalies };
+        const discoveries = [
+          ...exploResult.newDiscoveries,
+          ...(s.systems.fleet.discoveries ?? []),
+        ].slice(0, 50);
+        s = {
+          ...s,
+          galaxy:  { ...s.galaxy, anomalies: mergedAnomalies },
+          systems: { ...s.systems, fleet: { ...s.systems.fleet, discoveries } },
+        };
+      }
+    }  }
 
   // ── 9. Combat: resolve fleet combat engagements ─────────────────────────
   if (s.unlocks['system-fleet']) {

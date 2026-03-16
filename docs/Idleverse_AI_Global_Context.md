@@ -161,19 +161,18 @@ For detailed specs see `Idleverse_SYSTEM_BLUEPRINTS.md`. For the upcoming pipeli
 - Asteroid Mining (9 ore belts, 3 security tiers, pool depletion)
 - Ore Reprocessing (mineral yield, skill-scaled, auto-queue)
 - Manufacturing (12 recipes — components + ships, skill-gated)
-- Skills (34 corp-wide skills; pilot individual skills)
+- Skills (34+ corp-wide skills; pilot individual skills)
 - NPC Market (ISK income via sell orders, auto-sell, lifetime tracking)
 - Galaxy & Navigation (400 procedurally generated systems, BFS/Dijkstra routing)
 - Fleet Management (ships, pilots, named fleets, doctrines, ship roles)
 - Fleet Combat (NPC pirate groups, patrol/raid orders, hull damage, loot)
 - Factions (rep tracking — consequences planned for Phase 5)
 - Pilots (individual crew with skills, morale, training focus)
+- Blueprint Research & T2 Manufacturing (research levels, BPC copies, T2 recipes)
+- Exploration & Anomaly Scanning (scan progress, 5 anomaly types, discovery feed)
 
 ### Planned Systems (see Design Plan)
 
-- Phase 1: Dynamic Economy & Trade Routes
-- Phase 3: Blueprint Research & T2 Manufacturing
-- Phase 4: Exploration & Anomaly Scanning
 - Phase 5: Factions, Stations & Mission Boards
 - Phase 6: Structures & Player Outposts
 - Phase 7: Prestige / New Game+

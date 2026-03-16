@@ -159,6 +159,14 @@ interface GameStore {
   /** Global galaxy selector helper — reads galaxy from state. */
   getGalaxy: () => ReturnType<typeof generateGalaxy>;
 
+  // Exploration
+  /** Toggle a fleet's scanning mode. Scanning fleets reveal anomalies each tick. */
+  setFleetScanning: (fleetId: string, scanning: boolean) => boolean;
+  /** Loot a revealed data or relic anomaly with the given fleet. Requires Hacking or Archaeology unlock. */
+  lootSite: (fleetId: string, anomalyId: string) => boolean;
+  /** Activate a revealed ore-pocket anomaly to receive an immediate bonus ore yield. */
+  activateOrePocket: (fleetId: string, anomalyId: string) => boolean;
+
   // Persistence
   saveToStorage: () => void;
   loadFromStorage: () => void;
@@ -1235,6 +1243,109 @@ export const useGameStore = create<GameStore>((set, get) => ({
   getGalaxy: () => {
     return generateGalaxy(get().state.galaxy.seed);
   },
+
+  // ── Exploration ───────────────────────────────────────────────────────────
+
+  setFleetScanning: (fleetId, scanning) => {
+    const { state } = get();
+    const fleet = state.systems.fleet.fleets[fleetId];
+    if (!fleet) return false;
+    set({
+      state: {
+        ...state,
+        systems: {
+          ...state.systems,
+          fleet: {
+            ...state.systems.fleet,
+            fleets: {
+              ...state.systems.fleet.fleets,
+              [fleetId]: { ...fleet, isScanning: scanning },
+            },
+          },
+        },
+      },
+    });
+    return true;
+  },
+
+  lootSite: (fleetId, anomalyId) => {
+    const { state } = get();
+    const fleet = state.systems.fleet.fleets[fleetId];
+    if (!fleet) return false;
+
+    const systemId = fleet.currentSystemId ?? state.galaxy.currentSystemId;
+    const systemAnomalies = state.galaxy.anomalies[systemId] ?? [];
+    const anomaly = systemAnomalies.find(a => a.id === anomalyId);
+    if (!anomaly || !anomaly.revealed || anomaly.depleted) return false;
+
+    const isDataSite  = anomaly.type === 'data-site';
+    const isRelicSite = anomaly.type === 'relic-site';
+    if (!isDataSite && !isRelicSite) return false;
+
+    const hasHacking    = isDataSite  && !!state.unlocks['loot-data-sites'];
+    const hasArchaeology = isRelicSite && !!state.unlocks['loot-relic-sites'];
+    if (!hasHacking && !hasArchaeology) return false;
+
+    // Award loot into state.resources
+    const loot: Record<string, number> = isDataSite
+      ? { 'datacore-electronic': 2 + Math.floor(Math.random() * 3), 'datacore-mechanical': 1 + Math.floor(Math.random() * 2) }
+      : { 'advanced-alloy': 3 + Math.floor(Math.random() * 4), 'datacore-starship': 1 + Math.floor(Math.random() * 2) };
+
+    const newResources = { ...state.resources };
+    for (const [id, qty] of Object.entries(loot)) {
+      newResources[id] = (newResources[id] ?? 0) + qty;
+    }
+
+    const updatedAnomalies = systemAnomalies.map(a =>
+      a.id === anomalyId ? { ...a, depleted: true } : a,
+    );
+
+    set({
+      state: {
+        ...state,
+        resources: newResources,
+        galaxy: {
+          ...state.galaxy,
+          anomalies: { ...state.galaxy.anomalies, [systemId]: updatedAnomalies },
+        },
+      },
+    });
+    return true;
+  },
+
+  activateOrePocket: (fleetId, anomalyId) => {
+    const { state } = get();
+    const fleet = state.systems.fleet.fleets[fleetId];
+    if (!fleet) return false;
+
+    const systemId = fleet.currentSystemId ?? state.galaxy.currentSystemId;
+    const systemAnomalies = state.galaxy.anomalies[systemId] ?? [];
+    const anomaly = systemAnomalies.find(a => a.id === anomalyId);
+    if (!anomaly || !anomaly.revealed || anomaly.depleted || anomaly.type !== 'ore-pocket') return false;
+
+    // Award a bonus ore haul proportional to the fleet's mining power
+    const shipCount = fleet.shipIds.length;
+    const bonusOre  = 200 + shipCount * 80;
+    const newResources = { ...state.resources };
+    newResources['ferrite'] = (newResources['ferrite'] ?? 0) + bonusOre;
+
+    const updatedAnomalies = systemAnomalies.map(a =>
+      a.id === anomalyId ? { ...a, depleted: true, bonusExpiresAt: null } : a,
+    );
+
+    set({
+      state: {
+        ...state,
+        resources: newResources,
+        galaxy: {
+          ...state.galaxy,
+          anomalies: { ...state.galaxy.anomalies, [systemId]: updatedAnomalies },
+        },
+      },
+    });
+    return true;
+  },
+
   // ── Persistence ──────────────────────────────────────────────────────────
 
   saveToStorage: () => {
@@ -1294,6 +1405,27 @@ export const useGameStore = create<GameStore>((set, get) => ({
       patchedSystems.factions = defaults.systems.factions;
     }
 
+    // Patch manufacturing — blueprints/researchJobs/copyJobs added in Phase 3
+    if (!patchedSystems.manufacturing.blueprints) {
+      patchedSystems.manufacturing = { ...patchedSystems.manufacturing, blueprints: defaults.systems.manufacturing.blueprints };
+    }
+    if (!patchedSystems.manufacturing.researchJobs) {
+      patchedSystems.manufacturing = { ...patchedSystems.manufacturing, researchJobs: [] };
+    }
+    if (!patchedSystems.manufacturing.copyJobs) {
+      patchedSystems.manufacturing = { ...patchedSystems.manufacturing, copyJobs: [] };
+    }
+
+    // Patch fleet Phase 4 — discoveries feed, isScanning flag on every fleet
+    if (!patchedSystems.fleet.discoveries) {
+      patchedSystems.fleet = { ...patchedSystems.fleet, discoveries: [] };
+    }
+    const patchedFleets4: typeof patchedSystems.fleet.fleets = {};
+    for (const [id, fleet] of Object.entries(patchedSystems.fleet.fleets)) {
+      patchedFleets4[id] = fleet.isScanning === undefined ? { ...fleet, isScanning: false } : fleet;
+    }
+    patchedSystems.fleet = { ...patchedSystems.fleet, fleets: patchedFleets4 };
+
     // Recompute skill-derived modifiers from saved skill levels (safety net)
     const recomputedModifiers = buildModifiersFromSkills(patchedSystems.skills);
     const recomputedUnlocks   = buildUnlocksFromSkills(patchedSystems.skills);
@@ -1305,7 +1437,12 @@ export const useGameStore = create<GameStore>((set, get) => ({
       modifiers: { ...save.state.modifiers, ...recomputedModifiers },
       // Patch galaxy if it was added after this save was written
       galaxy:    save.state.galaxy
-        ? { ...save.state.galaxy, galacticSliceZ: save.state.galaxy.galacticSliceZ ?? 0.5, npcGroupStates: save.state.galaxy.npcGroupStates ?? {} }
+        ? {
+            ...save.state.galaxy,
+            galacticSliceZ:  save.state.galaxy.galacticSliceZ  ?? 0.5,
+            npcGroupStates:  save.state.galaxy.npcGroupStates ?? {},
+            anomalies:       save.state.galaxy.anomalies       ?? {},
+          }
         : defaults.galaxy,
     };
 

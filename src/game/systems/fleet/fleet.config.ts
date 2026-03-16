@@ -11,6 +11,7 @@ export const HULL_DEFINITIONS: Record<string, HullDefinition> = {
     baseMiningBonus: 0.5, baseCombatRating: 0.5,
     baseCargoMultiplier: 1.0, warpSpeedBonus: 0.0,
     moduleSlots: { high: 1, mid: 1, low: 1 },
+    baseSensorStrength: 3,
   },
 
   'frigate': {
@@ -21,6 +22,7 @@ export const HULL_DEFINITIONS: Record<string, HullDefinition> = {
     baseCargoMultiplier: 1.0, warpSpeedBonus: 0.1,
     moduleSlots: { high: 2, mid: 2, low: 2 },
     requiredPilotSkill: { skillId: 'spaceship-command', minLevel: 1 },
+    baseSensorStrength: 5,
   },
 
   'mining-frigate': {
@@ -31,6 +33,7 @@ export const HULL_DEFINITIONS: Record<string, HullDefinition> = {
     baseCargoMultiplier: 1.5, warpSpeedBonus: 0.0,
     moduleSlots: { high: 2, mid: 1, low: 2 },
     requiredPilotSkill: { skillId: 'mining-frigate', minLevel: 1 },
+    baseSensorStrength: 4,
   },
 
   'hauler': {
@@ -41,6 +44,7 @@ export const HULL_DEFINITIONS: Record<string, HullDefinition> = {
     baseCargoMultiplier: 4.0, warpSpeedBonus: 0.0,
     moduleSlots: { high: 1, mid: 2, low: 3 },
     requiredPilotSkill: { skillId: 'industrial', minLevel: 1 },
+    baseSensorStrength: 3,
   },
 
   'destroyer': {
@@ -51,6 +55,7 @@ export const HULL_DEFINITIONS: Record<string, HullDefinition> = {
     baseCargoMultiplier: 1.0, warpSpeedBonus: 0.05,
     moduleSlots: { high: 4, mid: 2, low: 1 },
     requiredPilotSkill: { skillId: 'destroyer', minLevel: 1 },
+    baseSensorStrength: 5,
   },
 
   'exhumer': {
@@ -61,6 +66,42 @@ export const HULL_DEFINITIONS: Record<string, HullDefinition> = {
     baseCargoMultiplier: 2.0, warpSpeedBonus: 0.0,
     moduleSlots: { high: 3, mid: 2, low: 3 },
     requiredPilotSkill: { skillId: 'mining-barge', minLevel: 3 },
+    baseSensorStrength: 3,
+  },
+
+  // ─── T2 hulls ─────────────────────────────────────────────────────────────
+
+  'assault-frigate': {
+    id: 'assault-frigate', name: 'Assault Frigate', shipClass: 'frigate',
+    description: 'A Tech 2 combat frigate with reinforced hull and advanced weapon systems. Superior firepower over its T1 counterpart.',
+    resourceId: 'ship-assault-frigate',
+    baseMiningBonus: 0.8, baseCombatRating: 2.8,
+    baseCargoMultiplier: 1.0, warpSpeedBonus: 0.15,
+    moduleSlots: { high: 3, mid: 2, low: 2 },
+    requiredPilotSkill: { skillId: 'frigate', minLevel: 3 },
+    baseSensorStrength: 8,
+  },
+
+  'covert-ops': {
+    id: 'covert-ops', name: 'Covert Ops', shipClass: 'frigate',
+    description: 'A Tech 2 exploration and reconnaissance frigate. Exceptional sensor arrays make it the fastest scanner in the cluster.',
+    resourceId: 'ship-covert-ops',
+    baseMiningBonus: 0.5, baseCombatRating: 1.0,
+    baseCargoMultiplier: 1.2, warpSpeedBonus: 0.2,
+    moduleSlots: { high: 2, mid: 3, low: 2 },
+    requiredPilotSkill: { skillId: 'frigate', minLevel: 4 },
+    baseSensorStrength: 15,
+  },
+
+  'command-destroyer': {
+    id: 'command-destroyer', name: 'Command Destroyer', shipClass: 'destroyer',
+    description: 'A Tech 2 destroyer variant with fleet command capabilities. Coordinates fleet combat and applies warfare links.',
+    resourceId: 'ship-command-destroyer',
+    baseMiningBonus: 0.5, baseCombatRating: 4.0,
+    baseCargoMultiplier: 1.2, warpSpeedBonus: 0.05,
+    moduleSlots: { high: 4, mid: 3, low: 2 },
+    requiredPilotSkill: { skillId: 'destroyer', minLevel: 3 },
+    baseSensorStrength: 7,
   },
 };
 
@@ -134,6 +175,14 @@ export const MODULE_DEFINITIONS: Record<string, ModuleDefinition> = {
     buildCost: { 'ferrite': 40, 'sensor-cluster': 1 },
   },
 
+  'scan-pinpointing-i': {
+    id: 'scan-pinpointing-i', name: 'Scan Pinpointing Array I',
+    description: 'Focused sensor array that narrows scan beams. Greatly increases scan strength for anomaly revelation.',
+    slotType: 'mid',
+    effects: { 'scan-strength': 0.20 },
+    buildCost: { 'vexirite': 120, 'sensor-cluster': 2 },
+  },
+
   // Low-slot modules
   'cargo-expander-i': {
     id: 'cargo-expander-i', name: 'Cargo Expander I',
@@ -175,7 +224,7 @@ export const PILOT_SKILL_FOCUS_TREES: Record<PilotTrainingFocus, string[]> = {
   mining:      ['mining', 'astrogeology', 'mining-frigate', 'mining-barge', 'drone-interfacing', 'advanced-mining'],
   combat:      ['spaceship-command', 'frigate', 'destroyer', 'cruiser', 'gunnery', 'military-operations', 'electronics', 'ladar-sensing'],
   hauling:     ['spaceship-command', 'industrial', 'frigate', 'cpu-management'],
-  exploration: ['survey', 'electronics', 'ladar-sensing', 'spaceship-command', 'frigate'],
+  exploration: ['astrometrics', 'survey', 'electronics', 'ladar-sensing', 'spaceship-command', 'frigate', 'archaeology', 'hacking'],
   balanced:    ['spaceship-command', 'mining', 'frigate', 'survey', 'electronics'],
 };
 

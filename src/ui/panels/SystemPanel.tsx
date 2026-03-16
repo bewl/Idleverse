@@ -16,6 +16,7 @@ import { getCurrentSystemBeltIds, getBeltRichness } from '@/game/systems/mining/
 import { ORE_BELTS } from '@/game/systems/mining/mining.config';
 import { RESOURCE_REGISTRY } from '@/game/resources/resourceRegistry';
 import type { CelestialBody } from '@/types/galaxy.types';
+import type { Anomaly, AnomalyType } from '@/types/game.types';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -357,6 +358,238 @@ function BodyDetail({ body, inWarp }: { body: CelestialBody; inWarp: boolean }) 
   );
 }
 
+// ─── Anomaly helpers ──────────────────────────────────────────────────────────
+
+function anomalyTypeColor(type: AnomalyType): string {
+  switch (type) {
+    case 'ore-pocket':   return '#22d3ee';
+    case 'data-site':    return '#818cf8';
+    case 'relic-site':   return '#f59e0b';
+    case 'combat-site':  return '#f87171';
+    case 'wormhole':     return '#a78bfa';
+  }
+}
+
+function anomalyTypeLabel(type: AnomalyType): string {
+  switch (type) {
+    case 'ore-pocket':  return 'Ore Pocket';
+    case 'data-site':   return 'Data Site';
+    case 'relic-site':  return 'Relic Site';
+    case 'combat-site': return 'Combat Site';
+    case 'wormhole':    return 'Wormhole';
+  }
+}
+
+function anomalyTypeIcon(type: AnomalyType): string {
+  switch (type) {
+    case 'ore-pocket':  return '◆';
+    case 'data-site':   return '⬡';
+    case 'relic-site':  return '⧖';
+    case 'combat-site': return '☩';
+    case 'wormhole':    return '⊕';
+  }
+}
+
+function AnomalyCard({
+  anomaly,
+  canLootData,
+  canLootRelic,
+  fleetIdInSystem,
+}: {
+  anomaly: Anomaly;
+  canLootData: boolean;
+  canLootRelic: boolean;
+  fleetIdInSystem: string | null;
+}) {
+  const lootSite        = useGameStore(s => s.lootSite);
+  const activateOrePocket = useGameStore(s => s.activateOrePocket);
+
+  const col = anomalyTypeColor(anomaly.type);
+
+  const canLoot =
+    (anomaly.type === 'data-site'  && canLootData)  ||
+    (anomaly.type === 'relic-site' && canLootRelic);
+  const canActivate = anomaly.type === 'ore-pocket';
+
+  return (
+    <div style={{
+      padding: '8px 10px', borderRadius: 5,
+      border: `1px solid ${col}25`,
+      background: `${col}08`,
+      display: 'flex', flexDirection: 'column', gap: 5,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+        <span style={{ color: col, fontSize: 10 }}>{anomalyTypeIcon(anomaly.type)}</span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          {anomaly.revealed ? (
+            <div style={{ fontSize: 10, fontWeight: 700, color: col, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {anomaly.name}
+            </div>
+          ) : (
+            <div style={{ fontSize: 10, color: '#475569', fontStyle: 'italic' }}>Unknown Signal</div>
+          )}
+          <div style={{ fontSize: 8, color: '#475569', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+            {anomaly.revealed ? anomalyTypeLabel(anomaly.type) : `Sig ${anomaly.signatureRadius.toFixed(0)} AU`}
+          </div>
+        </div>
+        {anomaly.depleted && (
+          <span style={{ fontSize: 8, color: '#374151', padding: '1px 5px', border: '1px solid #1f2937', borderRadius: 3 }}>
+            depleted
+          </span>
+        )}
+      </div>
+
+      {/* Scan progress bar */}
+      {!anomaly.revealed && !anomaly.depleted && (
+        <div>
+          <div style={{ fontSize: 8, color: '#475569', marginBottom: 2 }}>
+            Scan progress — {anomaly.scanProgress.toFixed(0)}%
+          </div>
+          <div style={{ height: 3, background: 'rgba(30,41,59,0.6)', borderRadius: 3, overflow: 'hidden' }}>
+            <div style={{
+              height: '100%', borderRadius: 3,
+              background: 'linear-gradient(90deg, #0e7490, #22d3ee)',
+              width: `${anomaly.scanProgress}%`, transition: 'width 0.5s',
+            }} />
+          </div>
+        </div>
+      )}
+
+      {/* Wormhole destination */}
+      {anomaly.revealed && anomaly.type === 'wormhole' && anomaly.linkedSystemId && (
+        <div style={{ fontSize: 8, color: '#7c3aed', fontFamily: 'monospace' }}>
+          → {anomaly.linkedSystemId} · mass {((anomaly.massRemaining ?? 0) / 1000).toFixed(1)}kt
+        </div>
+      )}
+
+      {/* Action buttons — only when fleet is present */}
+      {anomaly.revealed && !anomaly.depleted && fleetIdInSystem && (
+        <div style={{ display: 'flex', gap: 5, marginTop: 2 }}>
+          {canActivate && (
+            <button
+              onClick={() => activateOrePocket(fleetIdInSystem, anomaly.id)}
+              style={{
+                flex: 1, padding: '3px 0', borderRadius: 3, cursor: 'pointer', fontSize: 8,
+                border: '1px solid rgba(34,211,238,0.4)', color: '#22d3ee',
+                background: 'rgba(8,51,68,0.25)',
+              }}
+            >
+              Activate
+            </button>
+          )}
+          {(anomaly.type === 'data-site' || anomaly.type === 'relic-site') && (
+            <button
+              onClick={() => canLoot ? lootSite(fleetIdInSystem, anomaly.id) : undefined}
+              disabled={!canLoot}
+              style={{
+                flex: 1, padding: '3px 0', borderRadius: 3, cursor: canLoot ? 'pointer' : 'default', fontSize: 8,
+                border: canLoot ? '1px solid rgba(129,140,248,0.4)' : '1px solid rgba(55,65,81,0.5)',
+                color: canLoot ? '#818cf8' : '#374151',
+                background: canLoot ? 'rgba(29,30,80,0.25)' : 'transparent',
+              }}
+            >
+              {canLoot ? 'Loot Site' : (anomaly.type === 'data-site' ? 'Need Hacking' : 'Need Archaeology')}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AnomaliesTab({ systemId }: { systemId: string }) {
+  const state           = useGameStore(s => s.state);
+  const setFleetScanning = useGameStore(s => s.setFleetScanning);
+
+  const anomalies: Anomaly[]  = state.galaxy?.anomalies?.[systemId] ?? [];
+  const canLootData   = !!state.unlocks['loot-data-sites'];
+  const canLootRelic  = !!state.unlocks['loot-relic-sites'];
+  const hasExploration = !!state.unlocks['system-exploration'];
+
+  // Find all player fleets in this system
+  const localFleets = Object.values(state.systems.fleet.fleets).filter(
+    f => f.currentSystemId === systemId && f.shipIds.length > 0,
+  );
+  // First fleet in system for action buttons
+  const primaryFleetId = localFleets[0]?.id ?? null;
+
+  return (
+    <div style={{ display: 'flex', flex: 1, flexDirection: 'column', overflow: 'hidden' }}>
+      {/* Fleet scanning controls */}
+      {localFleets.length > 0 && (
+        <div style={{
+          padding: '8px 12px',
+          borderBottom: '1px solid rgba(22,30,52,0.6)',
+          flexShrink: 0,
+        }}>
+          <div style={{ fontSize: 8, color: '#334155', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 5 }}>
+            Fleet Scanners
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {localFleets.map(fleet => (
+              <div key={fleet.id} style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                padding: '5px 8px', borderRadius: 4,
+                border: fleet.isScanning ? '1px solid rgba(34,211,238,0.3)' : '1px solid rgba(22,30,52,0.5)',
+                background: fleet.isScanning ? 'rgba(8,51,68,0.2)' : 'rgba(6,9,20,0.3)',
+                cursor: 'pointer',
+              }}
+                onClick={() => setFleetScanning(fleet.id, !fleet.isScanning)}
+              >
+                <span style={{
+                  width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
+                  background: fleet.isScanning ? '#22d3ee' : '#1e293b',
+                  boxShadow: fleet.isScanning ? '0 0 4px #22d3ee' : 'none',
+                }} />
+                <span style={{ flex: 1, fontSize: 10, color: fleet.isScanning ? '#22d3ee' : '#475569' }}>
+                  {fleet.name}
+                </span>
+                <span style={{
+                  fontSize: 8, color: fleet.isScanning ? '#22d3ee' : '#374151',
+                  letterSpacing: '0.08em', textTransform: 'uppercase',
+                }}>
+                  {fleet.isScanning ? 'scanning' : 'idle'}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Anomaly list */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {!hasExploration ? (
+          <div style={{
+            padding: '16px 12px', fontSize: 9, color: '#334155',
+            textAlign: 'center', lineHeight: 1.6,
+          }}>
+            Exploration locked.<br />
+            Train <span style={{ color: '#818cf8' }}>Astrometrics I</span> to begin scanning anomalies.
+          </div>
+        ) : anomalies.length === 0 ? (
+          <div style={{
+            padding: '16px 12px', fontSize: 9, color: '#334155',
+            textAlign: 'center', lineHeight: 1.6,
+          }}>
+            No anomalies detected.<br />
+            Deploy a fleet and enable scanning to reveal signatures.
+          </div>
+        ) : (
+          anomalies.map(anomaly => (
+            <AnomalyCard
+              key={anomaly.id}
+              anomaly={anomaly}
+              canLootData={canLootData}
+              canLootRelic={canLootRelic}
+              fleetIdInSystem={primaryFleetId}
+            />
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Main component ────────────────────────────────────────────────────────────
 
 /** Inner panel — only rendered when galaxy state is confirmed present. */
@@ -370,6 +603,7 @@ function SystemPanelInner() {
   );
 
   const [selectedBodyId, setSelectedBodyId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'orrery' | 'anomalies'>('orrery');
 
   const selectedBody = useMemo(
     () => system.bodies.find(b => b.id === selectedBodyId) ?? null,
@@ -384,6 +618,10 @@ function SystemPanelInner() {
   // Available belt count for this system
   const systemBeltIds = getCurrentSystemBeltIds(state);
   const activeBeltCount = systemBeltIds.filter(id => state.systems.mining.targets[id]).length;
+
+  // Anomaly badge for the tab
+  const systemAnomalies: Anomaly[] = galaxy.anomalies?.[system.id] ?? [];
+  const revealedCount = systemAnomalies.filter(a => a.revealed && !a.depleted).length;
 
   return (
     <div style={{
@@ -429,6 +667,42 @@ function SystemPanelInner() {
         </div>
       </div>
 
+      {/* ── Tab bar ── */}
+      <div style={{
+        display: 'flex', borderBottom: '1px solid rgba(22,30,52,0.8)', flexShrink: 0,
+        background: 'rgba(3,5,16,0.5)',
+      }}>
+        {(['orrery', 'anomalies'] as const).map(tab => {
+          const isActive = activeTab === tab;
+          return (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              style={{
+                padding: '6px 14px', fontSize: 9, cursor: 'pointer',
+                fontWeight: isActive ? 700 : 400, letterSpacing: '0.08em', textTransform: 'uppercase',
+                color: isActive ? '#ffe47a' : '#334155',
+                borderTop: 'none', borderLeft: 'none', borderRight: 'none',
+                borderBottom: isActive ? '2px solid #ffe47a' : '2px solid transparent',
+                background: 'transparent',
+                display: 'flex', alignItems: 'center', gap: 5,
+              }}
+            >
+              {tab === 'orrery' ? 'Orrery' : 'Anomalies'}
+              {tab === 'anomalies' && revealedCount > 0 && (
+                <span style={{
+                  fontSize: 8, padding: '0px 4px', borderRadius: 8,
+                  background: 'rgba(168,85,247,0.25)', color: '#a855f7',
+                  border: '1px solid rgba(168,85,247,0.3)',
+                }}>
+                  {revealedCount}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
       {/* ── Warp banner ── */}
       {inWarp && warp && (
         <div style={{
@@ -451,7 +725,13 @@ function SystemPanelInner() {
         </div>
       )}
 
-      {/* ── Main: orrery + detail ── */}
+      {/* ── Anomalies tab ── */}
+      {activeTab === 'anomalies' && (
+        <AnomaliesTab systemId={system.id} />
+      )}
+
+      {/* ── Orrery tab: orrery + detail ── */}
+      {activeTab === 'orrery' && (
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
         {/* Orrery */}
         <div
@@ -541,6 +821,7 @@ function SystemPanelInner() {
           )}
         </div>
       </div>
+      )}
     </div>
   );
 }
