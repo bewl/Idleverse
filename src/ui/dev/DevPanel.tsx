@@ -31,7 +31,11 @@ import {
 } from '@/game/systems/skills/skills.logic';
 import { HULL_DEFINITIONS } from '@/game/systems/fleet/fleet.config';
 import { generatePilot } from '@/game/systems/fleet/fleet.gen';
-import type { GameState, SkillsState, ShipInstance } from '@/types/game.types';
+import { useUiStore } from '@/stores/uiStore';
+import { FACTION_DEFINITIONS, FACTION_ORDER } from '@/game/systems/factions/faction.config';
+import { generateGalaxy } from '@/game/galaxy/galaxy.gen';
+import type { GameState, SkillsState, ShipInstance, AnomalyType, Anomaly } from '@/types/game.types';
+import type { FactionId } from '@/types/faction.types';
 
 // ─── Static data ────────────────────────────────────────────────────────────
 
@@ -42,7 +46,7 @@ const COMPONENT_IDS = [
 
 const ALL_SYSTEM_UNLOCKS = [
   'system-mining', 'system-skills', 'system-manufacturing',
-  'system-market', 'system-reprocessing', 'system-fleet',
+  'system-market', 'system-reprocessing', 'system-fleet', 'system-exploration',
 ];
 
 const ALL_BELT_UNLOCKS = [
@@ -167,30 +171,33 @@ const SCENARIOS: ScenarioDef[] = [
 
 // ─── Shared micro-components ─────────────────────────────────────────────────
 
-function SectionLabel({ children }: { children: React.ReactNode }) {
+function SectionLabel({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
   return (
     <div style={{
       fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase',
       color: '#44403c', fontFamily: 'monospace', padding: '6px 0 2px',
       borderTop: '1px solid rgba(30,41,59,0.5)', marginTop: 4,
+      ...style,
     }}>
       {children}
     </div>
   );
 }
 
-function InjectButton({ label, onClick }: { label: string; onClick: () => void }) {
+function InjectButton({ label, onClick, disabled }: { label: string; onClick: () => void; disabled?: boolean }) {
   return (
     <button
       onClick={onClick}
+      disabled={disabled}
       style={{
         padding: '2px 5px', fontSize: 9, fontFamily: 'monospace', fontWeight: 600,
         border: '1px solid rgba(34,211,238,0.25)', borderRadius: 3,
-        background: 'rgba(8,51,68,0.5)', color: '#67e8f9', cursor: 'pointer',
+        background: 'rgba(8,51,68,0.5)', color: disabled ? '#334155' : '#67e8f9',
+        cursor: disabled ? 'not-allowed' : 'pointer',
         transition: 'background 0.1s',
         whiteSpace: 'nowrap',
       }}
-      onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(8,51,68,0.9)'; }}
+      onMouseEnter={e => { if (!disabled) (e.currentTarget as HTMLButtonElement).style.background = 'rgba(8,51,68,0.9)'; }}
       onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(8,51,68,0.5)'; }}
     >
       {label}
@@ -583,6 +590,61 @@ function ScenariosTab() {
   );
 }
 
+// ─── Time Controls ────────────────────────────────────────────────────────────
+
+const SPEED_PRESETS = [0.1, 0.5, 1, 2, 5, 10, 50] as const;
+
+function TimeControls() {
+  const devTimeScale  = useUiStore(s => s.devTimeScale);
+  const setDevTimeScale = useUiStore(s => s.setDevTimeScale);
+
+  const tickForward = (seconds: number) => {
+    useGameStore.getState().tick(seconds);
+  };
+
+  return (
+    <div style={{ padding: '5px 10px 6px', borderBottom: '1px solid rgba(30,41,59,0.7)', flexShrink: 0 }}>
+      {/* Speed row */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginBottom: 5 }}>
+        <span style={{ fontSize: 8, color: '#57534e', fontFamily: 'monospace', marginRight: 2 }}>SPEED</span>
+        {SPEED_PRESETS.map(s => (
+          <button
+            key={s}
+            onClick={() => setDevTimeScale(s)}
+            style={{
+              flex: 1, padding: '3px 0', fontSize: 8, fontFamily: 'monospace', fontWeight: 700,
+              border: `1px solid ${devTimeScale === s ? 'rgba(245,158,11,0.5)' : 'rgba(30,41,59,0.5)'}`,
+              borderRadius: 3,
+              background: devTimeScale === s ? 'rgba(120,53,15,0.45)' : 'rgba(15,23,42,0.6)',
+              color: devTimeScale === s ? '#fbbf24' : '#475569',
+              cursor: 'pointer',
+            }}
+          >
+            {s}×
+          </button>
+        ))}
+      </div>
+      {/* Tick-forward row */}
+      <div style={{ display: 'flex', gap: 5 }}>
+        {([['+ 1 min', 60], ['+ 1 hr', 3600], ['+ 24 hr', 86400]] as const).map(([label, secs]) => (
+          <button
+            key={secs}
+            onClick={() => tickForward(secs)}
+            style={{
+              flex: 1, padding: '3px 0', fontSize: 8, fontFamily: 'monospace', fontWeight: 700,
+              border: '1px solid rgba(34,211,238,0.2)', borderRadius: 3,
+              background: 'rgba(8,51,68,0.3)', color: '#22d3ee',
+              cursor: 'pointer',
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ─── Fleet Tab ───────────────────────────────────────────────────────────────
 
 function FleetTab() {
@@ -737,20 +799,399 @@ function FleetTab() {
           </div>
         );
       })}
+
+      {/* Live ships — hull integrity + repair */}
+      {shipCount > 0 && (
+        <>
+          <SectionLabel style={{ marginTop: 8 }}>Ship Integrity</SectionLabel>
+          {Object.values(ships).map(ship => {
+            const integrity = 100 - ship.hullDamage;
+            const isDamaged = ship.hullDamage > 0;
+            const hullDef = HULL_DEFINITIONS[ship.shipDefinitionId];
+            return (
+              <div
+                key={ship.id}
+                style={{
+                  padding: '5px 7px', marginBottom: 3, borderRadius: 4,
+                  border: `1px solid ${isDamaged ? 'rgba(239,68,68,0.3)' : 'rgba(30,41,59,0.5)'}`,
+                  background: isDamaged ? 'rgba(69,10,10,0.2)' : 'rgba(15,23,42,0.4)',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3 }}>
+                  <span style={{ fontSize: 9, fontWeight: 600, color: '#cbd5e1' }}>
+                    {ship.customName ?? hullDef?.name ?? ship.shipDefinitionId}
+                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <span style={{ fontSize: 8, fontFamily: 'monospace', color: isDamaged ? '#f87171' : '#4ade80' }}>
+                      {integrity}%
+                    </span>
+                    {isDamaged && (
+                      <button
+                        onClick={() => useGameStore.getState().repairShip(ship.id)}
+                        style={{
+                          padding: '1px 7px', fontSize: 8, fontFamily: 'monospace', fontWeight: 700,
+                          border: '1px solid rgba(34,197,94,0.35)', borderRadius: 3,
+                          background: 'rgba(5,46,22,0.4)', color: '#4ade80', cursor: 'pointer',
+                        }}
+                      >
+                        REPAIR
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <div style={{ height: 3, background: 'rgba(30,41,59,0.6)', borderRadius: 2 }}>
+                  <div style={{
+                    height: '100%', borderRadius: 2,
+                    width: `${integrity}%`,
+                    background: integrity > 66 ? '#4ade80' : integrity > 33 ? '#fbbf24' : '#f87171',
+                    transition: 'width 0.3s',
+                  }} />
+                </div>
+              </div>
+            );
+          })}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─── Galaxy Tab ───────────────────────────────────────────────────────────────
+
+const ANOMALY_TYPES: AnomalyType[] = ['ore-pocket', 'data-site', 'relic-site', 'combat-site', 'wormhole'];
+
+function GalaxyTab() {
+  const currentSystemId = useGameStore(s => s.state.galaxy.currentSystemId);
+  const warp            = useGameStore(s => s.state.galaxy.warp);
+  const seed            = useGameStore(s => s.state.galaxy.seed);
+  const [anomalyType, setAnomalyType] = useState<AnomalyType>('ore-pocket');
+  const [teleportId,  setTeleportId]  = useState('');
+
+  const galaxy = generateGalaxy(seed);
+  const currentSystem = galaxy.find(s => s.id === currentSystemId);
+
+  const teleport = () => {
+    const target = teleportId || currentSystemId;
+    useGameStore.setState(s => ({
+      state: {
+        ...s.state,
+        galaxy: { ...s.state.galaxy, currentSystemId: target, warp: null },
+      },
+    }));
+  };
+
+  const scan = () => {
+    useGameStore.getState().scanSystem(currentSystemId);
+  };
+
+  const injectAnomaly = () => {
+    const ts = Date.now();
+    const id = `dev-anom-${ts.toString(36)}`;
+    const anomaly: Anomaly = {
+      id,
+      systemId: currentSystemId,
+      type: anomalyType,
+      name: `Dev ${anomalyType.replace(/-/g, ' ')}`,
+      signatureRadius: 50,
+      scanProgress: 0,
+      revealed: false,
+      depleted: false,
+      bonusExpiresAt: null,
+      linkedSystemId: null,
+      massRemaining: null,
+      expiresAt: null,
+    };
+    useGameStore.setState(s => {
+      const existing = s.state.galaxy.anomalies[currentSystemId] ?? [];
+      return {
+        state: {
+          ...s.state,
+          galaxy: {
+            ...s.state.galaxy,
+            anomalies: {
+              ...s.state.galaxy.anomalies,
+              [currentSystemId]: [...existing, anomaly],
+            },
+          },
+        },
+      };
+    });
+  };
+
+  const warpProgress = warp
+    ? Math.min(1, (Date.now() - warp.startedAt) / (warp.durationSeconds * 1000))
+    : null;
+
+  return (
+    <div>
+      {/* Current system */}
+      <SectionLabel>Current System</SectionLabel>
+      <div style={{ padding: '6px 8px', borderRadius: 4, border: '1px solid rgba(30,41,59,0.5)', background: 'rgba(15,23,42,0.4)', marginBottom: 6 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: '#e2e8f0', fontFamily: 'monospace' }}>
+            {currentSystem?.name ?? currentSystemId}
+          </span>
+          <span style={{
+            fontSize: 8, fontFamily: 'monospace', fontWeight: 700, padding: '1px 6px', borderRadius: 10,
+            background: currentSystem?.security === 'highsec' ? 'rgba(34,197,94,0.15)' :
+                        currentSystem?.security === 'lowsec'  ? 'rgba(234,179,8,0.15)' : 'rgba(239,68,68,0.15)',
+            color:      currentSystem?.security === 'highsec' ? '#4ade80' :
+                        currentSystem?.security === 'lowsec'  ? '#fbbf24' : '#f87171',
+            border: '1px solid currentColor',
+          }}>
+            {currentSystem?.security ?? '?'}
+          </span>
+        </div>
+        <div style={{ fontSize: 8, color: '#64748b', fontFamily: 'monospace', marginTop: 2 }}>
+          {currentSystemId} · {currentSystem?.regionName ?? 'Unknown region'}
+        </div>
+      </div>
+
+      {/* Warp progress */}
+      {warp && warpProgress !== null && (
+        <div style={{ marginBottom: 6, padding: '5px 8px', borderRadius: 4, border: '1px solid rgba(34,211,238,0.2)', background: 'rgba(8,51,68,0.25)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+            <span style={{ fontSize: 9, color: '#22d3ee', fontFamily: 'monospace' }}>⟵ WARP IN PROGRESS</span>
+            <span style={{ fontSize: 8, color: '#67e8f9', fontFamily: 'monospace' }}>{Math.round(warpProgress * 100)}%</span>
+          </div>
+          <div style={{ height: 3, background: 'rgba(30,41,59,0.6)', borderRadius: 2 }}>
+            <div style={{ height: '100%', width: `${warpProgress * 100}%`, background: '#22d3ee', borderRadius: 2, transition: 'width 0.3s' }} />
+          </div>
+          <div style={{ fontSize: 8, color: '#475569', fontFamily: 'monospace', marginTop: 2 }}>
+            → {galaxy.find(s => s.id === warp.toSystemId)?.name ?? warp.toSystemId}
+          </div>
+        </div>
+      )}
+
+      {/* Teleport */}
+      <SectionLabel>Teleport</SectionLabel>
+      <div style={{ display: 'flex', gap: 4, marginBottom: 6 }}>
+        <select
+          value={teleportId}
+          onChange={e => setTeleportId(e.target.value)}
+          style={{
+            flex: 1, padding: '3px 6px', fontSize: 9, fontFamily: 'monospace',
+            background: 'rgba(15,23,42,0.8)', color: '#cbd5e1',
+            border: '1px solid rgba(30,41,59,0.6)', borderRadius: 3,
+          }}
+        >
+          <option value="">— select system —</option>
+          {galaxy.map(sys => (
+            <option key={sys.id} value={sys.id}>
+              {sys.name} [{sys.security}]
+            </option>
+          ))}
+        </select>
+        <InjectButton
+          label="WARP"
+          onClick={teleport}
+          disabled={!teleportId || teleportId === currentSystemId}
+        />
+      </div>
+
+      {/* Scan */}
+      <div style={{ display: 'flex', gap: 4, marginBottom: 6 }}>
+        <button
+          onClick={scan}
+          style={{
+            flex: 1, padding: '4px 0', fontSize: 9, fontFamily: 'monospace', fontWeight: 700,
+            border: '1px solid rgba(168,85,247,0.35)', borderRadius: 4,
+            background: 'rgba(88,28,135,0.25)', color: '#c084fc', cursor: 'pointer',
+          }}
+        >
+          ◎ Reveal System
+        </button>
+      </div>
+
+      {/* Inject anomaly */}
+      <SectionLabel>Inject Anomaly</SectionLabel>
+      <div style={{ display: 'flex', gap: 4 }}>
+        <select
+          value={anomalyType}
+          onChange={e => setAnomalyType(e.target.value as AnomalyType)}
+          style={{
+            flex: 1, padding: '3px 6px', fontSize: 9, fontFamily: 'monospace',
+            background: 'rgba(15,23,42,0.8)', color: '#cbd5e1',
+            border: '1px solid rgba(30,41,59,0.6)', borderRadius: 3,
+          }}
+        >
+          {ANOMALY_TYPES.map(t => (
+            <option key={t} value={t}>{t.replace(/-/g, ' ')}</option>
+          ))}
+        </select>
+        <InjectButton label="INJECT" onClick={injectAnomaly} />
+      </div>
+    </div>
+  );
+}
+
+// ─── Factions Tab ─────────────────────────────────────────────────────────────
+
+function FactionsTab() {
+  const rep        = useGameStore(s => s.state.systems.factions.rep);
+  const docked     = useGameStore(s => s.state.systems.factions.dockedStationId);
+  const adjustRep  = useGameStore(s => s.adjustReputation);
+  const undock     = useGameStore(s => s.undockFromStation);
+
+  return (
+    <div>
+      {/* Dock status */}
+      <div style={{
+        marginBottom: 8, padding: '5px 8px', borderRadius: 4,
+        border: `1px solid ${docked ? 'rgba(34,197,94,0.3)' : 'rgba(30,41,59,0.5)'}`,
+        background: docked ? 'rgba(5,46,22,0.2)' : 'rgba(15,23,42,0.4)',
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+      }}>
+        <span style={{ fontSize: 9, fontFamily: 'monospace', color: docked ? '#4ade80' : '#475569' }}>
+          {docked ? `⬡ DOCKED: ${docked}` : '⬡ UNDOCKED'}
+        </span>
+        {docked && (
+          <button
+            onClick={() => undock()}
+            style={{
+              padding: '2px 8px', fontSize: 8, fontFamily: 'monospace', fontWeight: 700,
+              border: '1px solid rgba(34,197,94,0.4)', borderRadius: 3,
+              background: 'rgba(5,46,22,0.4)', color: '#4ade80', cursor: 'pointer',
+            }}
+          >
+            UNDOCK
+          </button>
+        )}
+      </div>
+
+      <SectionLabel>Reputation</SectionLabel>
+      {FACTION_ORDER.map(factionId => {
+        const def = FACTION_DEFINITIONS[factionId as FactionId];
+        const current = rep[factionId as FactionId] ?? def.baseRep;
+        const pct = Math.round(((current - def.repMin) / (def.repMax - def.repMin)) * 100);
+        return (
+          <div
+            key={factionId}
+            style={{
+              marginBottom: 5, padding: '6px 8px', borderRadius: 4,
+              border: '1px solid rgba(30,41,59,0.5)', background: 'rgba(15,23,42,0.4)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+              <span style={{ fontSize: 10, fontWeight: 700, color: def.color }}>{def.shortName}</span>
+              <span style={{ fontSize: 9, fontFamily: 'monospace', color: current >= 0 ? '#4ade80' : '#f87171', fontWeight: 700 }}>
+                {current > 0 ? '+' : ''}{current}
+              </span>
+            </div>
+            {/* Bar */}
+            <div style={{ height: 3, background: 'rgba(30,41,59,0.6)', borderRadius: 2, marginBottom: 5 }}>
+              <div style={{ height: '100%', width: `${pct}%`, background: def.color, borderRadius: 2, opacity: 0.7 }} />
+            </div>
+            {/* Buttons */}
+            <div style={{ display: 'flex', gap: 3 }}>
+              {([-100, -10, 10, 100] as const).map(delta => (
+                <button
+                  key={delta}
+                  onClick={() => adjustRep(factionId as FactionId, delta)}
+                  style={{
+                    flex: 1, padding: '2px 0', fontSize: 8, fontFamily: 'monospace', fontWeight: 700,
+                    border: `1px solid ${delta > 0 ? 'rgba(34,197,94,0.25)' : 'rgba(239,68,68,0.25)'}`,
+                    borderRadius: 3,
+                    background: delta > 0 ? 'rgba(5,46,22,0.3)' : 'rgba(127,29,29,0.3)',
+                    color: delta > 0 ? '#4ade80' : '#f87171',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {delta > 0 ? '+' : ''}{delta}
+                </button>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── State Tab ────────────────────────────────────────────────────────────────
+
+function StateTab() {
+  const state    = useGameStore(s => s.state);
+  const unlocks  = Object.keys(state.unlocks).filter(k => state.unlocks[k]);
+  const ships    = Object.keys(state.systems.fleet.ships).length;
+  const pilots   = Object.keys(state.systems.fleet.pilots).length;
+  const credits  = state.resources['credits'] ?? 0;
+  const mfgJobs  = state.systems.manufacturing.queue.length;
+
+  const dump = () => {
+    // eslint-disable-next-line no-console
+    console.log('[DEV] Game state snapshot:', useGameStore.getState().state);
+  };
+
+  return (
+    <div>
+      <SectionLabel>Key Metrics</SectionLabel>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, marginBottom: 8 }}>
+        {([
+          ['Credits',    credits.toLocaleString()],
+          ['Ships',      ships],
+          ['Pilots',     pilots],
+          ['Mfg Jobs',   mfgJobs],
+          ['Unlocks',    `${unlocks.length}`],
+          ['Modifiers',  `${Object.keys(state.modifiers).length}`],
+        ] as const).map(([label, value]) => (
+          <div key={label} style={{
+            padding: '5px 8px', borderRadius: 4,
+            border: '1px solid rgba(30,41,59,0.5)', background: 'rgba(15,23,42,0.4)',
+          }}>
+            <div style={{ fontSize: 8, color: '#64748b', fontFamily: 'monospace', marginBottom: 2 }}>{label}</div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#e2e8f0', fontFamily: 'monospace' }}>{value}</div>
+          </div>
+        ))}
+      </div>
+
+      <button
+        onClick={dump}
+        style={{
+          width: '100%', padding: '5px 0', fontSize: 9, fontFamily: 'monospace', fontWeight: 700,
+          letterSpacing: '0.08em', border: '1px solid rgba(168,85,247,0.35)', borderRadius: 4,
+          background: 'rgba(88,28,135,0.25)', color: '#c084fc', cursor: 'pointer', marginBottom: 8,
+        }}
+      >
+        ⎌ DUMP STATE TO CONSOLE
+      </button>
+
+      <SectionLabel>Active Unlocks</SectionLabel>
+      <div style={{ maxHeight: 160, overflowY: 'auto', fontFamily: 'monospace', fontSize: 8 }}>
+        {unlocks.length === 0
+          ? <div style={{ color: '#44403c', padding: '4px 0' }}>No unlocks active</div>
+          : unlocks.map(k => (
+            <div key={k} style={{ color: '#4ade80', padding: '1px 0' }}>✓ {k}</div>
+          ))
+        }
+      </div>
+
+      <SectionLabel style={{ marginTop: 8 }}>State Keys</SectionLabel>
+      <div style={{ fontFamily: 'monospace', fontSize: 8, color: '#475569', lineHeight: 1.7 }}>
+        {Object.keys(state).map(k => (
+          <div key={k}>
+            <span style={{ color: '#64748b' }}>{k}: </span>
+            <span style={{ color: '#94a3b8' }}>{typeof (state as unknown as Record<string, unknown>)[k]}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
 
 // ─── Main DevPanel ─────────────────────────────────────────────────────────
 
-type Tab = 'resources' | 'skills' | 'unlocks' | 'scenarios' | 'fleet';
+type Tab = 'resources' | 'skills' | 'unlocks' | 'scenarios' | 'fleet' | 'galaxy' | 'factions' | 'state';
 
 const TABS: Array<{ id: Tab; label: string }> = [
-  { id: 'resources', label: 'Resources' },
-  { id: 'skills',    label: 'Skills'    },
-  { id: 'unlocks',   label: 'Unlocks'   },
-  { id: 'scenarios', label: 'Scenarios' },
-  { id: 'fleet',     label: 'Fleet'     },
+  { id: 'resources', label: 'Res'      },
+  { id: 'skills',    label: 'Skills'   },
+  { id: 'unlocks',   label: 'Unlocks'  },
+  { id: 'scenarios', label: 'Scen'     },
+  { id: 'fleet',     label: 'Fleet'    },
+  { id: 'galaxy',    label: 'Galaxy'   },
+  { id: 'factions',  label: 'Factions' },
+  { id: 'state',     label: 'State'    },
 ];
 
 interface DevPanelProps {
@@ -861,6 +1302,9 @@ export function DevPanel({ open, onToggle }: DevPanelProps) {
             </button>
           </div>
 
+          {/* Time controls */}
+          <TimeControls />
+
           {/* Tabs */}
           <div style={{ display: 'flex', padding: '5px 7px', gap: 3, borderBottom: '1px solid rgba(30,41,59,0.7)', flexShrink: 0 }}>
             {TABS.map(t => (
@@ -889,6 +1333,9 @@ export function DevPanel({ open, onToggle }: DevPanelProps) {
             {tab === 'unlocks'   && <UnlocksTab   />}
             {tab === 'scenarios' && <ScenariosTab />}
             {tab === 'fleet'     && <FleetTab     />}
+            {tab === 'galaxy'    && <GalaxyTab    />}
+            {tab === 'factions'  && <FactionsTab  />}
+            {tab === 'state'     && <StateTab     />}
           </div>
 
           {/* Footer */}

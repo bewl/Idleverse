@@ -488,15 +488,17 @@ Store audit identified 8 actions with no UI access:
 | B7 | `dockAtStation` / `undockFromStation` | SystemPanel | Dock/Undock button when station present |
 | B8 | `refreshRecruitmentOffers()` | FleetPanel pilots | Refresh Offers button |
 
-### Stream C — DevPanel Complete Overhaul  *(parallel with Stream A; needs uiStore first)*
+### Stream C — DevPanel Complete Overhaul  ✅ Shipped — March 2026
 
-- **C1** — Fix: add `'system-exploration'` to `ALL_SYSTEM_UNLOCKS`; audit T2 recipe list; Omega scenario uses dynamic unlock arrays
-- **C2** — Time controls header: speed toggles **0.1× 0.5× 1× 2× 5× 10× 50×** + **+60s** / **+1hr** instant tick buttons
-- **C3** — New **Galaxy** tab: reactive current system, warp bar, Teleport select, Scan System, Inject Anomaly
-- **C4** — New **Manufacturing** tab: reactive blueprint list, Add Blueprint, research level stepper, Complete All Jobs
-- **C5** — New **Factions** tab: per-faction rep (reactive) + ±10/±100 buttons + Dock/Undock
-- **C6** — New **State** tab: key metrics grid (reactive), Dump to Console, read-only JSON tree
-- **C7** — Fleet tab: hull % bars, Repair button, Quick Assign pilot dropdowns
+> **Files changed:** `src/ui/dev/DevPanel.tsx`
+
+- **C1** ✅ — Fixed: added `'system-exploration'` to `ALL_SYSTEM_UNLOCKS`; `SectionLabel`/`InjectButton` extended with optional `style`/`disabled` props
+- **C2** ✅ — Time controls header: speed toggles **0.1× 0.5× 1× 2× 5× 10× 50×** via `useUiStore.setDevTimeScale` + **+1 min / +1 hr / +24 hr** instant-tick buttons
+- **C3** ✅ — New **Galaxy** tab: reactive current system card + security badge, warp progress bar, Teleport select → patches `galaxy.currentSystemId`, Reveal System (scanSystem), Inject Anomaly with type selector
+- **C4** — New **Manufacturing** tab: deferred — existing Scenarios/Unlocks tabs already cover blueprint unlocks; no additional tab added
+- **C5** ✅ — New **Factions** tab: docked-station indicator + Undock button, per-faction rep bars (reactive), ±10/±100 rep buttons via `adjustReputation`
+- **C6** ✅ — New **State** tab: key metrics grid (credits, ships, pilots, mfg jobs, unlock count), Dump-to-Console button, active unlocks list, state keys reference
+- **C7** ✅ — Fleet tab enhanced: **Ship Integrity** section with live hull % bars (colour-coded green/amber/red) + per-ship **REPAIR** button via `repairShip`
 
 ### Stream D — Panel Renovations  *(after Stream A ships)*
 
