@@ -1,7 +1,19 @@
+import type { GameState } from '@/types/game.types';
 import type { FactionId, FactionsState, StationDefinition } from '@/types/faction.types';
 import type { StarSystem } from '@/types/galaxy.types';
+import { getSystemById } from '@/game/galaxy/galaxy.gen';
 import { FACTION_DEFINITIONS } from './faction.config';
 import { getStationForSystem } from './station.gen';
+
+export interface CorpHqBonus {
+  id: string;
+  label: string;
+  description: string;
+  manufacturingSpeedBonus?: number;
+  marketSellPriceBonus?: number;
+  combatLootQualityMultiplier?: number;
+  miningYieldInFactionTerritory?: { factionId: FactionId; bonus: number };
+}
 
 // ─── Reputation helpers ────────────────────────────────────────────────────
 
@@ -107,6 +119,59 @@ export function getStationInSystem(
 ): StationDefinition | null {
   if (!system.stationId || !system.factionId) return null;
   return getStationForSystem(system, system.factionId, systemIndex, galaxySeed);
+}
+
+export function getHomeStationDefinition(state: GameState): StationDefinition | null {
+  const homeSystemId = state.systems.factions.homeStationSystemId;
+  const homeStationId = state.systems.factions.homeStationId;
+  if (!homeSystemId || !homeStationId) return null;
+
+  const system = getSystemById(state.galaxy.seed, homeSystemId);
+  const systemIndex = homeSystemId === 'home' ? 0 : parseInt(homeSystemId.replace('sys-', ''), 10);
+  const station = getStationInSystem(system, state.galaxy.seed, isNaN(systemIndex) ? 0 : systemIndex);
+  if (!station || station.id !== homeStationId) return null;
+  return station;
+}
+
+export function getCorpHqBonus(station: StationDefinition | null): CorpHqBonus | null {
+  if (!station) return null;
+
+  switch (station.factionId) {
+    case 'concordat':
+      return {
+        id: 'concordat-industrial-charter',
+        label: 'Concordat Industrial Charter',
+        description: '+10% manufacturing speed while this station is your Corp HQ.',
+        manufacturingSpeedBonus: 0.10,
+      };
+    case 'veldris':
+      return {
+        id: 'veldris-extraction-license',
+        label: 'Veldris Extraction License',
+        description: '+15% mining yield in Veldris-controlled systems while this station is your Corp HQ.',
+        miningYieldInFactionTerritory: { factionId: 'veldris', bonus: 0.15 },
+      };
+    case 'syndicate':
+      return {
+        id: 'syndicate-salvage-channel',
+        label: 'Syndicate Salvage Channel',
+        description: '+20% combat loot quality while this station is your Corp HQ.',
+        combatLootQualityMultiplier: 1.2,
+      };
+    case 'covenant':
+      return {
+        id: 'covenant-trade-accord',
+        label: 'Covenant Trade Accord',
+        description: '+10% market sell price while this station is your Corp HQ.',
+        marketSellPriceBonus: 0.10,
+      };
+    default:
+      return null;
+  }
+}
+
+export function getCorpHqBonusFromState(state: GameState): CorpHqBonus | null {
+  return getCorpHqBonus(getHomeStationDefinition(state));
 }
 
 // ─── Aggression & engagement ───────────────────────────────────────────────

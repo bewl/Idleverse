@@ -72,6 +72,10 @@ export function getHaulingWings(fleet: PlayerFleet): FleetWing[] {
   return fleet.wings?.filter(wing => wing.type === 'hauling') ?? [];
 }
 
+export function hasDispatchedHaulingWing(fleet: PlayerFleet): boolean {
+  return getHaulingWings(fleet).some(wing => wing.isDispatched);
+}
+
 export function getWingByShipId(fleet: PlayerFleet, shipId: string): FleetWing | null {
   return fleet.wings?.find(wing => wing.shipIds.includes(shipId)) ?? null;
 }

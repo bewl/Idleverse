@@ -18,6 +18,7 @@ import type { FleetOrder, RouteSecurityFilter } from '@/types/faction.types';
 import { findRoute } from '@/game/galaxy/route.logic';
 import { generateGalaxy } from '@/game/galaxy/galaxy.gen';
 import { computeFleetJumpRange } from './fleet.logic';
+import { hasDispatchedHaulingWing } from './wings.logic';
 
 // ─── Jump range constant ──────────────────────────────────────────────────
 
@@ -123,6 +124,7 @@ export function issueFleetGroupOrder(
 ): GameState | null {
   const fleet = state.systems.fleet.fleets[fleetId];
   if (!fleet) return null;
+  if (hasDispatchedHaulingWing(fleet)) return null;
 
   const fromId = fleet.currentSystemId;
   if (fromId === destinationId) return null;
@@ -170,6 +172,7 @@ export function issueFleetGroupOrder(
 export function cancelFleetGroupOrder(state: GameState, fleetId: string): GameState | null {
   const fleet = state.systems.fleet.fleets[fleetId];
   if (!fleet || !fleet.fleetOrder) return null;
+  if (hasDispatchedHaulingWing(fleet)) return null;
 
   let newShips = { ...state.systems.fleet.ships };
   for (const sid of fleet.shipIds) {

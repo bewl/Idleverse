@@ -42,14 +42,28 @@ impact. Each phase is independently shippable and leaves the game in a playable,
 | Corp identity migration (FC-1G partial) | ✅ Complete | state.pilot → state.corp; OverviewPanel → corp command center (CorpCard + CorpHQCard) |
 | Fleet-centric foundation (FC-1: cargo holds, auto-haul, corp identity, richness wiring) | ✅ Complete | All FC-1 steps shipped |
 | **Fleet commander skills** | **✅ FC-2 COMPLETE** | **Designate pilot as commander; command skill trees; fleet-wide bonuses** |
-| **Fleet wings (hauling + escort)** | **⚡ FC-3 ACTIVE** | **Core wing model shipped: wing commanders, multi-hauler logistics, inactive unwinged ships, per-wing dispatch; escort/combat follow-ons remain** |
-| **Corp HQ — station registration & POS** | **⚡ FC-4 TOP PRIORITY** | **Register with faction station or build own POS; gate manufacturing/reprocessing** |
-| **On-site fleet reprocessing** | **⚡ FC-5 TOP PRIORITY** | **Ore refinery module; industrial hull; refine ore in-field** |
-| **Dynamic mining threats & fleet defense** | **⚡ FC-6 TOP PRIORITY** | **Mining attracts NPC threats; resource claims; fleet reputation** |
-| Factions & missions | ⬜ Phase 5 | Rep tracking exists, no consequences |
+| **Fleet wings (hauling + escort)** | **⚡ FC-3 ACTIVE** | **Core wing model shipped; escort automation, combat response, and follow-on wing behaviors remain** |
+| **Corp HQ — station registration & POS** | **⚡ FC-4 ACTIVE** | **Station registration, HQ reassignment, industrial HQ gating, and faction HQ passive bonuses shipped; POS/outpost path still pending** |
+| **On-site fleet reprocessing** | **🟠 FC-5 QUEUED** | **Post-FC-4 industrial operations layer; ore refinery module and industrial hulls** |
+| **Dynamic mining threats & fleet defense** | **🟠 FC-6 QUEUED** | **Post-FC-3/FC-4 threat layer; mining pressure, combat response, and fleet reputation** |
+| Factions & missions | ⬜ Phase 5 | Reputation tracking exists; station consequences, services, and mission content are still unimplemented |
 | Dynamic economy & trade routes | ✅ Complete | Phase 1 shipped — dynamic prices + trade route automation |
 | Structures & player outposts | ⬜ Phase 6 | Type stub exists |
 | Prestige / New Game+ | ⬜ Phase 7 | Planned |
+
+---
+
+## Immediate Roadmap
+
+| Stage | Focus | Why it is next |
+|---|---|---|
+| **Now** | **FC-3 follow-ons** | Core wings are live, but escort automation and combat-response behaviors still need to land on top of the shipped wing model. |
+| **Now** | **FC-4 completion** | Station registration and HQ gating are live; the remaining FC-4 work is the POS/outpost path and station-specific bonuses. |
+| **After FC-4** | **FC-5 On-site Reprocessing** | Deep-space refining makes the most sense once HQ registration and corp infrastructure rules are established. |
+| **After FC-3 + FC-4** | **FC-6 Mining Threats** | Threat escalation is strongest once fleets can defend themselves with wings and once faction-controlled territory has real consequences. |
+| **Broader expansion** | **Phase 5 Factions, Stations & Mission Boards** | Builds on the FC-4 reputation-gating slice and expands it into station services, mission boards, and faction-hostility consequences. |
+
+This is the intended near-term ship order: finish FC-3 follow-ons, complete the remaining FC-4 POS/station work, then layer FC-5 and FC-6 on top before tackling the broader Phase 5 faction-content rollout.
 
 ---
 
@@ -476,6 +490,7 @@ n-levels deep with their own clickable tags.
 | A1 | `src/stores/uiStore.ts` *(new)* | Zustand store: `activePanel`, `focusTarget`, `devTimeScale`; actions: `navigate(panel, focus?)`, `clearFocus()`, `setDevTimeScale(n)` |
 | A2 | `src/ui/layouts/GameLayout.tsx` | Use `useUiStore` for `activePanel`; game loop multiplies `delta` by `devTimeScale` (DEV guard) |
 | A3 | `src/ui/components/GameTooltip.tsx` *(new)* | Pure behavioral shell: depth-aware z-index (`9998 + depth×4`), 80ms hover delay, smart close (leaves trigger AND body), optional pin; + `TT.*` composable content primitives |
+| A3b | `src/ui/components/GameDropdown.tsx` *(new, later follow-up)* | Pure behavioral shell for searchable, filterable, portal-rendered rich dropdowns; content-aware option model with badges, tone, metadata, render hooks, and optional split detail pane |
 | A4 | `src/ui/components/NavTag.tsx` *(new)* | Clickable entity chip; routes to correct panel + sets `focusTarget` on click; optional nested tooltip |
 | A5 | `src/ui/components/StatTooltip.tsx` | Refactor: thin wrapper over `<GameTooltip pinnable content={<StatSheet>}>` — API unchanged |
 | A6 | `src/ui/panels/ResourceBar.tsx` | Replace private `Tooltip`/`HoverCard` with `GameTooltip` + `TT.*`; resource name chips → `NavTag` |
@@ -514,7 +529,7 @@ n-levels deep with their own clickable tags.
 > **Files changed:** `OverviewPanel.tsx`, `MiningPanel.tsx`, `ManufacturingPanel.tsx`, `SkillsPanel.tsx`, `SystemPanel.tsx`, `ReprocessingPanel.tsx`, `MarketPanel.tsx`, `FleetPanel.tsx`
 > **Commit:** `d1e4e32`
 
-All 8 targeted panels renovated with NavTag entity links, data density additions, and contextual status indicators. StarMapPanel renovation deferred (low priority — existing panel is functional).
+All 8 targeted panels renovated with NavTag entity links, data density additions, and contextual status indicators. A later follow-up pass started on StarMapPanel readability, beginning with zoom-aware label decluttering and lower-priority label suppression.
 
 ### What Was Built
 
@@ -538,13 +553,14 @@ All 8 targeted panels renovated with NavTag entity links, data density additions
 | ReprocessingPanel | Efficiency grade badge (S/A/B/C), output yield table, throughput/hr | skills→Skills |
 | MarketPanel | Trade volume, trend arrows ↑↓, inflow/outflow row, margin % | — |
 | SkillsPanel | Queue total ETA, affects-system NavTags, next-level preview, category pill row | systems→panels |
-| StarMapPanel | Fleet position dots, anomaly density heat, fleet dot click | system→System, fleet dot→Fleet+focus |
+| StarMapPanel | Fleet position dots, anomaly density heat, fleet dot click, priority-faded star labels with overlap suppression, projected React hover intel card, widened right rail with clearer route/intel hierarchy | system→System, fleet dot→Fleet+focus |
 | SystemPanel | Belt ore composition bars, fleet assignment section, anomaly counts by type, Dock/Undock (B7) | fleet→Fleet |
 
 ## Key Technical Decisions
 
 - `activePanel` lives in `useUiStore` (Zustand), **not** local component state or React Context — NavTags inside tooltip portals need to navigate without being in the component tree
 - `GameTooltip` is a **behavioral shell only** — content layout is 100% caller-defined via `TT.*` primitives or arbitrary JSX
+- `GameDropdown` follows the same rule as `GameTooltip`: shared behavior, caller-owned content semantics via structured option data + optional render hooks, including inline detail panes for dense selectors
 - `TT.*` primitives: `TT.Header`, `TT.Section`, `TT.Grid`, `TT.Row`, `TT.Divider`, `TT.ProgressBar`, `TT.BadgeRow`, `TT.Footer`, `TT.Spacer` — stateless, freely composable
 - Focus behavior on NavTag navigation: **auto-expand + scroll into view + 3s `.focus-pulse` glow**, then `clearFocus()`
 - Nested tooltip depth tracked via `TooltipDepthContext`; z-index formula `9998 + depth × 4`
@@ -557,6 +573,7 @@ All 8 targeted panels renovated with NavTag entity links, data density additions
 | `src/stores/uiStore.ts` | A1 | CREATE |
 | `src/ui/layouts/GameLayout.tsx` | A2 | MODIFY |
 | `src/ui/components/GameTooltip.tsx` | A3 | CREATE |
+| `src/ui/components/GameDropdown.tsx` | A3b | CREATE |
 | `src/ui/components/NavTag.tsx` | A4 | CREATE |
 | `src/ui/components/StatTooltip.tsx` | A5 | REFACTOR |
 | `src/ui/panels/ResourceBar.tsx` | A6 | REFACTOR + NavTags |
@@ -594,7 +611,7 @@ All 8 targeted panels renovated with NavTag entity links, data density additions
 | **FC-1e** — Fleet auto-haul to HQ | ✅ Shipped | Full round-trip loop: fleet at HQ dumps immediately inline; fleet away stamps `miningOriginSystemId`, dispatches haul trip; on HQ arrival ore dumped + fleet dispatched back; on return `activity: 'mining'` restored per ship and `miningOriginSystemId` cleared; FleetPanel "Haul to HQ" button + fill bar |
 | **FC-1f** — Clean remaining UI gates | ✅ Shipped | MiningPanel fully fleet-centric; `getCurrentSystemBeltIds` removed; `ORE_BELTS` richness wired into fleet mining yield |
 | **FC-1G** — Corp identity (state.pilot → state.corp) | ✅ Shipped | `state.corp: CorpState` replaces deprecated `state.pilot`; save migration included; OverviewPanel → CorpCard + CorpHQCard |
-| **FC-1H** — Belt skill gates | ✅ Shipped | `ORE_BELTS[beltId].requiredSkill` checked in `setShipActivity()`; `SystemPanel` shows locked belt cards with 🔒 tooltip; dead `unlocks` arrays removed from `skills.config.ts` |
+| **FC-1H** — Belt skill gates | ✅ Shipped | `ORE_BELTS[beltId].requiredSkill` checked in `setShipActivity()`; `SystemPanel` shows locked belt cards with 🔒 tooltip and live fleet-assignment status for unlocked belts; dead `unlocks` arrays removed from `skills.config.ts` |
 
 ## Key Architecture Changes
 
@@ -606,7 +623,7 @@ All 8 targeted panels renovated with NavTag entity links, data density additions
 - `getCurrentSystemBeltIds` removed; `SystemPanel` uses `getBeltsForSystem(system.id, galaxy.seed)`
 - **Auto-haul is two-branch**: fleet already at HQ → ore dumped inline immediately (no haul trip); fleet away from HQ → `miningOriginSystemId` stamped on `PlayerFleet`, haul trip dispatched; dump block only fires for fleets with `miningOriginSystemId` set (prevents instant ore drain for stationary miners at HQ)
 - **Re-mining round-trip**: after dumping at HQ, fleet auto-dispatches back to `miningOriginSystemId`; on arrival, ships with `assignedBeltId` have `activity: 'mining'` restored and `miningOriginSystemId` cleared
-- Belt skill gates: `ORE_BELTS[beltId].requiredSkill` checked in `setShipActivity()`; `SystemPanel` renders locked belt cards with a 🔒 disabled button and `GameTooltip` showing the required skill name and level
+- Belt skill gates: `ORE_BELTS[beltId].requiredSkill` checked in `setShipActivity()`; `SystemPanel` renders locked belt cards with a 🔒 disabled button and `GameTooltip` showing the required skill name and level, while unlocked belts now show actual fleet assignment status instead of the old `mining.targets` toggle state
 
 ---
 
@@ -630,8 +647,8 @@ All 8 targeted panels renovated with NavTag entity links, data density additions
 
 # ⚡ FC-3 — Fleet Wings
 
-> **Status:** In progress — initial implementation shipped March 2026.
-> **Priority:** Highest — core wing automation is live; remaining follow-ons build on the shipped model.
+> **Status:** Partially shipped — core wing systems shipped March 2026; escort/combat follow-ons remain.
+> **Priority:** High — this is active follow-on work on top of an already-live wing model.
 
 > **Depends on:** FC-1 (fleet cargo model), FC-2 (commander skills feed wing-level bonuses).
 
@@ -723,7 +740,7 @@ New file: `src/game/systems/fleet/wings.logic.ts`
 - Hauling wings now own cargo directly via `wing.cargoHold`, and fleets with multiple hauling wings distribute ore across available wing holds.
 - Auto-haul now dispatches ready hauling wings independently, sending only the selected hauling wing and its escort to HQ.
 - Fleet and wing commander bonuses now propagate at ship scope for mining and exploration, and at wing scope for hauling capacity.
-- Wing mutation rules are hardened: wings cannot be mutated while dispatched or while the whole fleet is in transit, and deleting a wing transfers stored cargo back into the fleet hold.
+- Wing mutation rules are hardened: wings cannot be mutated while dispatched or while the whole fleet is in transit, whole-fleet movement and fleet membership changes are blocked while a hauling wing is dispatched, and deleting a wing transfers stored cargo back into the fleet hold.
 - A pilot can be both fleet commander and wing commander at the same time; the same pilot's command bonus is only counted once per ship/wing calculation.
 - Fleets with no hauling wing keep the prior FC-1 whole-fleet auto-haul behavior.
 - Fleet, mining, and overview summaries now distinguish total fleet members from operational wing-assigned ships so inactive unwinged ships remain visible without being misreported as active contributors.
@@ -732,11 +749,11 @@ New file: `src/game/systems/fleet/wings.logic.ts`
 
 ---
 
-# ⚡ FC-4 — Corp HQ: Station Registration & Player-Owned Structures (TOP PRIORITY)
+# ⚡ FC-4 — Corp HQ: Station Registration & Player-Owned Structures
 
-> **Status:** Designed, not yet implemented.
-> **Priority:** Highest — provides the physical anchor for all corp activities.
-> **Depends on:** FC-1 (homeStationId model), Phase 5 (faction rep system needed for station registration gating).
+> **Status:** In progress — station registration and HQ gating shipped March 2026; POS path still pending.
+> **Priority:** Highest — active gating milestone for corp operations, industrial rules, and faction-station access.
+> **Depends on:** FC-1 (homeStationId model), existing faction reputation tracking from `FactionsState` for station-registration requirements.
 
 ## Goal
 
@@ -748,8 +765,8 @@ Manufacturing and reprocessing gain a soft warning (then hard gate in this phase
 
 ## Registered Faction Stations
 
-- `src/game/systems/factions/faction.config.ts`: Add `registrationCost: number` (ISK) and `registrationRepRequired: number` per station.
-- `src/stores/gameStore.ts`: `registerWithStation(stationId)` — deducts ISK, checks rep, adds to `registeredStations`.
+- `src/game/systems/factions/station.gen.ts`: Stations now expose deterministic `registrationCost` and `registrationRepRequired` values by faction.
+- `src/stores/gameStore.ts`: `registerWithStation(stationId)` now requires docking, checks standing and credits, adds the station to `registeredStations`, and sets it as the active Corp HQ.
 - Each faction station provides a unique passive bonus:
 
 | Faction | Station Bonus |
@@ -769,9 +786,9 @@ Manufacturing and reprocessing gain a soft warning (then hard gate in this phase
 
 ## UI Changes
 
-- `src/ui/panels/SystemPanel.tsx`: Gold ⬡ icon on orrery star when viewing the Corp HQ system. "Set as Corp HQ" button for unregistered stations. "Deploy POS" button when viewing a system without a POS.
-- `src/ui/panels/ManufacturingPanel.tsx`: Show HQ status indicator in panel header if no HQ is registered.
-- `src/ui/panels/ReprocessingPanel.tsx`: Same HQ status indicator.
+- `src/ui/panels/SystemPanel.tsx`: Gold ⬡ icon on orrery star when viewing the Corp HQ system. Docked stations can now be registered if the corp meets the standing and credit requirements; already-registered stations can be promoted to Corp HQ.
+- `src/ui/panels/ManufacturingPanel.tsx`: Show HQ status banner and hard-stop job creation/research/copy actions if no HQ is registered.
+- `src/ui/panels/ReprocessingPanel.tsx`: Show HQ status banner and disable job creation/auto-refinery controls if no HQ is registered.
 
 ## Store Actions
 
@@ -779,26 +796,43 @@ Manufacturing and reprocessing gain a soft warning (then hard gate in this phase
 - `deployPOS(systemId): void`
 - `upgradePOS(systemId): void`
 
+## What Was Built So Far
+
+- Stations now expose registration requirements and costs by faction.
+- Docked stations can be registered as corp facilities through `registerWithStation`, which also promotes the chosen station to active Corp HQ.
+- `setHomeStation` is now restricted to stations already present in `registeredStations`, so HQ reassignment follows the registration flow instead of bypassing it.
+- Manufacturing, blueprint research/copy, and reprocessing actions now require an active Corp HQ in the store layer.
+- Active Corp HQ stations now grant faction-specific passive bonuses: Concordat manufacturing speed, Veldris mining yield in Veldris space, Covenant market sell price, and Syndicate combat loot quality.
+- System, Manufacturing, and Reprocessing panels now surface HQ state directly so the gating is visible to the player.
+
 ## Files Changed
 
 | File | Change |
 |---|---|
-| `src/game/systems/factions/faction.config.ts` | Station `registrationCost` + `registrationRepRequired` + bonus per faction |
-| `src/stores/gameStore.ts` | `registerWithStation`, `deployPOS`, `upgradePOS` |
-| `src/game/systems/manufacturing/manufacturing.config.ts` | New `pos-core` T2 recipe |
-| `src/ui/panels/SystemPanel.tsx` | HQ marker, registration + POS deploy buttons |
+| `src/types/faction.types.ts` | Add station registration cost/standing fields |
+| `src/game/systems/factions/station.gen.ts` | Deterministic station registration requirements by faction |
+| `src/stores/gameStore.ts` | `registerWithStation`; restrict HQ reassignment to registered stations; gate manufacturing/reprocessing actions behind HQ presence |
+| `src/stores/initialState.ts` | Seed starter Corp HQ as already registered |
+| `src/game/persistence/saveLoad.ts` | Migrate legacy saves so `registeredStations` always includes `homeStationId` |
+| `src/game/systems/factions/faction.logic.ts` | Active HQ station lookup + faction passive bonus definitions |
+| `src/game/systems/manufacturing/manufacturing.logic.ts` | Concordat HQ manufacturing bonus applied to effective speed |
+| `src/game/systems/market/market.logic.ts` | Covenant HQ sell-price bonus applied to effective market value |
+| `src/game/systems/fleet/fleet.tick.ts` | Veldris HQ mining bonus applied in Veldris-controlled systems |
+| `src/game/systems/combat/combat.logic.ts` | Syndicate HQ loot-quality bonus applied to victory loot rolls |
+| `src/ui/panels/SystemPanel.tsx` | HQ marker, station registration flow, registered-station HQ reassignment, missing-HQ banner |
 | `src/ui/panels/ManufacturingPanel.tsx` | HQ status indicator |
 | `src/ui/panels/ReprocessingPanel.tsx` | HQ status indicator |
+| `src/ui/panels/OverviewPanel.tsx` | HQ card now surfaces the active faction passive bonus |
 
 ---
 
 ---
 
-# ⚡ FC-5 — On-Site Reprocessing & Industrial Ships (TOP PRIORITY)
+# 🟠 FC-5 — On-Site Reprocessing & Industrial Ships
 
 > **Status:** Designed, not yet implemented.
 > **Priority:** High — depth addition; reduces haul trips and enables deep-space industrial operations.
-> **Depends on:** FC-2 (`industrial-command` L2 gate), FC-4 (POS refinery for HQ-side refining comparison).
+> **Depends on:** FC-2 (`industrial-command` L2 gate), FC-4 (HQ registration/infrastructure rules establish the baseline refining loop this extends).
 
 ## Goal
 
@@ -852,11 +886,11 @@ Fleets equipped with an **Ore Refinery Array** module and a commander trained in
 
 ---
 
-# ⚡ FC-6 — Dynamic Mining Threats & Fleet Defense (TOP PRIORITY)
+# 🟠 FC-6 — Dynamic Mining Threats & Fleet Defense
 
 > **Status:** Designed, not yet implemented.
 > **Priority:** High — provides ongoing tension and content generation for fleet operations.
-> **Depends on:** FC-1 (fleet-based mining), FC-3 (wings — combat wing auto-responds), Phase 2 (combat resolution).
+> **Depends on:** FC-1 (fleet-based mining), FC-3 (combat wings and escort response behavior), Phase 2 combat systems that are already shipped.
 
 ## Goal
 
@@ -922,7 +956,7 @@ Reputation milestones unlock fleet-specific passive bonuses:
 # Phase 5 — Factions, Stations & Mission Boards
 
 > **Status:** Designed, not yet implemented.
-> **Depends on:** Phase 2 (combat missions track kill count from fleet combat results).
+> **Depends on:** FC-4 for station registration/HQ gating; uses already-shipped Phase 2 combat results for mission and hostility hooks.
 
 ## Goal
 

@@ -210,7 +210,7 @@ export function createInitialState(): GameState {
         outposts: {},
         homeStationId: 'station-home',
         homeStationSystemId: 'home',
-        registeredStations: [],
+        registeredStations: ['station-home'],
       },
     },
 

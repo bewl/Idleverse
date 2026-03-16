@@ -34,6 +34,7 @@ import { generatePilot } from '@/game/systems/fleet/fleet.gen';
 import { useUiStore } from '@/stores/uiStore';
 import { FACTION_DEFINITIONS, FACTION_ORDER } from '@/game/systems/factions/faction.config';
 import { generateGalaxy } from '@/game/galaxy/galaxy.gen';
+import { GameDropdown, type DropdownOption } from '@/ui/components/GameDropdown';
 import type { GameState, SkillsState, ShipInstance, AnomalyType, Anomaly } from '@/types/game.types';
 import type { FactionId } from '@/types/faction.types';
 
@@ -926,6 +927,29 @@ function GalaxyTab() {
 
   const galaxy = generateGalaxy(seed);
   const currentSystem = galaxy.find(s => s.id === currentSystemId);
+  const teleportOptions: DropdownOption[] = galaxy.map(system => ({
+    value: system.id,
+    label: system.name,
+    description: system.regionName,
+    meta: `[${system.security}]`,
+    group: system.security,
+    tone: system.security === 'highsec' ? 'emerald' : system.security === 'lowsec' ? 'amber' : 'rose',
+    keywords: [system.id, system.name, system.regionName, system.security],
+  }));
+  const anomalyOptions: DropdownOption[] = ANOMALY_TYPES.map(type => ({
+    value: type,
+    label: type.replace(/-/g, ' '),
+    description: type === 'ore-pocket'
+      ? 'Injects a mining anomaly.'
+      : type === 'combat-site'
+        ? 'Injects hostile encounter content.'
+        : type === 'wormhole'
+          ? 'Injects transient traversal content.'
+          : 'Injects exploration content.',
+    group: type === 'ore-pocket' ? 'Industry' : type === 'combat-site' ? 'Combat' : type === 'wormhole' ? 'Traversal' : 'Exploration',
+    tone: type === 'ore-pocket' ? 'cyan' : type === 'combat-site' ? 'rose' : type === 'wormhole' ? 'violet' : 'amber',
+    keywords: [type],
+  }));
 
   const teleport = () => {
     const target = teleportId || currentSystemId;
@@ -1023,22 +1047,21 @@ function GalaxyTab() {
       {/* Teleport */}
       <SectionLabel>Teleport</SectionLabel>
       <div style={{ display: 'flex', gap: 4, marginBottom: 6 }}>
-        <select
-          value={teleportId}
-          onChange={e => setTeleportId(e.target.value)}
-          style={{
-            flex: 1, padding: '3px 6px', fontSize: 9, fontFamily: 'monospace',
-            background: 'rgba(15,23,42,0.8)', color: '#cbd5e1',
-            border: '1px solid rgba(30,41,59,0.6)', borderRadius: 3,
-          }}
-        >
-          <option value="">— select system —</option>
-          {galaxy.map(sys => (
-            <option key={sys.id} value={sys.id}>
-              {sys.name} [{sys.security}]
-            </option>
-          ))}
-        </select>
+        <div style={{ flex: 1 }}>
+          <GameDropdown
+            value={teleportId}
+            onChange={setTeleportId}
+            options={teleportOptions}
+            placeholder="Select system"
+            emptyOptionLabel="Stay in current system"
+            emptyOptionDescription="Leaves the player where they are."
+            searchPlaceholder="Search galaxy..."
+            size="compact"
+            triggerTone="cyan"
+            menuWidth={360}
+            buttonStyle={{ minHeight: 28, borderRadius: 4, fontSize: 9 }}
+          />
+        </div>
         <InjectButton
           label="WARP"
           onClick={teleport}
@@ -1063,19 +1086,19 @@ function GalaxyTab() {
       {/* Inject anomaly */}
       <SectionLabel>Inject Anomaly</SectionLabel>
       <div style={{ display: 'flex', gap: 4 }}>
-        <select
-          value={anomalyType}
-          onChange={e => setAnomalyType(e.target.value as AnomalyType)}
-          style={{
-            flex: 1, padding: '3px 6px', fontSize: 9, fontFamily: 'monospace',
-            background: 'rgba(15,23,42,0.8)', color: '#cbd5e1',
-            border: '1px solid rgba(30,41,59,0.6)', borderRadius: 3,
-          }}
-        >
-          {ANOMALY_TYPES.map(t => (
-            <option key={t} value={t}>{t.replace(/-/g, ' ')}</option>
-          ))}
-        </select>
+        <div style={{ flex: 1 }}>
+          <GameDropdown
+            value={anomalyType}
+            onChange={nextValue => setAnomalyType(nextValue as AnomalyType)}
+            options={anomalyOptions}
+            placeholder="Select anomaly"
+            searchPlaceholder="Find anomaly type..."
+            size="compact"
+            triggerTone="violet"
+            menuWidth={360}
+            buttonStyle={{ minHeight: 28, borderRadius: 4, fontSize: 9 }}
+          />
+        </div>
         <InjectButton label="INJECT" onClick={injectAnomaly} />
       </div>
     </div>

@@ -51,6 +51,10 @@ export interface StationDefinition {
   systemId: string;
   factionId: FactionId;
   services: StationServiceType[];
+  /** Credit cost to register this station for corp use. */
+  registrationCost: number;
+  /** Minimum standing required to register the station. */
+  registrationRepRequired: number;
   /** Multiplier applied to buy/sell prices at this station (1.0 = neutral). */
   marketPriceModifier: number;
   /** Additive speed bonus to manufacturing jobs run here (0.15 = +15%). */

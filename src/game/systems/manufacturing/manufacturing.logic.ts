@@ -1,8 +1,10 @@
 ﻿import type { GameState, ManufacturingJob, Blueprint, ResearchJob, CopyJob } from '@/types/game.types';
 import { MANUFACTURING_RECIPES, BLUEPRINT_DEFINITIONS, BASE_RESEARCH_TIME, BASE_COPY_TIME_MULTIPLIER, DEFAULT_RESEARCH_SLOTS } from './manufacturing.config';
+import { getCorpHqBonusFromState } from '@/game/systems/factions/faction.logic';
 
 export function getManufacturingSpeedMultiplier(state: GameState): number {
-  return 1 + (state.modifiers['manufacturing-speed'] ?? 0);
+  const hqBonus = getCorpHqBonusFromState(state)?.manufacturingSpeedBonus ?? 0;
+  return 1 + (state.modifiers['manufacturing-speed'] ?? 0) + hqBonus;
 }
 
 export function getResearchSpeedMultiplier(state: GameState): number {

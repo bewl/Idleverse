@@ -24,6 +24,7 @@ import { HULL_DEFINITIONS } from '@/game/systems/fleet/fleet.config';
 import { FACTION_DEFINITIONS } from '@/game/systems/factions/faction.config';
 import { getLocalPrice } from '@/game/systems/market/market.logic';
 import { RESOURCE_REGISTRY } from '@/game/resources/resourceRegistry';
+import { GameDropdown, type DropdownOption } from '@/ui/components/GameDropdown';
 import type { StarSystem, GalacticSector, WarpState } from '@/types/galaxy.types';
 import type { StarType, SystemSecurity } from '@/types/galaxy.types';
 import type { ShipInstance, FleetActivity, PlayerFleet } from '@/types/game.types';
@@ -61,6 +62,12 @@ interface ActiveRoute {
   legSecurity: SystemSecurity[];
   /** Ordered list of sector coords the route passes through. */
   sectorPath: Array<{ gx: number; gy: number }>;
+}
+
+interface HoverPreview {
+  systemId: string;
+  x: number;
+  y: number;
 }
 
 type OverlayMode = 'default' | 'resource' | 'fleet' | 'faction';
@@ -118,6 +125,17 @@ function starTypeGlyph(t: StarType) {
     O: '★', B: '★', A: '☆', F: '☆', G: '·', K: '·', M: '·',
   };
   return m[t] ?? '·';
+}
+
+function clamp01(value: number) {
+  return Math.max(0, Math.min(1, value));
+}
+
+function boundsOverlap(
+  a: { left: number; top: number; right: number; bottom: number },
+  b: { left: number; top: number; right: number; bottom: number },
+) {
+  return !(a.right < b.left || a.left > b.right || a.bottom < b.top || a.top > b.bottom);
 }
 
 /**
@@ -312,6 +330,7 @@ const GalaxyGridView = forwardRef<GalaxyGridHandle, {
   warpState:          WarpState | null;
   warpFromSystem:     StarSystem | null;
   warpToSystem:       StarSystem | null;
+  onHoverChange?:     (hover: HoverPreview | null) => void;
 }>(function GalaxyGridView({
   allSystems,
   sectors: _sectors,
@@ -331,6 +350,7 @@ const GalaxyGridView = forwardRef<GalaxyGridHandle, {
   warpState,
   warpFromSystem,
   warpToSystem,
+  onHoverChange,
 }, ref) {
   void _sectors;
   const canvasRef  = useRef<HTMLCanvasElement>(null);
@@ -342,19 +362,20 @@ const GalaxyGridView = forwardRef<GalaxyGridHandle, {
   const mousePos   = useRef<{ x: number; y: number } | null>(null);
   const rafId      = useRef(0);
   const projCache  = useRef<Array<{ id: string; sx: number; sy: number }>>([]);
+  const hoverPreviewRef = useRef<HoverPreview | null>(null);
 
   // Props ref — lets the RAF callback always see latest values without re-creating draw
   const propsRef = useRef({
     allSystems, currentSystemId, visitedSystems, zSlice,
     filters, searchQuery, selectedId, reachable, jumpRangeLY,
     overlay, fleetShips, playerFleets, activeRoute,
-    warpState, warpFromSystem, warpToSystem,
+    warpState, warpFromSystem, warpToSystem, onHoverChange,
   });
   propsRef.current = {
     allSystems, currentSystemId, visitedSystems, zSlice,
     filters, searchQuery, selectedId, reachable, jumpRangeLY,
     overlay, fleetShips, playerFleets, activeRoute,
-    warpState, warpFromSystem, warpToSystem,
+    warpState, warpFromSystem, warpToSystem, onHoverChange,
   };
 
   const draw = useCallback(() => {
@@ -387,7 +408,7 @@ const GalaxyGridView = forwardRef<GalaxyGridHandle, {
       allSystems, currentSystemId, visitedSystems, zSlice,
       filters, searchQuery, selectedId, reachable, jumpRangeLY,
       overlay, fleetShips, playerFleets, activeRoute,
-      warpState, warpFromSystem, warpToSystem,
+      warpState, warpFromSystem, warpToSystem, onHoverChange,
     } = propsRef.current;
 
     ctx.save();
@@ -522,6 +543,9 @@ const GalaxyGridView = forwardRef<GalaxyGridHandle, {
       ctx.setLineDash([]); ctx.restore();
     }
 
+    const labelZoomFade = clamp01((720 - c.dist) / 420);
+    const drawnLabelBounds: Array<{ left: number; top: number; right: number; bottom: number }> = [];
+
     for (const { sys, sx, sy, scale } of entries) {
       const isVisited  = !!visitedSystems[sys.id];
       const isHovered  = hovId.current === sys.id;
@@ -645,21 +669,58 @@ const GalaxyGridView = forwardRef<GalaxyGridHandle, {
         ctx.fillText(`${fleetN}▲`, bx + 2, by + bh / 2);
       }
 
-      // System label — appears when zoomed in, hovered, or on route
-      if (scale > 3.2 || isHovered || isCurrent || isOnRoute || isSelected) {
-        const la = scale > 5.5 ? 0.95 : isHovered ? 0.90 : 0.72;
-        ctx.globalAlpha = la;
-        const fs = Math.round(Math.min(12, 7.5 + scale * 0.12));
-        ctx.font = `${isCurrent ? 'bold ' : ''}${fs}px monospace`;
-        ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
-        ctx.fillStyle = isCurrent ? '#fbbf24' : isOnRoute ? '#22d3ee' : '#e2e8f0';
-        ctx.fillText(sys.name, sx, sy - baseR - 5);
-        if (isHovered || scale > 5.5) {
-          ctx.font = '7px monospace'; ctx.globalAlpha = 0.58;
-          const sl = sys.security === 'highsec' ? 'HIGH' : sys.security === 'lowsec' ? 'LOW' : 'NULL';
-          ctx.fillStyle = sys.security === 'highsec' ? '#4ade80' :
-                          sys.security === 'lowsec'  ? '#fb923c' : '#f87171';
-          ctx.fillText(`${sl}  ${sys.starType}`, sx, sy - baseR - 17);
+      // System label — priority-scored, zoom-aware, and softly culled when low-priority labels overlap.
+      {
+        const isCriticalLabel = isSelected || isCurrent || isHovered || isOnRoute;
+        const contextualScaleGate = 2.55 + (1 - labelZoomFade) * 2.1;
+        if (isCriticalLabel || (isVisited && scale >= contextualScaleGate)) {
+          const labelPriority = isSelected ? 1
+            : isCurrent ? 0.96
+            : isHovered ? 0.93
+            : isOnRoute ? 0.84
+            : 0.46;
+          const depthFade = clamp01((scale - 1.25) / 3.3);
+          const labelAlpha = masterAlpha * (isCriticalLabel
+            ? Math.max(0.74, depthFade * 0.75 + labelZoomFade * 0.45) * labelPriority
+            : depthFade * labelZoomFade * labelPriority);
+          const showSecondary = labelAlpha > 0.34 && (isSelected || isCurrent || isHovered || (scale > 6.4 && labelZoomFade > 0.58));
+
+          if (labelAlpha > 0.1) {
+            const fs = Math.round(Math.max(8, Math.min(11, 7.4 + scale * 0.08)));
+            const primaryY = sy - baseR - 5;
+            ctx.font = `${isCurrent || isSelected ? 'bold ' : ''}${fs}px monospace`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'bottom';
+
+            const primaryWidth = ctx.measureText(sys.name).width;
+            const secondaryHeight = showSecondary ? 10 : 0;
+            const labelBounds = {
+              left: sx - primaryWidth / 2 - 7,
+              right: sx + primaryWidth / 2 + 7,
+              top: primaryY - fs - secondaryHeight - 4,
+              bottom: primaryY + 3,
+            };
+
+            if (!isCriticalLabel && drawnLabelBounds.some(bounds => boundsOverlap(labelBounds, bounds))) {
+              ctx.restore();
+              continue;
+            }
+
+            drawnLabelBounds.push(labelBounds);
+            ctx.globalAlpha = labelAlpha;
+            ctx.fillStyle = isCurrent || isSelected ? '#fbbf24' : isOnRoute ? '#22d3ee' : '#cbd5e1';
+            ctx.fillText(sys.name, sx, primaryY);
+
+            if (showSecondary) {
+              const sl = sys.security === 'highsec' ? 'HIGH' : sys.security === 'lowsec' ? 'LOW' : 'NULL';
+              ctx.font = '7px monospace';
+              ctx.globalAlpha = Math.min(labelAlpha * 0.76, 0.58);
+              ctx.fillStyle = sys.security === 'highsec' ? '#4ade80'
+                : sys.security === 'lowsec' ? '#fb923c'
+                : '#f87171';
+              ctx.fillText(`${sl}  ${sys.starType}`, sx, primaryY - fs - 1);
+            }
+          }
         }
       }
 
@@ -870,52 +931,25 @@ const GalaxyGridView = forwardRef<GalaxyGridHandle, {
       }
     }
 
-    // ── 7. Floating tooltip for hovered star system ──────────────────────
+    // ── 7. Hover preview anchor for React overlay ────────────────────────
     const hovSys = hovId.current ? allSystems.find(s => s.id === hovId.current) : null;
     const hovPos = hovId.current ? projCache.current.find(p => p.id === hovId.current) : null;
-    if (hovSys && hovPos) {
-      const isVis = !!visitedSystems[hovSys.id];
-      const col   = STAR_COL[hovSys.starType] ?? '#fff4e8';
-      const lines = isVis
-        ? [
-            hovSys.name,
-            `${hovSys.starType}-type  ·  ${secLabel(hovSys.security)}`,
-            hovSys.factionId
-              ? `⚑ ${FACTION_DEFINITIONS[hovSys.factionId]?.name ?? hovSys.factionId}`
-              : null,
-            hovSys.stationId ? `⬡ Station present` : null,
-            'click to select  ·  dbl-click to fly in',
-          ].filter(Boolean) as string[]
-        : ['??? Unknown System', 'Scan required to reveal', ''];
-      const pad = 9, lh = 14, tw = 200;
-      const th = pad * 2 + lines.length * lh - 2;
-      let bx = hovPos.sx + 20, by = hovPos.sy - th / 2;
-      if (bx + tw > W - 4) bx = hovPos.sx - tw - 20;
-      if (by < 4) by = 4;
-      if (by + th > H - 4) by = H - th - 4;
-      ctx.save();
-      ctx.shadowBlur = 14; ctx.shadowColor = 'rgba(0,0,8,0.9)';
-      ctx.fillStyle = 'rgba(4,6,22,0.94)';
-      ctx.strokeStyle = isVis ? col + '55' : 'rgba(71,85,105,0.25)';
-      ctx.lineWidth = 0.8;
-      ctx.beginPath(); ctx.rect(bx, by, tw, th); ctx.fill();
-      ctx.shadowBlur = 0; ctx.stroke();
-      if (isVis) {
-        ctx.fillStyle = col; ctx.globalAlpha = 0.8;
-        ctx.fillRect(bx, by, 2, th); ctx.globalAlpha = 1;
+    if (onHoverChange) {
+      const nextHover = hovSys && hovPos ? {
+        systemId: hovSys.id,
+        x: hovPos.sx,
+        y: hovPos.sy,
+      } : null;
+      const prevHover = hoverPreviewRef.current;
+      const changed = !prevHover || !nextHover
+        ? prevHover !== nextHover
+        : prevHover.systemId !== nextHover.systemId
+          || Math.abs(prevHover.x - nextHover.x) > 0.75
+          || Math.abs(prevHover.y - nextHover.y) > 0.75;
+      if (changed) {
+        hoverPreviewRef.current = nextHover;
+        onHoverChange(nextHover);
       }
-      ctx.textBaseline = 'top'; ctx.textAlign = 'left';
-      ctx.fillStyle = isVis ? '#f1f5f9' : '#475569';
-      ctx.font = 'bold 10px monospace';
-      ctx.fillText(lines[0], bx + pad, by + pad);
-      ctx.font = '8px monospace';
-      ctx.fillStyle = isVis ? secColor(hovSys.security) : '#334155';
-      ctx.fillText(lines[1], bx + pad, by + pad + lh);
-      if (lines[2]) {
-        ctx.fillStyle = 'rgba(34,211,238,0.55)';
-        ctx.fillText(lines[2], bx + pad, by + pad + lh * 2);
-      }
-      ctx.restore();
     }
 
     // ── 8. HUD ─────────────────────────────────────────────────────────────
@@ -1066,7 +1100,14 @@ const GalaxyGridView = forwardRef<GalaxyGridHandle, {
     drag.current.active = false; drag.current.moved = false;
     e.currentTarget.style.cursor = 'crosshair';
     mousePos.current = null;
-    if (hovId.current) { hovId.current = null; scheduleRedraw(); }
+    if (hovId.current) {
+      hovId.current = null;
+      if (propsRef.current.onHoverChange) {
+        hoverPreviewRef.current = null;
+        propsRef.current.onHoverChange(null);
+      }
+      scheduleRedraw();
+    }
   }, [scheduleRedraw]);
 
   const onDblClick = useCallback(() => {
@@ -1295,16 +1336,16 @@ function SystemIntelPanel({
           </div>
         );
       })()}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 4 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginTop: 4 }}>
         {!isCurrent && (
-          <button onClick={onSetCourse} style={{ padding: '5px 8px', fontSize: 9, fontWeight: 600, border: '1px solid rgba(34,211,238,0.3)', borderRadius: 4, background: 'rgba(8,51,68,0.3)', color: '#22d3ee', cursor: 'pointer', textAlign: 'left' }}>
+          <button onClick={onSetCourse} style={{ padding: '8px 10px', fontSize: 9, fontWeight: 700, border: '1px solid rgba(34,211,238,0.3)', borderRadius: 6, background: 'rgba(8,51,68,0.3)', color: '#22d3ee', cursor: 'pointer', textAlign: 'left', gridColumn: '1 / -1' }}>
             ⊛ Set Course
           </button>
         )}
-        <button onClick={onSetRouteFrom} style={{ padding: '5px 8px', fontSize: 9, border: '1px solid rgba(71,85,105,0.3)', borderRadius: 4, background: 'rgba(6,9,20,0.4)', color: '#64748b', cursor: 'pointer', textAlign: 'left' }}>
+        <button onClick={onSetRouteFrom} style={{ padding: '8px 10px', fontSize: 9, border: '1px solid rgba(71,85,105,0.3)', borderRadius: 6, background: 'rgba(6,9,20,0.4)', color: '#94a3b8', cursor: 'pointer', textAlign: 'left' }}>
           Route: Set as Origin
         </button>
-        <button onClick={onSetRouteTo} style={{ padding: '5px 8px', fontSize: 9, border: '1px solid rgba(71,85,105,0.3)', borderRadius: 4, background: 'rgba(6,9,20,0.4)', color: '#64748b', cursor: 'pointer', textAlign: 'left' }}>
+        <button onClick={onSetRouteTo} style={{ padding: '8px 10px', fontSize: 9, border: '1px solid rgba(71,85,105,0.3)', borderRadius: 6, background: 'rgba(6,9,20,0.4)', color: '#94a3b8', cursor: 'pointer', textAlign: 'left' }}>
           Route: Set as Destination
         </button>
       </div>
@@ -1344,9 +1385,9 @@ function RoutePlanner({
   );
 
   const selStyle: React.CSSProperties = {
-    width: '100%', padding: '4px 6px', fontSize: 9,
+    width: '100%', padding: '7px 8px', fontSize: 9,
     background: 'rgba(6,9,20,0.8)', color: '#94a3b8',
-    border: '1px solid rgba(30,40,60,0.8)', borderRadius: 3,
+    border: '1px solid rgba(30,40,60,0.8)', borderRadius: 6,
   };
 
   const ROUTE_FLEET_COLORS = ['#a78bfa', '#fb923c', '#34d399', '#f472b6', '#60a5fa'];
@@ -1372,6 +1413,69 @@ function RoutePlanner({
     { value: 'avoid-low',  label: 'No Low',     color: '#4ade80', title: 'Highsec only (avoid lowsec + null)' },
     { value: 'safest',     label: 'Safest',     color: '#a78bfa', title: 'Dijkstra: strongly prefers highsec, avoids dangerous systems' },
   ];
+  const fleetOptions = useMemo<DropdownOption[]>(() => (
+    playerFleets.map(fleet => {
+      const system = allSystems.find(s => s.id === fleet.currentSystemId);
+      const inTransit = !!fleet.fleetOrder;
+      const tone: DropdownOption['tone'] = inTransit ? 'amber' : 'cyan';
+      return {
+        value: fleet.id,
+        label: fleet.name,
+        description: system ? `Origin ${system.name}` : 'Unknown origin',
+        meta: inTransit ? 'IN TRANSIT' : 'READY',
+        group: inTransit ? 'In Transit' : 'Ready',
+        tone,
+        badges: system ? [{ label: secLabel(system.security), color: secColor(system.security) }] : undefined,
+        keywords: [fleet.name, system?.name ?? '', system?.security ?? ''],
+      };
+    })
+  ), [allSystems, playerFleets]);
+  const originOptions = useMemo<DropdownOption[]>(() => {
+    const currentSystem = allSystems.find(s => s.id === currentSystemId);
+    const known = knownSystems.filter(s => s.id !== currentSystemId).map(system => {
+      const tone: DropdownOption['tone'] = system.security === 'highsec' ? 'emerald' : system.security === 'lowsec' ? 'amber' : 'rose';
+      return {
+        value: system.id,
+        label: system.name,
+        description: `${secLabel(system.security)} origin`,
+        group: secLabel(system.security),
+        tone,
+        badges: [{ label: system.starType, color: '#94a3b8' }],
+        keywords: [system.name, system.security, system.starType],
+      };
+    });
+    return currentSystem
+      ? [{
+          value: currentSystem.id,
+          label: currentSystem.name,
+          description: 'Current location',
+          group: 'Current',
+          tone: 'cyan',
+          badges: [{ label: secLabel(currentSystem.security), color: secColor(currentSystem.security) }],
+          keywords: [currentSystem.name, currentSystem.security, 'current'],
+        }, ...known]
+      : known;
+  }, [allSystems, currentSystemId, knownSystems]);
+  const destinationOptions = useMemo<DropdownOption[]>(() => (
+    allSystemsSorted.map(system => {
+      const tone: DropdownOption['tone'] = !visitedSystems[system.id]
+        ? 'slate'
+        : system.security === 'highsec'
+          ? 'emerald'
+          : system.security === 'lowsec'
+            ? 'amber'
+            : 'rose';
+      return {
+        value: system.id,
+        label: `${visitedSystems[system.id] ? '' : '? '}${system.name}`,
+        description: visitedSystems[system.id] ? `${secLabel(system.security)} destination` : 'Unvisited destination',
+        group: visitedSystems[system.id] ? secLabel(system.security) : 'Unvisited',
+        tone,
+        badges: [{ label: system.starType, color: '#94a3b8' }],
+        keywords: [system.name, system.security, system.starType, visitedSystems[system.id] ? 'visited' : 'unvisited'],
+      };
+    })
+  ), [allSystemsSorted, visitedSystems]);
 
   // Compute security breakdown for active route
   const secCount = activeRoute ? {
@@ -1389,22 +1493,18 @@ function RoutePlanner({
       {/* Fleet selector */}
       <div>
         <div style={{ fontSize: 8, color: '#475569', marginBottom: 3 }}>Fleet (as origin)</div>
-        <select
+        <GameDropdown
           value={routeFleetId ?? ''}
-          onChange={e => onSetFleet(e.target.value || null)}
-          style={selStyle}
-        >
-          <option value="">— None (set origin manually) —</option>
-          {playerFleets.map((fleet, i) => {
-            const sys = allSystems.find(s => s.id === fleet.currentSystemId);
-            const inTransit = !!fleet.fleetOrder;
-            return (
-              <option key={fleet.id} value={fleet.id}>
-                {inTransit ? '⇒' : '▶'} {fleet.name} @ {sys?.name ?? '?'}{inTransit ? ' (in transit)' : ''}
-              </option>
-            );
-          })}
-        </select>
+          onChange={nextValue => onSetFleet(nextValue || null)}
+          options={fleetOptions}
+          placeholder="Select fleet..."
+          emptyOptionLabel="Manual origin"
+          emptyOptionDescription="Do not bind the route to a fleet yet"
+          searchPlaceholder="Search fleets or staging systems..."
+          size="compact"
+          menuWidth={320}
+          buttonStyle={selStyle}
+        />
       </div>
 
       <div>
@@ -1424,26 +1524,35 @@ function RoutePlanner({
             </span>
           </div>
         ) : (
-          <select value={routeFrom ?? ''} onChange={e => onSetFrom(e.target.value)} style={selStyle}>
-            <option value="">— Select origin —</option>
-            <option value={currentSystemId}>⊛ {allSystems.find(s => s.id === currentSystemId)?.name ?? 'Current'} (here)</option>
-            {knownSystems.filter(s => s.id !== currentSystemId).map(s => (
-              <option key={s.id} value={s.id}>{s.name}</option>
-            ))}
-          </select>
+          <GameDropdown
+            value={routeFrom ?? ''}
+            onChange={onSetFrom}
+            options={originOptions}
+            placeholder="Select origin..."
+            emptyOptionLabel="No origin selected"
+            emptyOptionDescription="Pick a manual starting system"
+            searchPlaceholder="Search visited origin systems..."
+            size="compact"
+            menuWidth={320}
+            buttonStyle={selStyle}
+          />
         )}
       </div>
 
       <div>
         <div style={{ fontSize: 8, color: '#475569', marginBottom: 3 }}>Destination</div>
-        <select value={routeTo ?? ''} onChange={e => onSetTo(e.target.value)} style={selStyle}>
-          <option value="">— Select destination —</option>
-          {allSystemsSorted.map(s => (
-            <option key={s.id} value={s.id}>
-              {visitedSystems[s.id] ? '' : '? '}{s.name}
-            </option>
-          ))}
-        </select>
+        <GameDropdown
+          value={routeTo ?? ''}
+          onChange={onSetTo}
+          options={destinationOptions}
+          placeholder="Select destination..."
+          emptyOptionLabel="No destination selected"
+          emptyOptionDescription="Pick a target system to solve a route"
+          searchPlaceholder="Search all known and unknown systems..."
+          size="compact"
+          menuWidth={340}
+          buttonStyle={selStyle}
+        />
       </div>
 
       <div>
@@ -1486,9 +1595,9 @@ function RoutePlanner({
               onClick={() => onSetFilter(opt.value)}
               title={opt.title}
               style={{
-                padding: '3px 4px', fontSize: 8, fontWeight: 600,
+                padding: '6px 5px', fontSize: 8, fontWeight: 700,
                 border: `1px solid ${routeFilter === opt.value ? opt.color + '55' : 'rgba(30,40,60,0.6)'}`,
-                borderRadius: 3, cursor: 'pointer',
+                borderRadius: 6, cursor: 'pointer',
                 background: routeFilter === opt.value ? opt.color + '18' : 'rgba(6,9,20,0.4)',
                 color: routeFilter === opt.value ? opt.color : '#334155',
               }}
@@ -1505,8 +1614,8 @@ function RoutePlanner({
       <div style={{ display: 'flex', gap: 4 }}>
         <button onClick={onComputeRoute} disabled={!routeFrom || !routeTo}
           style={{
-            flex: 1, padding: '5px 8px', fontSize: 9, fontWeight: 600,
-            border: '1px solid rgba(34,211,238,0.3)', borderRadius: 4,
+            flex: 1, padding: '8px 10px', fontSize: 9, fontWeight: 700,
+            border: '1px solid rgba(34,211,238,0.3)', borderRadius: 6,
             background: routeFrom && routeTo ? 'rgba(8,51,68,0.4)' : 'rgba(6,9,20,0.2)',
             color: routeFrom && routeTo ? '#22d3ee' : '#334155',
             cursor: routeFrom && routeTo ? 'pointer' : 'not-allowed',
@@ -1515,24 +1624,24 @@ function RoutePlanner({
           Find Route
         </button>
         {activeRoute && (
-          <button onClick={onClearRoute} style={{ padding: '5px 8px', fontSize: 9, border: '1px solid rgba(239,68,68,0.25)', borderRadius: 4, background: 'rgba(127,29,29,0.15)', color: '#f87171', cursor: 'pointer' }}>
+          <button onClick={onClearRoute} style={{ padding: '8px 10px', fontSize: 9, border: '1px solid rgba(239,68,68,0.25)', borderRadius: 6, background: 'rgba(127,29,29,0.15)', color: '#f87171', cursor: 'pointer' }}>
             Clear
           </button>
         )}
       </div>
 
       {activeRoute && (
-        <div style={{ padding: '8px 10px', borderRadius: 5, border: '1px solid rgba(34,211,238,0.2)', background: 'rgba(8,51,68,0.2)' }}>
-          <div style={{ fontSize: 9, color: '#22d3ee', fontWeight: 600, marginBottom: 6 }}>Route found</div>
+        <div style={{ padding: '10px 12px', borderRadius: 8, border: '1px solid rgba(34,211,238,0.2)', background: 'linear-gradient(180deg, rgba(8,51,68,0.22), rgba(4,6,18,0.88))' }}>
+          <div style={{ fontSize: 9, color: '#22d3ee', fontWeight: 700, marginBottom: 8, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Route Summary</div>
 
           {/* Dispatch button */}
           {selectedFleet && (
             <button
               onClick={() => onDispatch(selectedFleet.id)}
               style={{
-                width: '100%', padding: '6px 8px', fontSize: 9, fontWeight: 700,
+                width: '100%', padding: '8px 10px', fontSize: 9, fontWeight: 700,
                 border: `1px solid ${selectedFleetColor}55`,
-                borderRadius: 4,
+                borderRadius: 6,
                 background: `${selectedFleetColor}20`,
                 color: selectedFleetColor ?? '#a78bfa',
                 cursor: 'pointer',
@@ -1671,6 +1780,213 @@ function ZLayerControl({ zSlice, onUp, onDown, onReset }: {
   );
 }
 
+function StarSystemHoverCard({
+  hover,
+  sys,
+  allSystems,
+  currentSystem,
+  visitedSystems,
+  activeRoute,
+  fleetShips,
+  playerFleets,
+}: {
+  hover: HoverPreview;
+  sys: StarSystem;
+  allSystems: StarSystem[];
+  currentSystem: StarSystem;
+  visitedSystems: Record<string, boolean>;
+  activeRoute: ActiveRoute | null;
+  fleetShips: ShipInstance[];
+  playerFleets: PlayerFleet[];
+}) {
+  const gameState = useGameStore(s => s.state);
+  const isVisited = !!visitedSystems[sys.id];
+  const isCurrent = sys.id === currentSystem.id;
+  const starColor = STAR_COL[sys.starType] ?? '#fff4e8';
+  const belts = sys.bodies.filter(body => body.type === 'asteroid-belt').length;
+  const planets = sys.bodies.filter(body => body.type !== 'asteroid-belt' && body.type !== 'moon').length;
+  const hasNullOres = sys.bodies.some(body => body.beltIds.some(id => id === 'belt-arkonite' || id === 'belt-crokitite'));
+  const threatGroups = isVisited ? getAliveNpcGroupsInSystem(gameState, sys.id) : [];
+  const fleetsHere = playerFleets.filter(fleet => fleet.currentSystemId === sys.id).length;
+  const shipsHere = fleetShips.filter(ship => ship.systemId === sys.id).length;
+  const routeHopIndex = activeRoute ? activeRoute.path.indexOf(sys.id) : -1;
+  const distLY = unitsToLy(systemDistance(currentSystem, sys));
+  const TRADE_MINERALS = ['ferrite','silite','vexirite','isorium','noxium','zyridium','megacite','voidsteel'];
+  const tradeOpportunities = isVisited && !isCurrent
+    ? TRADE_MINERALS
+        .map(resourceId => ({
+          resourceId,
+          buyPrice: getLocalPrice(gameState, resourceId, currentSystem.id),
+          sellPrice: getLocalPrice(gameState, resourceId, sys.id),
+        }))
+        .filter(opportunity => opportunity.buyPrice > 0 && opportunity.sellPrice > opportunity.buyPrice * 1.05)
+        .sort((a, b) => (b.sellPrice / b.buyPrice) - (a.sellPrice / a.buyPrice))
+        .slice(0, 2)
+    : [];
+
+  let left = hover.x + 18;
+  let top = hover.y - 88;
+  if (left + 260 > window.innerWidth - 260) left = hover.x - 278;
+  if (top < 12) top = 12;
+
+  return (
+    <div style={{
+      position: 'absolute',
+      left,
+      top,
+      width: 260,
+      pointerEvents: 'none',
+      background: 'rgba(4,6,22,0.96)',
+      border: `1px solid ${isVisited ? `${starColor}40` : 'rgba(51,65,85,0.45)'}`,
+      borderRadius: 8,
+      boxShadow: '0 18px 42px rgba(0,0,0,0.55)',
+      overflow: 'hidden',
+      zIndex: 12,
+    }}>
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 10,
+        padding: '10px 12px 8px',
+        borderBottom: '1px solid rgba(15,23,42,0.85)',
+        background: 'linear-gradient(180deg, rgba(15,23,42,0.68), rgba(4,6,22,0.2))',
+      }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 8, color: '#334155', letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 3 }}>
+            {isVisited ? 'System Hover' : 'Unknown Signature'}
+          </div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: isVisited ? '#f8fafc' : '#64748b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {isVisited ? sys.name : '??? Unknown System'}
+          </div>
+        </div>
+        <div style={{
+          flexShrink: 0,
+          fontSize: 9,
+          padding: '2px 7px',
+          borderRadius: 999,
+          color: isVisited ? secColor(sys.security) : '#475569',
+          border: `1px solid ${isVisited ? `${secColor(sys.security)}35` : 'rgba(71,85,105,0.35)'}`,
+          background: isVisited ? `${secColor(sys.security)}14` : 'rgba(15,23,42,0.6)',
+        }}>
+          {isVisited ? secLabel(sys.security) : 'Unscanned'}
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '10px 12px 12px' }}>
+        {isVisited ? (
+          <>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 9, color: '#94a3b8', border: '1px solid rgba(51,65,85,0.65)', borderRadius: 999, padding: '2px 7px', background: 'rgba(15,23,42,0.45)' }}>
+                {starTypeGlyph(sys.starType)} {sys.starType}-type
+              </span>
+              {sys.factionId && (
+                <span style={{ fontSize: 9, color: '#22d3ee', border: '1px solid rgba(34,211,238,0.25)', borderRadius: 999, padding: '2px 7px', background: 'rgba(8,51,68,0.18)' }}>
+                  ⚑ {FACTION_DEFINITIONS[sys.factionId]?.name ?? sys.factionId}
+                </span>
+              )}
+              {sys.stationId && (
+                <span style={{ fontSize: 9, color: '#cbd5e1', border: '1px solid rgba(148,163,184,0.25)', borderRadius: 999, padding: '2px 7px', background: 'rgba(15,23,42,0.52)' }}>
+                  ⬡ Station
+                </span>
+              )}
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 14px' }}>
+              {[
+                ['Distance', `${distLY.toFixed(1)} LY`],
+                ['Bodies', `${sys.bodies.length}`],
+                ['Planets', `${planets}`],
+                ['Belts', `${belts}`],
+                ['Fleets', `${fleetsHere}`],
+                ['Ships', `${shipsHere}`],
+              ].map(([label, value]) => (
+                <div key={label} style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                  <span style={{ fontSize: 9, color: '#475569' }}>{label}</span>
+                  <span style={{ fontSize: 9, color: '#cbd5e1', fontFamily: 'monospace' }}>{value}</span>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 8, color: '#64748b', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                {isCurrent ? 'Current Location' : 'Inspectable'}
+              </span>
+              {hasNullOres && (
+                <span style={{ fontSize: 8, color: '#22d3ee', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                  Null Ore Signal
+                </span>
+              )}
+              {routeHopIndex >= 0 && (
+                <span style={{ fontSize: 8, color: '#fbbf24', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                  Route Hop {routeHopIndex + 1}
+                </span>
+              )}
+            </div>
+
+            {(threatGroups.length > 0 || tradeOpportunities.length > 0) && (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <div>
+                  <div style={{ fontSize: 8, color: '#334155', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 4 }}>
+                    Threats
+                  </div>
+                  {threatGroups.length > 0 ? threatGroups.slice(0, 2).map(group => (
+                    <div key={group.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 9, marginBottom: 3 }}>
+                      <span style={{ color: '#fca5a5', minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{group.name}</span>
+                      <span style={{ color: '#7f1d1d', fontFamily: 'monospace', flexShrink: 0 }}>STR {group.strength}</span>
+                    </div>
+                  )) : (
+                    <div style={{ fontSize: 9, color: '#475569' }}>No active contacts</div>
+                  )}
+                </div>
+
+                <div>
+                  <div style={{ fontSize: 8, color: '#334155', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 4 }}>
+                    Trade
+                  </div>
+                  {tradeOpportunities.length > 0 ? tradeOpportunities.map(opportunity => (
+                    <div key={opportunity.resourceId} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 9, marginBottom: 3 }}>
+                      <span style={{ color: '#94a3b8' }}>{RESOURCE_REGISTRY[opportunity.resourceId]?.name ?? opportunity.resourceId}</span>
+                      <span style={{ color: '#4ade80', fontFamily: 'monospace', flexShrink: 0 }}>
+                        +{((opportunity.sellPrice / opportunity.buyPrice - 1) * 100).toFixed(0)}%
+                      </span>
+                    </div>
+                  )) : (
+                    <div style={{ fontSize: 9, color: '#475569' }}>No strong spread</div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            <div style={{ fontSize: 8, color: '#64748b', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+              Click to inspect · double-click to fly in
+            </div>
+          </>
+        ) : (
+          <>
+            <div style={{ fontSize: 10, color: '#64748b', lineHeight: 1.45 }}>
+              Scan required to reveal detailed system telemetry.
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 12px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: 9, color: '#475569' }}>Distance</span>
+                <span style={{ fontSize: 9, color: '#94a3b8', fontFamily: 'monospace' }}>{distLY.toFixed(1)} LY</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: 9, color: '#475569' }}>Status</span>
+                <span style={{ fontSize: 9, color: '#64748b', fontFamily: 'monospace' }}>UNKNOWN</span>
+              </div>
+            </div>
+            <div style={{ fontSize: 8, color: '#475569', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+              Click to lock selection before planning a scan or route
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Main panel ───────────────────────────────────────────────────────────────
 
 function StarMapPanelInner() {
@@ -1725,6 +2041,7 @@ function StarMapPanelInner() {
   const [routeComputed,  setRouteComputed]  = useState(false);
   const [routeFleetId,   setRouteFleetId]   = useState<string | null>(null);
   const [overlay,        setOverlay]        = useState<OverlayMode>('default');
+  const [hoverPreview,   setHoverPreview]   = useState<HoverPreview | null>(null);
   const gridRef = useRef<GalaxyGridHandle>(null);
 
   // Warp ticker
@@ -1819,6 +2136,7 @@ function StarMapPanelInner() {
   const selectedSys    = selectedId ? allSystems.find(s => s.id === selectedId) : null;
   const selectedVisited = selectedId ? !!galaxy.visitedSystems[selectedId] : false;
   const selectedDistLY  = selectedSys ? unitsToLy(systemDistance(currentSystem, selectedSys)) : null;
+  const hoveredSys = hoverPreview ? allSystems.find(s => s.id === hoverPreview.systemId) ?? null : null;
 
   const Z_STEP = 0.08;
 
@@ -1965,14 +2283,27 @@ function StarMapPanelInner() {
               warpState={warp ?? null}
               warpFromSystem={warpFromSystem}
               warpToSystem={warpToSystem}
+              onHoverChange={setHoverPreview}
             />
+            {hoverPreview && hoveredSys && (
+              <StarSystemHoverCard
+                hover={hoverPreview}
+                sys={hoveredSys}
+                allSystems={allSystems}
+                currentSystem={currentSystem}
+                visitedSystems={galaxy.visitedSystems}
+                activeRoute={activeRoute}
+                fleetShips={fleetShips}
+                playerFleets={playerFleets}
+              />
+            )}
           </div>
         </div>
 
         {/* Right panel */}
         {showRight && (
           <div style={{
-            width: 210, borderLeft: '1px solid rgba(22,30,52,0.8)',
+            width: 292, borderLeft: '1px solid rgba(22,30,52,0.8)',
             background: 'rgba(3,5,16,0.95)', display: 'flex', flexDirection: 'column',
             overflowY: 'auto', flexShrink: 0,
           }}>
@@ -1997,12 +2328,20 @@ function StarMapPanelInner() {
             <div style={{ padding: '10px 12px', overflowY: 'auto', flex: 1 }}>
               {rightTab === 'intel' ? (
                 <>
-                  <div style={{ paddingBottom: 8, marginBottom: 8, borderBottom: '1px solid rgba(22,30,52,0.5)' }}>
-                    <div style={{ fontSize: 8, color: '#334155', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 3 }}>Current Location</div>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: '#22d3ee' }}>{currentSystem.name}</div>
-                    <div style={{ fontSize: 9, color: secColor(currentSystem.security), marginTop: 1 }}>{secLabel(currentSystem.security)}</div>
-                    <div style={{ fontSize: 9, color: '#334155', marginTop: 1 }}>
-                      {starTypeGlyph(currentSystem.starType)} {currentSystem.starType}-type · {currentSystem.bodies.length} bodies
+                  <div style={{ paddingBottom: 10, marginBottom: 10, borderBottom: '1px solid rgba(22,30,52,0.5)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                      <div>
+                        <div style={{ fontSize: 8, color: '#334155', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 3 }}>Current Location</div>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: '#22d3ee' }}>{currentSystem.name}</div>
+                      </div>
+                      <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                        <span style={{ fontSize: 8, padding: '2px 7px', borderRadius: 999, color: secColor(currentSystem.security), border: `1px solid ${secColor(currentSystem.security)}30`, background: `${secColor(currentSystem.security)}12`, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                          {secLabel(currentSystem.security)}
+                        </span>
+                        <span style={{ fontSize: 8, padding: '2px 7px', borderRadius: 999, color: '#64748b', border: '1px solid rgba(100,116,139,0.25)', background: 'rgba(15,23,42,0.52)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                          {currentSystem.bodies.length} Bodies
+                        </span>
+                      </div>
                     </div>
                   </div>
 
@@ -2017,8 +2356,8 @@ function StarMapPanelInner() {
                       onSetRouteTo={()   => { setRouteTo(selectedSys!.id);   setRightTab('route'); }}
                     />
                   ) : (
-                    <div style={{ fontSize: 9, color: '#334155', textAlign: 'center', padding: '14px 0' }}>
-                      Click any star to inspect it · dbl-click to fly in
+                    <div style={{ fontSize: 9, color: '#475569', textAlign: 'left', padding: '12px 14px', border: '1px solid rgba(30,41,59,0.72)', borderRadius: 8, background: 'linear-gradient(180deg, rgba(8,12,28,0.94), rgba(4,6,18,0.9))', lineHeight: 1.5 }}>
+                      Click any star to inspect it. Hover gives fast intel, selection opens the full inspector, and double-click flies the camera in.
                     </div>
                   )}
                 </>

@@ -6,6 +6,7 @@ import { getEffectiveSellPrice, getTradeBonusMultiplier } from '@/game/systems/m
 import { StatTooltip } from '@/ui/tooltip/StatTooltip';
 import { generateGalaxy } from '@/game/galaxy/galaxy.gen';
 import { NavTag } from '@/ui/components/NavTag';
+import { GameDropdown, type DropdownOption } from '@/ui/components/GameDropdown';
 
 // ─── Resource categories to display in market ─────────────────────────────
 
@@ -195,6 +196,63 @@ function TradeRoutesTab() {
   });
   const [showForm, setShowForm]   = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  const fleetOptions = useMemo<DropdownOption[]>(() => (
+    fleets.map(fleet => {
+      const system = systems.find(sys => sys.id === fleet.currentSystemId);
+      const inTransit = !!fleet.fleetOrder;
+      return {
+        value: fleet.id,
+        label: fleet.name,
+        description: system ? `Operating from ${system.name}` : 'Unknown staging system',
+        meta: inTransit ? 'IN TRANSIT' : 'READY',
+        group: inTransit ? 'In Transit' : 'Ready',
+        tone: inTransit ? 'amber' : 'cyan',
+        badges: system ? [{ label: system.security, color: system.security === 'highsec' ? '#4ade80' : system.security === 'lowsec' ? '#fb923c' : '#f87171' }] : undefined,
+        keywords: [fleet.name, system?.name ?? '', system?.security ?? ''],
+      };
+    })
+  ), [fleets, systems]);
+  const resourceOptions = useMemo<DropdownOption[]>(() => (
+    TRADEABLE_RESOURCE_IDS
+      .filter(id => (state.systems.market.prices[id] ?? 0) > 0)
+      .map(id => {
+        const resource = RESOURCE_REGISTRY[id];
+        const category = resource?.category ?? 'misc';
+        return {
+          value: id,
+          label: resource?.name ?? id,
+          description: `${category} · Tier ${resource?.tier ?? '?'}`,
+          group: category,
+          tone: category === 'mineral' ? 'cyan' : category === 'ore' ? 'amber' : category === 'component' ? 'violet' : 'slate',
+          badges: resource ? [{ label: `T${resource.tier}`, color: '#94a3b8' }] : undefined,
+          keywords: [resource?.name ?? id, category, `${resource?.tier ?? ''}`],
+        };
+      })
+  ), [state.systems.market.prices]);
+  const buySystemOptions = useMemo<DropdownOption[]>(() => (
+    visitedSystems.map(system => ({
+      value: system.id,
+      label: system.name,
+      description: `Buy source · ${system.security}`,
+      group: system.security,
+      tone: system.security === 'highsec' ? 'emerald' : system.security === 'lowsec' ? 'amber' : 'rose',
+      badges: [{ label: system.starType, color: '#94a3b8' }],
+      keywords: [system.name, system.security, system.starType],
+    }))
+  ), [visitedSystems]);
+  const sellSystemOptions = useMemo<DropdownOption[]>(() => (
+    visitedSystems
+      .filter(system => system.id !== form.fromSystemId)
+      .map(system => ({
+        value: system.id,
+        label: system.name,
+        description: `Sell target · ${system.security}`,
+        group: system.security,
+        tone: system.security === 'highsec' ? 'emerald' : system.security === 'lowsec' ? 'amber' : 'rose',
+        badges: [{ label: system.starType, color: '#94a3b8' }],
+        keywords: [system.name, system.security, system.starType],
+      }))
+  ), [form.fromSystemId, visitedSystems]);
 
   function handleCreate() {
     setCreateError(null);
@@ -264,31 +322,27 @@ function TradeRoutesTab() {
             </div>
             <div>
               <div className="text-[9px] text-slate-500 mb-1">Fleet</div>
-              <select
+              <GameDropdown
                 value={form.fleetId}
-                onChange={e => setForm(f => ({ ...f, fleetId: e.target.value }))}
-                className="w-full text-[10px] font-mono bg-slate-800/60 border border-slate-700/40 rounded px-2 py-1 text-slate-300 focus:outline-none focus:border-cyan-700/50"
-              >
-                <option value="">Select fleet…</option>
-                {fleets.map(fleet => (
-                  <option key={fleet.id} value={fleet.id}>{fleet.name}</option>
-                ))}
-              </select>
+                onChange={value => setForm(f => ({ ...f, fleetId: value }))}
+                options={fleetOptions}
+                placeholder="Select fleet..."
+                searchPlaceholder="Search fleets or staging systems..."
+                size="compact"
+                menuWidth={320}
+              />
             </div>
             <div>
               <div className="text-[9px] text-slate-500 mb-1">Resource</div>
-              <select
+              <GameDropdown
                 value={form.resourceId}
-                onChange={e => setForm(f => ({ ...f, resourceId: e.target.value }))}
-                className="w-full text-[10px] font-mono bg-slate-800/60 border border-slate-700/40 rounded px-2 py-1 text-slate-300 focus:outline-none focus:border-cyan-700/50"
-              >
-                <option value="">Select resource…</option>
-                {TRADEABLE_RESOURCE_IDS
-                  .filter(id => (state.systems.market.prices[id] ?? 0) > 0)
-                  .map(id => (
-                    <option key={id} value={id}>{RESOURCE_REGISTRY[id]?.name ?? id}</option>
-                  ))}
-              </select>
+                onChange={value => setForm(f => ({ ...f, resourceId: value }))}
+                options={resourceOptions}
+                placeholder="Select resource..."
+                searchPlaceholder="Search tradeable resources..."
+                size="compact"
+                menuWidth={340}
+              />
             </div>
             <div>
               <div className="text-[9px] text-slate-500 mb-1">Amount per run</div>
@@ -302,31 +356,27 @@ function TradeRoutesTab() {
             </div>
             <div>
               <div className="text-[9px] text-slate-500 mb-1">Buy from system</div>
-              <select
+              <GameDropdown
                 value={form.fromSystemId}
-                onChange={e => setForm(f => ({ ...f, fromSystemId: e.target.value }))}
-                className="w-full text-[10px] font-mono bg-slate-800/60 border border-slate-700/40 rounded px-2 py-1 text-slate-300 focus:outline-none focus:border-cyan-700/50"
-              >
-                <option value="">Select system…</option>
-                {visitedSystems.map(sys => (
-                  <option key={sys.id} value={sys.id}>{sys.name}</option>
-                ))}
-              </select>
+                onChange={value => setForm(f => ({ ...f, fromSystemId: value }))}
+                options={buySystemOptions}
+                placeholder="Select source system..."
+                searchPlaceholder="Search visited source systems..."
+                size="compact"
+                menuWidth={320}
+              />
             </div>
             <div>
               <div className="text-[9px] text-slate-500 mb-1">Sell to system</div>
-              <select
+              <GameDropdown
                 value={form.toSystemId}
-                onChange={e => setForm(f => ({ ...f, toSystemId: e.target.value }))}
-                className="w-full text-[10px] font-mono bg-slate-800/60 border border-slate-700/40 rounded px-2 py-1 text-slate-300 focus:outline-none focus:border-cyan-700/50"
-              >
-                <option value="">Select system…</option>
-                {visitedSystems
-                  .filter(sys => sys.id !== form.fromSystemId)
-                  .map(sys => (
-                    <option key={sys.id} value={sys.id}>{sys.name}</option>
-                  ))}
-              </select>
+                onChange={value => setForm(f => ({ ...f, toSystemId: value }))}
+                options={sellSystemOptions}
+                placeholder="Select destination system..."
+                searchPlaceholder="Search visited destination systems..."
+                size="compact"
+                menuWidth={320}
+              />
             </div>
           </div>
           {createError && (

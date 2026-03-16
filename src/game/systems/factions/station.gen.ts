@@ -58,6 +58,20 @@ export function generateStation(
     covenant:  1.05,
   };
 
+  const registrationCost: Record<FactionId, number> = {
+    concordat: 8000,
+    veldris:   6000,
+    syndicate: 4000,
+    covenant:  7000,
+  };
+
+  const registrationRepRequired: Record<FactionId, number> = {
+    concordat: 150,
+    veldris:   50,
+    syndicate: -150,
+    covenant:  100,
+  };
+
   // Manufacturing bonus: veldris industrial, others basic
   const mfgBonus: Record<FactionId, number> = {
     concordat: 0.10,
@@ -80,6 +94,8 @@ export function generateStation(
     systemId: system.id,
     factionId,
     services: SERVICES_BY_FACTION[factionId],
+    registrationCost: registrationCost[factionId],
+    registrationRepRequired: registrationRepRequired[factionId],
     marketPriceModifier:     priceModifiers[factionId],
     manufacturingSpeedBonus: mfgBonus[factionId],
     minRepToDock:            minRep[factionId],

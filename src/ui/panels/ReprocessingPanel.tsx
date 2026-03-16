@@ -6,6 +6,8 @@ import { formatResourceAmount } from '@/game/resources/resourceRegistry';
 import { FlairProgressBar } from '@/ui/components/FlairProgressBar';
 import { StatTooltip } from '@/ui/tooltip/StatTooltip';
 import { NavTag } from '@/ui/components/NavTag';
+import { GameDropdown, type DropdownOption } from '@/ui/components/GameDropdown';
+import { getSystemById } from '@/game/galaxy/galaxy.gen';
 import { getBatchYieldPreview, getReprocessingEfficiency } from '@/game/systems/reprocessing/reprocessing.logic';
 import { BATCH_SIZE_BASE, BATCH_TIME_SECONDS, ORE_YIELD_TABLE } from '@/game/systems/reprocessing/reprocessing.config';
 import type { OreSecurityTier } from '@/types/game.types';
@@ -64,6 +66,7 @@ function AutoRefineryCard({ oreId }: { oreId: string }) {
   const threshold = state.systems.reprocessing.autoThreshold?.[oreId] ?? 0;
   const have     = state.resources[oreId] ?? 0;
   const hasYield = !!ORE_YIELD_TABLE[oreId];
+  const hasCorpHq = !!state.systems.factions.homeStationId && !!state.systems.factions.homeStationSystemId;
 
   if (!hasYield) return null;
 
@@ -96,6 +99,7 @@ function AutoRefineryCard({ oreId }: { oreId: string }) {
               min={0}
               step={100}
               value={threshold}
+              disabled={!hasCorpHq}
               onChange={e => setThreshold(oreId, Number(e.target.value))}
               className="w-20 text-[10px] font-mono bg-slate-800/60 border border-slate-700/40 rounded px-1.5 py-0.5 text-slate-300 focus:outline-none focus:border-cyan-700/50"
             />
@@ -106,7 +110,8 @@ function AutoRefineryCard({ oreId }: { oreId: string }) {
         {/* Toggle button */}
         <button
           onClick={() => toggleAuto(oreId)}
-          className={`shrink-0 px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${
+          disabled={!hasCorpHq}
+          className={`shrink-0 px-3 py-1.5 rounded-lg text-xs font-bold border transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
             enabled
               ? 'bg-rose-900/40 border-rose-600/50 text-rose-300 hover:bg-rose-800/50'
               : 'bg-cyan-900/30 border-cyan-700/40 text-cyan-300 hover:bg-cyan-800/40'
@@ -127,6 +132,7 @@ function ManualQueue() {
   const cancelJob    = useGameStore(s => s.cancelReprocessingJob);
   const [selectedOre, setSelectedOre] = useState('ferrock');
   const [amount, setAmount]           = useState(100);
+  const hasCorpHq = !!state.systems.factions.homeStationId && !!state.systems.factions.homeStationSystemId;
 
   const queue = state.systems.reprocessing.queue;
   const activeJob = queue[0] ?? null;
@@ -136,6 +142,21 @@ function ManualQueue() {
   const availableOres = BELT_ORDER
     .map(bId => ORE_BELTS[bId]?.outputs[0]?.resourceId)
     .filter((id): id is string => !!id && !!ORE_YIELD_TABLE[id]);
+  const oreOptions: DropdownOption[] = availableOres.map(id => {
+    const beltDef = Object.values(ORE_BELTS).find(belt => belt.outputs.some(output => output.resourceId === id));
+    const tier = (beltDef?.securityTier ?? 'highsec') as OreSecurityTier;
+    const tone: DropdownOption['tone'] = tier === 'highsec' ? 'cyan' : tier === 'lowsec' ? 'amber' : 'rose';
+    return {
+      value: id,
+      label: RESOURCE_REGISTRY[id]?.name ?? id,
+      description: `${TIER_CONFIG[tier].label} ore`,
+      meta: `Have ${formatResourceAmount(state.resources[id] ?? 0, 0)}`,
+      group: TIER_CONFIG[tier].label,
+      tone,
+      badges: [{ label: `Yield ${getBatchYieldPreview(state, id)}`, color: TIER_CONFIG[tier].color }],
+      keywords: [id, tier],
+    };
+  });
 
   const handleQueue = () => {
     queueRepr(selectedOre, amount);
@@ -149,15 +170,18 @@ function ManualQueue() {
         <div className="flex items-end gap-2 flex-wrap">
           <div className="flex flex-col gap-1">
             <label className="text-[9px] text-slate-600">Ore type</label>
-            <select
-              value={selectedOre}
-              onChange={e => setSelectedOre(e.target.value)}
-              className="text-[10px] bg-slate-800/60 border border-slate-700/40 rounded px-2 py-1 text-slate-300 focus:outline-none focus:border-cyan-700/50"
-            >
-              {availableOres.map(id => (
-                <option key={id} value={id}>{RESOURCE_REGISTRY[id]?.name ?? id}</option>
-              ))}
-            </select>
+            <div className="min-w-[220px]">
+              <GameDropdown
+                value={selectedOre}
+                onChange={setSelectedOre}
+                options={oreOptions}
+                placeholder="Select ore"
+                searchPlaceholder="Find ore..."
+                size="compact"
+                triggerTone="cyan"
+                buttonStyle={{ minHeight: 30 }}
+              />
+            </div>
           </div>
           <div className="flex flex-col gap-1">
             <label className="text-[9px] text-slate-600">Amount (min {BATCH_SIZE_BASE})</label>
@@ -172,10 +196,10 @@ function ManualQueue() {
           </div>
           <button
             onClick={handleQueue}
-            disabled={(state.resources[selectedOre] ?? 0) < BATCH_SIZE_BASE}
+            disabled={!hasCorpHq || (state.resources[selectedOre] ?? 0) < BATCH_SIZE_BASE}
             className="px-3 py-1 rounded-lg text-xs font-bold border border-cyan-700/40 bg-cyan-900/20 text-cyan-300 hover:bg-cyan-800/30 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
           >
-            Queue
+            {hasCorpHq ? 'Queue' : 'HQ Required'}
           </button>
         </div>
         {selectedOre && (
@@ -242,7 +266,8 @@ function ManualQueue() {
 // ─── Main Panel ─────────────────────────────────────────────────────────────
 
 export function ReprocessingPanel() {
-  const unlocked = useGameStore(s => s.state.unlocks['system-reprocessing']);
+  const state = useGameStore(s => s.state);
+  const unlocked = state.unlocks['system-reprocessing'];
 
   if (!unlocked) {
     return (
@@ -260,6 +285,8 @@ export function ReprocessingPanel() {
   const oreIds = BELT_ORDER
     .map(bId => ORE_BELTS[bId]?.outputs[0]?.resourceId)
     .filter((id): id is string => !!id && !!ORE_YIELD_TABLE[id]);
+  const homeSystemId = state.systems.factions.homeStationSystemId;
+  const homeSystem = homeSystemId ? getSystemById(state.galaxy.seed, homeSystemId) : null;
 
   return (
     <div className="space-y-6 max-w-2xl">
@@ -292,6 +319,12 @@ export function ReprocessingPanel() {
           </StatTooltip>{' '}
           modifier. Train <NavTag entityType="skill" entityId="reprocessing" label="Reprocessing" /> to improve yield.
         </p>
+      </div>
+
+      <div className={`rounded-xl border px-3 py-2 text-xs ${homeSystem ? 'border-cyan-700/20 bg-cyan-950/10 text-slate-400' : 'border-amber-700/30 bg-amber-950/15 text-amber-300'}`}>
+        {homeSystem
+          ? <>Corp HQ anchored at <span className="text-cyan-300 font-semibold">{homeSystem.name}</span>. Reprocessing jobs route through this station network.</>
+          : <>No Corp HQ registered. Dock at a station in the System panel and register it to enable reprocessing jobs and auto-refinery controls.</>}
       </div>
 
       {/* ── Auto-Refinery ── */}

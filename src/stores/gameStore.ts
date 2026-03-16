@@ -56,7 +56,7 @@ import {
 } from '@/game/systems/fleet/pilot.logic';
 import { generatePilot, generateRecruitmentOffers } from '@/game/systems/fleet/fleet.gen';
 import { COMMANDER_SKILL_DEFINITIONS } from '@/game/systems/fleet/commander.config';
-import { dispatchHaulerWing, getOperationalFleetShipIds } from '@/game/systems/fleet/wings.logic';
+import { dispatchHaulerWing, getOperationalFleetShipIds, hasDispatchedHaulingWing } from '@/game/systems/fleet/wings.logic';
 
 // ─── Store interface ───────────────────────────────────────────────────────
 
@@ -159,6 +159,7 @@ interface GameStore {
   adjustReputation: (factionId: FactionId, delta: number) => void;
   dockAtStation: (stationId: string) => boolean;
   undockFromStation: () => void;
+  registerWithStation: (stationId: string) => boolean;
   /** Register a station as Corp HQ. Stores both the station ID and its system ID for fast lookup. */
   setHomeStation: (stationId: string, systemId: string) => void;
 
@@ -361,6 +362,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
   queueManufacturing: (recipeId, quantity) => {
     const { state } = get();
     if (!state.unlocks['system-manufacturing']) return false;
+    if (!state.systems.factions.homeStationId || !state.systems.factions.homeStationSystemId) return false;
 
     const recipe = MANUFACTURING_RECIPES[recipeId];
     if (!recipe) return false;
@@ -443,6 +445,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
   queueManufacturingWithBpc: (recipeId, quantity, blueprintId) => {
     const { state } = get();
     if (!state.unlocks['system-manufacturing']) return false;
+    if (!state.systems.factions.homeStationId || !state.systems.factions.homeStationSystemId) return false;
 
     const recipe = MANUFACTURING_RECIPES[recipeId];
     if (!recipe || !recipe.isTech2) return false;
@@ -484,6 +487,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
   researchBlueprint: (blueprintId) => {
     const { state } = get();
+    if (!state.systems.factions.homeStationId || !state.systems.factions.homeStationSystemId) return false;
     const mfg = state.systems.manufacturing;
 
     const bp = mfg.blueprints.find(b => b.id === blueprintId);
@@ -550,6 +554,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
   copyBlueprint: (blueprintId, runs) => {
     const { state } = get();
+    if (!state.systems.factions.homeStationId || !state.systems.factions.homeStationSystemId) return false;
     const mfg = state.systems.manufacturing;
 
     const bp = mfg.blueprints.find(b => b.id === blueprintId);
@@ -613,6 +618,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
   queueReprocessing: (oreId, amount) => {
     const { state } = get();
     if (!state.unlocks['system-reprocessing']) return false;
+    if (!state.systems.factions.homeStationId || !state.systems.factions.homeStationSystemId) return false;
 
     const have = state.resources[oreId] ?? 0;
     const batches = Math.floor(amount / BATCH_SIZE_BASE);
@@ -668,6 +674,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
   toggleAutoReprocess: (oreId) => {
     const { state } = get();
+    if (!state.systems.factions.homeStationId || !state.systems.factions.homeStationSystemId) return;
     const current = state.systems.reprocessing.autoTargets?.[oreId] ?? false;
     set({
       state: {
@@ -994,21 +1001,30 @@ export const useGameStore = create<GameStore>((set, get) => ({
   },
 
   disbandPlayerFleet: (fleetId) => {
-    const newState = disbandPlayerFleet(get().state, fleetId);
+    const { state } = get();
+    const fleet = state.systems.fleet.fleets[fleetId];
+    if (!fleet || hasDispatchedHaulingWing(fleet)) return false;
+    const newState = disbandPlayerFleet(state, fleetId);
     if (!newState) return false;
     set({ state: newState });
     return true;
   },
 
   addShipToFleet: (fleetId, shipId) => {
-    const newState = addShipToFleet(get().state, fleetId, shipId);
+    const { state } = get();
+    const fleet = state.systems.fleet.fleets[fleetId];
+    if (!fleet || hasDispatchedHaulingWing(fleet)) return false;
+    const newState = addShipToFleet(state, fleetId, shipId);
     if (!newState) return false;
     set({ state: newState });
     return true;
   },
 
   removeShipFromFleet: (fleetId, shipId) => {
-    const newState = removeShipFromFleet(get().state, fleetId, shipId);
+    const { state } = get();
+    const fleet = state.systems.fleet.fleets[fleetId];
+    if (!fleet || hasDispatchedHaulingWing(fleet)) return false;
+    const newState = removeShipFromFleet(state, fleetId, shipId);
     if (!newState) return false;
     set({ state: newState });
     return true;
@@ -1035,7 +1051,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
   },
 
   issueFleetGroupOrder: (fleetId, destinationId, securityFilter = 'shortest', pauseOnArrival = false) => {
-    const newState = issueFleetGroupOrder(get().state, fleetId, destinationId, securityFilter, pauseOnArrival);
+    const { state } = get();
+    const fleet = state.systems.fleet.fleets[fleetId];
+    if (!fleet || hasDispatchedHaulingWing(fleet)) return false;
+    const newState = issueFleetGroupOrder(state, fleetId, destinationId, securityFilter, pauseOnArrival);
     if (!newState) return false;
     set({ state: newState });
     return true;
@@ -1058,7 +1077,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
   },
 
   cancelFleetGroupOrder: (fleetId) => {
-    const newState = cancelFleetGroupOrder(get().state, fleetId);
+    const { state } = get();
+    const fleet = state.systems.fleet.fleets[fleetId];
+    if (!fleet || hasDispatchedHaulingWing(fleet)) return false;
+    const newState = cancelFleetGroupOrder(state, fleetId);
     if (!newState) return false;
     set({ state: newState });
     return true;
@@ -1220,11 +1242,52 @@ export const useGameStore = create<GameStore>((set, get) => ({
     });
   },
 
+  registerWithStation: (stationId) => {
+    const { state } = get();
+    const galaxy = generateGalaxy(state.galaxy.seed);
+    const system = galaxy.find(entry => entry.stationId === stationId);
+    if (!system || !system.factionId) return false;
+
+    const sysIndex = system.id === 'home' ? 0 : parseInt(system.id.replace('sys-', ''), 10);
+    const station = getStationInSystem(system, state.galaxy.seed, isNaN(sysIndex) ? 0 : sysIndex);
+    if (!station) return false;
+
+    const factions = state.systems.factions;
+    if (factions.dockedStationId !== station.id) return false;
+
+    const rep = factions.rep[station.factionId] ?? 0;
+    if (rep < station.registrationRepRequired) return false;
+
+    const credits = state.resources['credits'] ?? 0;
+    const registeredStations = factions.registeredStations ?? [];
+    const alreadyRegistered = registeredStations.includes(station.id);
+    if (!alreadyRegistered && credits < station.registrationCost) return false;
+
+    set({
+      state: {
+        ...state,
+        resources: alreadyRegistered
+          ? state.resources
+          : { ...state.resources, credits: credits - station.registrationCost },
+        systems: {
+          ...state.systems,
+          factions: {
+            ...factions,
+            registeredStations: alreadyRegistered ? registeredStations : [...registeredStations, station.id],
+            homeStationId: station.id,
+            homeStationSystemId: system.id,
+          },
+        },
+      },
+    });
+    return true;
+  },
+
   setHomeStation: (stationId, systemId) => {
     const { state } = get();
     const factions = state.systems.factions;
     const existing = factions.registeredStations ?? [];
-    const registered = existing.includes(stationId) ? existing : [...existing, stationId];
+    if (!existing.includes(stationId)) return;
     set({
       state: {
         ...state,
@@ -1234,7 +1297,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
             ...factions,
             homeStationId: stationId,
             homeStationSystemId: systemId,
-            registeredStations: registered,
+            registeredStations: existing,
           },
         },
       },

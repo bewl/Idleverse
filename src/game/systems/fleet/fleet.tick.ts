@@ -4,7 +4,9 @@ import { tickPilotSkillTraining, tickMorale, getPilotMoraleMultiplier, getPilotM
 import { tickCommanderSkillTraining, getCombinedCommanderBonus } from './commander.logic';
 import { IDLE_REPAIR_RATE_PER_SEC } from '@/game/balance/constants';
 import { ORE_BELTS } from '@/game/systems/mining/mining.config';
+import { getSystemById } from '@/game/galaxy/galaxy.gen';
 import { getBeltRichnessForSystem } from '@/game/systems/mining/mining.logic';
+import { getCorpHqBonusFromState, getHomeStationDefinition } from '@/game/systems/factions/faction.logic';
 import { getOperationalFleetShipIds, getWingByShipId } from './wings.logic';
 
 // ─── Tick result ───────────────────────────────────────────────────────────
@@ -59,6 +61,9 @@ export function tickFleet(state: GameState, deltaSeconds: number): FleetTickResu
   const corpSkillMult = 1 + (state.modifiers['mining-yield'] ?? 0);
   const deepOreBonus  = 1 + (state.modifiers['deep-ore-yield'] ?? 0);
   const beltRespawnAt = state.systems.mining.beltRespawnAt ?? {};
+  const homeStation = getHomeStationDefinition(state);
+  const hqBonus = getCorpHqBonusFromState(state);
+  const systemFactionCache = new Map<string, import('@/types/faction.types').FactionId | null>();
 
   // Build map: pilotId → fleet for fast commander lookup.
   // Wing commanders train command skills too; a fleet commander can also be a wing commander.
@@ -152,11 +157,22 @@ export function tickFleet(state: GameState, deltaSeconds: number): FleetTickResu
       ? getBeltRichnessForSystem(state.galaxy, ship.assignedBeltId, fleetSystemId)
       : 1.0;
 
+    let territoryMiningBonus = 0;
+    if (fleetSystemId && homeStation && hqBonus?.miningYieldInFactionTerritory) {
+      if (!systemFactionCache.has(fleetSystemId)) {
+        systemFactionCache.set(fleetSystemId, getSystemById(state.galaxy.seed, fleetSystemId).factionId ?? null);
+      }
+      const systemFactionId = systemFactionCache.get(fleetSystemId);
+      if (systemFactionId === hqBonus.miningYieldInFactionTerritory.factionId && homeStation.factionId === systemFactionId) {
+        territoryMiningBonus = hqBonus.miningYieldInFactionTerritory.bonus;
+      }
+    }
+
     const isDeep     = beltDef.securityTier === 'lowsec' || beltDef.securityTier === 'nullsec';
     const deepFactor = isDeep ? deepOreBonus : 1;
 
     // Total yield multiplier for this ship this tick
-    const yieldMultiplier = (hullMining + moduleMining + pilotMining) * moraleMult * corpSkillMult * richnessFactor * deepFactor * deltaSeconds;
+    const yieldMultiplier = (hullMining + moduleMining + pilotMining) * moraleMult * corpSkillMult * richnessFactor * deepFactor * (1 + territoryMiningBonus) * deltaSeconds;
 
     // Apply commander mining bonus if this ship's fleet has a designated commander
     const commanderMiningBonus = fleetGroupForShip

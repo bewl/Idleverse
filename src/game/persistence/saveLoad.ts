@@ -47,6 +47,21 @@ export function loadGame(): SaveFile | null {
         }
       }
     }
+    const factionsState = save.state?.systems?.factions as (GameState['systems']['factions'] & {
+      homeStationSystemId?: string | null;
+      registeredStations?: string[];
+    }) | undefined;
+    if (factionsState) {
+      if (!Array.isArray(factionsState.registeredStations)) {
+        factionsState.registeredStations = [];
+      }
+      if (factionsState.homeStationId && !factionsState.registeredStations.includes(factionsState.homeStationId)) {
+        factionsState.registeredStations.push(factionsState.homeStationId);
+      }
+      if (typeof factionsState.homeStationSystemId === 'undefined') {
+        factionsState.homeStationSystemId = null;
+      }
+    }
     return save;
   } catch (e) {
     console.error('[Idleverse] Failed to load game:', e);

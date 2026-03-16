@@ -9,7 +9,7 @@ import { SKILL_DEFINITIONS } from '@/game/systems/skills/skills.config';
 import { activeTrainingEta, formatTrainingEta } from '@/game/systems/skills/skills.logic';
 import { skillTrainingSeconds } from '@/game/balance/constants';
 import { NavTag } from '@/ui/components/NavTag';
-import { getStationInSystem } from '@/game/systems/factions/faction.logic';
+import { getCorpHqBonus, getStationInSystem } from '@/game/systems/factions/faction.logic';
 import { getSystemById } from '@/game/galaxy/galaxy.gen';
 import { computeFleetCargoCapacity } from '@/game/systems/fleet/fleet.logic';
 import { getFleetStoredCargo, getFleetStorageCapacity, getOperationalFleetShipIds } from '@/game/systems/fleet/wings.logic';
@@ -122,7 +122,7 @@ function CorpHQCard() {
         className="rounded-xl p-4 text-center"
         style={{ background: 'rgba(3,8,20,0.6)', border: '1px dashed rgba(255,255,255,0.08)' }}
       >
-        <p className="text-slate-600 text-xs">No Corp HQ. Open System panel and set a station as headquarters.</p>
+        <p className="text-slate-600 text-xs">No Corp HQ. Open System panel, dock at a station, and register it as headquarters.</p>
       </div>
     );
   }
@@ -132,6 +132,7 @@ function CorpHQCard() {
   const station      = hqSystemId && systemObj
     ? getStationInSystem(systemObj, state.galaxy.seed, systemIndex)
     : null;
+  const hqBonus = getCorpHqBonus(station);
 
   return (
     <div
@@ -154,12 +155,7 @@ function CorpHQCard() {
             {station.services.map((svc: string) => (
               <div key={svc} className="text-[10px]">• {svc}</div>
             ))}
-            {station.marketPriceModifier !== 1 && (
-              <div className="text-[10px]">• Market {station.marketPriceModifier > 1 ? '+' : ''}{Math.round((station.marketPriceModifier - 1) * 100)}% prices</div>
-            )}
-            {station.manufacturingSpeedBonus > 0 && (
-              <div className="text-[10px]">• +{Math.round(station.manufacturingSpeedBonus * 100)}% manufacturing speed</div>
-            )}
+            {hqBonus && <div className="text-[10px] text-cyan-300">• {hqBonus.description}</div>}
           </div>
         ) : 'Standard station services'}
       </div>

@@ -1,27 +1,74 @@
+import type { GameState, ShipInstance } from '@/types/game.types';
 import { useGameStore } from '@/stores/gameStore';
 import { ORE_BELTS } from '@/game/systems/mining/mining.config';
-import { getMiningSkillMultiplier, getMiningUpgradeMultiplier } from '@/game/systems/mining/mining.logic';
+import { getBeltRichnessForSystem } from '@/game/systems/mining/mining.logic';
+import { HULL_DEFINITIONS, MODULE_DEFINITIONS } from '@/game/systems/fleet/fleet.config';
+import { getPilotMiningBonus, getPilotMoraleMultiplier } from '@/game/systems/fleet/pilot.logic';
+import { getCombinedCommanderBonus } from '@/game/systems/fleet/commander.logic';
+import { getWingByShipId } from '@/game/systems/fleet/wings.logic';
 import { MANUFACTURING_RECIPES } from '@/game/systems/manufacturing/manufacturing.config';
 import { getManufacturingSpeedMultiplier } from '@/game/systems/manufacturing/manufacturing.logic';
+
+function getModuleBonus(ship: ShipInstance, effectKey: string): number {
+  let total = 0;
+  for (const slotType of ['high', 'mid', 'low'] as const) {
+    for (const moduleId of ship.fittedModules[slotType]) {
+      const mod = MODULE_DEFINITIONS[moduleId];
+      if (mod?.effects[effectKey]) total += mod.effects[effectKey];
+    }
+  }
+  return total;
+}
+
+export function getFleetMiningResourceRates(state: GameState): Record<string, number> {
+  const rates: Record<string, number> = {};
+  const corpSkillMult = 1 + (state.modifiers['mining-yield'] ?? 0);
+  const deepOreBonus = 1 + (state.modifiers['deep-ore-yield'] ?? 0);
+  const beltRespawnAt = state.systems.mining.beltRespawnAt ?? {};
+
+  for (const ship of Object.values(state.systems.fleet.ships)) {
+    if (ship.activity !== 'mining' || !ship.assignedPilotId || !ship.assignedBeltId) continue;
+
+    const fleet = ship.fleetId ? state.systems.fleet.fleets[ship.fleetId] : null;
+    const wing = fleet ? getWingByShipId(fleet, ship.id) : null;
+    if (fleet && !wing) continue;
+
+    const pilot = state.systems.fleet.pilots[ship.assignedPilotId];
+    const hull = HULL_DEFINITIONS[ship.shipDefinitionId];
+    const beltDef = ORE_BELTS[ship.assignedBeltId];
+    if (!pilot || !hull || !beltDef) continue;
+    if ((beltRespawnAt[ship.assignedBeltId] ?? 0) > 0) continue;
+
+    const moduleMining = getModuleBonus(ship, 'mining-yield');
+    const pilotMining = getPilotMiningBonus(pilot);
+    const moraleMult = getPilotMoraleMultiplier(pilot);
+    const richnessFactor = fleet && state.galaxy
+      ? getBeltRichnessForSystem(state.galaxy, ship.assignedBeltId, fleet.currentSystemId)
+      : 1;
+    const deepFactor = beltDef.securityTier === 'lowsec' || beltDef.securityTier === 'nullsec'
+      ? deepOreBonus
+      : 1;
+    const commanderMult = fleet
+      ? 1 + getCombinedCommanderBonus(state.systems.fleet.pilots, fleet, wing, 'mining-yield')
+      : 1;
+    const yieldMultiplier = (hull.baseMiningBonus + moduleMining + pilotMining) * moraleMult * corpSkillMult * richnessFactor * deepFactor * commanderMult;
+
+    for (const output of beltDef.outputs) {
+      const amount = output.baseRate * yieldMultiplier;
+      if (amount > 0) {
+        rates[output.resourceId] = (rates[output.resourceId] ?? 0) + amount;
+      }
+    }
+  }
+
+  return rates;
+}
 
 /** Net per-second rates for every resource (positive = gaining, negative = consuming). */
 export function useResourceRates(): Record<string, number> {
   const state = useGameStore(s => s.state);
 
-  const rates: Record<string, number> = {};
-  const upgradeMultiplier = getMiningUpgradeMultiplier(state);
-  const skillMultiplier   = getMiningSkillMultiplier(state);
-
-  // ── Mining production ─────────────────────────────────────────────────
-  for (const [beltId, isActive] of Object.entries(state.systems.mining.targets)) {
-    if (!isActive) continue;
-    const def = ORE_BELTS[beltId];
-    if (!def) continue;
-    for (const output of def.outputs) {
-      const r = output.baseRate * upgradeMultiplier * skillMultiplier;
-      rates[output.resourceId] = (rates[output.resourceId] ?? 0) + r;
-    }
-  }
+  const rates: Record<string, number> = getFleetMiningResourceRates(state);
 
   // ── Manufacturing: active job output/input projection ─────────────────
   const { queue } = state.systems.manufacturing;
@@ -46,17 +93,5 @@ export function useResourceRates(): Record<string, number> {
 /** Per-belt ore output rates (ore units/s). */
 export function useMiningOutputRates(): Record<string, number> {
   const state = useGameStore(s => s.state);
-  const upgradeMultiplier = getMiningUpgradeMultiplier(state);
-  const skillMultiplier   = getMiningSkillMultiplier(state);
-  const rates: Record<string, number> = {};
-  for (const [beltId, isActive] of Object.entries(state.systems.mining.targets)) {
-    if (!isActive) continue;
-    const def = ORE_BELTS[beltId];
-    if (!def) continue;
-    for (const output of def.outputs) {
-      const r = output.baseRate * upgradeMultiplier * skillMultiplier;
-      rates[output.resourceId] = (rates[output.resourceId] ?? 0) + r;
-    }
-  }
-  return rates;
+  return getFleetMiningResourceRates(state);
 }

@@ -35,7 +35,7 @@ MiningState {
 
 - **9 ore belts** across 3 security tiers (highsec ×4, lowsec ×3, nullsec ×2)
 - Lowsec requires Advanced Mining I; nullsec requires Advanced Mining III
-- **Belt skill gates**: `ORE_BELTS[beltId].requiredSkill` is checked in `setShipActivity()` before a ship can be assigned to mine a belt; if the corp's skill level is below the required minimum the assignment is rejected. The `SystemPanel` renders locked belt cards with a 🔒 disabled button and a `GameTooltip` displaying the required skill name and level.
+- **Belt skill gates**: `ORE_BELTS[beltId].requiredSkill` is checked in `setShipActivity()` before a ship can be assigned to mine a belt; if the corp's skill level is below the required minimum the assignment is rejected. The `SystemPanel` renders locked belt cards with a 🔒 disabled button and a `GameTooltip` displaying the required skill name and level; unlocked belts surface live fleet-assignment status rather than a legacy mining toggle.
 - Each belt has a `poolSize` — it depletes as ore is extracted, then respawns
 - Ore accumulates in the storage target for the fleet: `fleet.cargoHold` for legacy fleets, or `haulingWing.cargoHold` when a hauling wing exists. The active hold has a capacity derived from assigned hull cargo.
 - Auto-haul at 80% cargo fill — see System 7 Fleet Cargo Hold for the full round-trip logic
@@ -203,6 +203,9 @@ systems via BFS shortest-path or Dijkstra least-cost routing.
 - Fleet `fleetOrder` drives movement; `maxJumpRangeLY` constrains which hops are valid
 - RoutePlanner in StarMapPanel: calculates and dispatches multi-hop routes
 - StarMapPanel right panel: Intel tab (system info, threats) | Route tab (route planning)
+- StarMapPanel label pass is priority-driven: selected, current, hovered, and route systems always retain labels, while lower-priority labels fade by zoom and depth and are culled when they overlap stronger labels. Secondary security/star-type text only appears for highlighted systems or close zoom.
+- StarMapPanel hover detail is now rendered as a React overlay anchored to the projected star position instead of a canvas text box. Hover cards can show richer system intel such as fleets present, body counts, active threats, trade spreads, and route-hop context while the canvas remains responsible only for hit-testing and highlight rings.
+- StarMapPanel right rail now gives more room to route planning and system inspection: the rail is wider, the current-location summary is condensed into a compact header strip, and route controls use larger task-oriented controls with a more legible route-summary card.
 
 ---
 
@@ -244,7 +247,13 @@ The deprecated `state.pilot` field is migration-only and no longer written to.
 ## Corporal HQ
 
 `GameState.systems.factions.homeStationId / homeStationSystemId` tracks the designated Corp HQ.
-Set via `setHomeStation(stationId, systemId)` store action (wired to SystemPanel "Set as Corp HQ" button).
+Starter saves seed `station-home` as an already-registered HQ. Additional stations must be docked and registered through `registerWithStation(stationId)` before `setHomeStation(stationId, systemId)` can promote them to active HQ.
+The active HQ station also grants one faction-specific passive bonus:
+
+- Concordat HQ: +10% manufacturing speed
+- Veldris HQ: +15% mining yield in Veldris-controlled systems
+- Covenant HQ: +10% market sell price
+- Syndicate HQ: +20% combat loot quality
 
 ## Fleet Cargo Hold
 
@@ -326,7 +335,7 @@ Last 20 engagements tracked in `combat.log` with outcome, bounty, and damage tak
 
 ## Role
 
-Four galactic factions with reputation tracking. Standing consequences planned for Phase 5.
+Four galactic factions with reputation tracking, docking rules, and the first Corp HQ registration consequences. Broader standing consequences still expand in Phase 5.
 
 ## Factions
 
@@ -339,8 +348,13 @@ Four galactic factions with reputation tracking. Standing consequences planned f
 
 ## Current State
 
-Reputation (`standing`) tracked per faction. Effects (docking access, hostile patrols,
-mission boards) are designed for Phase 5 but not yet active.
+Reputation (`standing`) is tracked per faction and already affects two live station behaviors:
+
+- docking access through `minRepToDock`
+- Corp HQ registration through station-specific `registrationRepRequired`
+
+Stations also expose deterministic registration credit costs. The broader consequence layer (station services, hostile patrols, mission boards) remains designed but not yet active.
+The active HQ faction bonus is already live and feeds manufacturing, mining, market, or combat depending on the registered HQ station's faction.
 
 ---
 
@@ -622,6 +636,21 @@ for assembling rich tooltip layouts. All accept `ReactNode` children.
 Design principle: primitives compose freely. A fleet tooltip uses `TT.Header` + `TT.Grid` +
 `TT.BadgeRow` + inline `NavTag`s — no structure is imposed.
 
+### `<GameDropdown>` — Behavioral Selection Shell
+
+`src/ui/components/GameDropdown.tsx`
+
+Props include: `value`, `options`, `onChange`, `placeholder`, plus search/filter/layout controls such as
+`searchable`, `filterable`, `menuWidth`, `size`, `renderValue`, `renderOption`, and `renderDetail`.
+
+- Portal-rendered dropdown popup with viewport clamping; avoids clipping in narrow panels and scroll containers
+- Shares popup depth behavior with tooltips via `TooltipDepthContext`
+- Option model supports `description`, `meta`, `group`, `tone`, `keywords`, and badge chips for rich rows
+- Search input and group-filter chips are derived from the option content instead of being reimplemented per panel
+- Optional split detail pane supports high-information selectors without reverting to bespoke modal pickers
+- Mouse-first interactions: open from the trigger, inspect by hover, select by click, dismiss by outside click
+- Initial adopters: `StarMapPanel` route planner, `MarketPanel` trade-route creation form, `FleetPanel` navigation + wing/fitting controls, `ManufacturingPanel` T2 blueprint picker, `ReprocessingPanel` ore selector, `DevPanel` galaxy utilities
+
 ### `<NavTag>` — Content-Aware Navigation Chip
 
 `src/ui/components/NavTag.tsx`
@@ -661,6 +690,7 @@ When `focusTarget` is set after navigation, the target panel should:
 
 - All 9 panels: import `NavTag`, use `useUiStore`
 - `StatTooltip`: thin wrapper over `GameTooltip` — external API unchanged
+- `GameDropdown`: shared rich selector for content-heavy picking flows
 - `ResourceBar`: private `Tooltip`/`HoverCard` replaced by `GameTooltip` + `TT.*`
 - `DevPanel`: `devTimeScale` field from `useUiStore`; game loop multiplies `delta` in DEV guard
 
@@ -668,9 +698,10 @@ When `focusTarget` is set after navigation, the target panel should:
 
 - `src/stores/uiStore.ts` — store
 - `src/ui/components/GameTooltip.tsx` — shell + TT.* primitives
+- `src/ui/components/GameDropdown.tsx` — shell for searchable/filterable dropdowns
 - `src/ui/components/NavTag.tsx` — entity navigation chip
 - `src/ui/components/StatTooltip.tsx` — refactored to use GameTooltip
-- `src/index.css` — glow utilities + entity-tag + focus-pulse
+- `src/index.css` — glow utilities + entity-tag + focus-pulse + dropdown popup styles
 
 ---
 
@@ -867,6 +898,7 @@ Fleet Wings appears as a dedicated section in each expanded fleet card:
 Mutation safety rules:
 
 - Wings cannot be deleted, reassigned, renamed, re-commanded, or have escort mappings changed while dispatched or while the whole fleet has an active fleet-order movement.
+- Whole-fleet move and cancel-order actions are blocked while any hauling wing is dispatched, preventing fleet-level travel from trampling the dispatched wing's ship-level orders.
 - Reassigning a ship out of a wing automatically clears that wing commander if the commander no longer has a ship in the wing.
 - A combat escort wing can only be assigned to one hauling wing at a time.
 - Deleting a non-dispatched wing transfers any stored `cargoHold` contents back into the fleet legacy hold.

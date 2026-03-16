@@ -14,10 +14,11 @@ import { StarfieldBackground } from '@/ui/effects/StarfieldBackground';
 import { generateGalaxy } from '@/game/galaxy/galaxy.gen';
 import type { RouteSecurityFilter } from '@/types/faction.types';
 import { NavTag } from '@/ui/components/NavTag';
+import { GameDropdown, type DropdownOption } from '@/ui/components/GameDropdown';
 import { useUiStore } from '@/stores/uiStore';
 import { COMMANDER_SKILL_DEFINITIONS, COMMANDER_BONUS_LABELS } from '@/game/systems/fleet/commander.config';
 import { commanderSkillEtaSeconds, getCombinedCommanderBonus } from '@/game/systems/fleet/commander.logic';
-import { getFleetStoredCargo, getFleetStorageCapacity, getOperationalFleetShipIds, getWingCargoCapacity, getWingCargoTotals, getWingCargoUsed } from '@/game/systems/fleet/wings.logic';
+import { getFleetStoredCargo, getFleetStorageCapacity, getOperationalFleetShipIds, getWingCargoCapacity, getWingCargoTotals, getWingCargoUsed, hasDispatchedHaulingWing } from '@/game/systems/fleet/wings.logic';
 
 const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V'];
 
@@ -153,6 +154,42 @@ function WingRow({
     setEditingName(false);
   };
 
+  const wingCommanderOptions: DropdownOption[] = wingPilots.map(pilot => {
+    const assignedShip = wingShips.find(ship => ship.assignedPilotId === pilot.id);
+    const focus = pilot.skills.idleTrainingFocus ?? 'balanced';
+    return {
+      value: pilot.id,
+      label: pilot.name,
+      description: assignedShip ? `${assignedShip.customName ?? HULL_DEFINITIONS[assignedShip.shipDefinitionId]?.name ?? assignedShip.id} · ${FOCUS_LABEL[focus]}` : FOCUS_LABEL[focus],
+      meta: `Morale ${Math.round(pilot.morale ?? 0)}%`,
+      group: FOCUS_LABEL[focus],
+      tone: 'amber',
+      badges: pilot.id === wing.commanderId ? [{ label: 'Assigned', color: '#fbbf24' }] : undefined,
+      keywords: [focus, assignedShip?.shipDefinitionId ?? ''],
+    };
+  });
+
+  const escortDropdownOptions: DropdownOption[] = escortOptions.map(option => ({
+    value: option.id,
+    label: option.name,
+    description: `${option.shipIds.length} ships · ${WING_LABELS[option.type]} wing`,
+    meta: option.commanderId ? 'Commander assigned' : 'No commander',
+    group: 'Combat Escorts',
+    tone: 'rose',
+    badges: option.commanderId ? [{ label: 'Cmd', color: '#f87171' }] : undefined,
+    keywords: [option.name, option.type],
+  }));
+
+  const shipAssignmentOptions: DropdownOption[] = wings.map(option => ({
+    value: option.id,
+    label: option.name,
+    description: `${WING_LABELS[option.type]} wing · ${option.shipIds.length} ships`,
+    meta: option.commanderId ? 'Commanded' : 'No commander',
+    group: WING_LABELS[option.type],
+    tone: option.type === 'mining' ? 'cyan' : option.type === 'hauling' ? 'amber' : option.type === 'combat' ? 'rose' : option.type === 'recon' ? 'emerald' : 'violet',
+    keywords: [option.type, option.name],
+  }));
+
   return (
     <div className="rounded-md border overflow-hidden border-slate-700/20 bg-slate-950/25">
       <div
@@ -251,16 +288,20 @@ function WingRow({
 
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-[8px] uppercase tracking-widest text-slate-500">Commander</span>
-            <select
-              value={wing.commanderId ?? ''}
-              onChange={e => onDesignateCommander(fleetId, wing.id, e.target.value || null)}
-              className="text-[9px] bg-slate-900/60 border border-slate-700/40 rounded px-1.5 py-0.5 text-slate-400"
-            >
-              <option value="">No wing commander</option>
-              {wingPilots.map(pilot => (
-                <option key={pilot.id} value={pilot.id}>{pilot.name}</option>
-              ))}
-            </select>
+            <div className="min-w-[170px] max-w-[240px]">
+              <GameDropdown
+                value={wing.commanderId ?? ''}
+                onChange={nextValue => onDesignateCommander(fleetId, wing.id, nextValue || null)}
+                options={wingCommanderOptions}
+                placeholder="No wing commander"
+                emptyOptionLabel="No wing commander"
+                emptyOptionDescription="Run the wing without command bonuses."
+                searchPlaceholder="Find wing pilot..."
+                size="compact"
+                triggerTone="amber"
+                buttonStyle={{ minHeight: 26 }}
+              />
+            </div>
             {wingCommander && (
               <span className="text-[8px] text-slate-500">command bonuses apply to this wing's ships</span>
             )}
@@ -268,16 +309,20 @@ function WingRow({
 
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-[8px] uppercase tracking-widest text-slate-500">Escort</span>
-            <select
-              value={wing.escortWingId ?? ''}
-              onChange={e => onSetEscort(fleetId, wing.id, e.target.value || null)}
-              className="text-[9px] bg-slate-900/60 border border-slate-700/40 rounded px-1.5 py-0.5 text-slate-400"
-            >
-              <option value="">No escort</option>
-              {escortOptions.map(option => (
-                <option key={option.id} value={option.id}>{option.name}</option>
-              ))}
-            </select>
+            <div className="min-w-[170px] max-w-[240px]">
+              <GameDropdown
+                value={wing.escortWingId ?? ''}
+                onChange={nextValue => onSetEscort(fleetId, wing.id, nextValue || null)}
+                options={escortDropdownOptions}
+                placeholder="No escort"
+                emptyOptionLabel="No escort"
+                emptyOptionDescription="Hauling wings will travel alone."
+                searchPlaceholder="Find escort wing..."
+                size="compact"
+                triggerTone="rose"
+                buttonStyle={{ minHeight: 26 }}
+              />
+            </div>
             {wing.escortWingId && (
               <span className="text-[8px] text-slate-500">combat wing travels with this wing on haul trips</span>
             )}
@@ -301,16 +346,20 @@ function WingRow({
                   <span className="text-[9px] text-slate-300 flex-1 min-w-0 truncate">
                     {ship.customName ?? hull?.name ?? ship.id}
                   </span>
-                  <select
-                    value={assignedWing?.id ?? ''}
-                    onChange={e => onAssignShip(fleetId, ship.id, e.target.value || null)}
-                    className="text-[9px] bg-slate-900/60 border border-slate-700/40 rounded px-1.5 py-0.5 text-slate-400 min-w-[120px]"
-                  >
-                    <option value="">Unassigned</option>
-                    {wings.map(option => (
-                      <option key={option.id} value={option.id}>{option.name}</option>
-                    ))}
-                  </select>
+                  <div className="min-w-[148px] max-w-[220px]">
+                    <GameDropdown
+                      value={assignedWing?.id ?? ''}
+                      onChange={nextValue => onAssignShip(fleetId, ship.id, nextValue || null)}
+                      options={shipAssignmentOptions}
+                      placeholder="Unassigned"
+                      emptyOptionLabel="Unassigned"
+                      emptyOptionDescription="Ships outside a wing remain non-operational."
+                      searchPlaceholder="Assign to wing..."
+                      size="compact"
+                      triggerTone="cyan"
+                      buttonStyle={{ minHeight: 26 }}
+                    />
+                  </div>
                 </div>
               );
             })}
@@ -387,6 +436,7 @@ function FleetCard({
   const fleetShips = fleet.shipIds.map(id => allShips[id]).filter(Boolean) as ShipInstance[];
   const wings = fleet.wings ?? [];
   const haulingWings = wings.filter(wing => wing.type === 'hauling');
+  const hasWingDispatch = hasDispatchedHaulingWing(fleet);
   const operationalShipIds = getOperationalFleetShipIds(fleet);
   const operationalFleetShips = operationalShipIds.map(id => allShips[id]).filter(Boolean) as ShipInstance[];
   const doctrine   = fleet.doctrine ?? 'balanced'; // guard stale persisted state
@@ -757,19 +807,31 @@ function FleetCard({
                   <div className="flex items-center gap-2">
                     <span className="text-[9px] text-slate-500 italic">None assigned</span>
                     {pilotsInFleet.length > 0 && (
-                      <select
-                        defaultValue=""
-                        onChange={e => {
-                          if (e.target.value) designateCommander(fleetId, e.target.value);
-                          e.target.value = '';
-                        }}
-                        className="text-[9px] bg-slate-900/60 border border-slate-700/40 rounded px-1.5 py-0.5 text-slate-400"
-                      >
-                        <option value="">+ Designate…</option>
-                        {pilotsInFleet.map(p => (
-                          <option key={p.id} value={p.id}>{p.name}</option>
-                        ))}
-                      </select>
+                      <div className="min-w-[180px] max-w-[240px]">
+                        <GameDropdown
+                          value=""
+                          onChange={nextValue => {
+                            if (nextValue) designateCommander(fleetId, nextValue);
+                          }}
+                          options={pilotsInFleet.map(pilot => {
+                            const focus = pilot.skills.idleTrainingFocus ?? 'balanced';
+                            return {
+                              value: pilot.id,
+                              label: pilot.name,
+                              description: FOCUS_LABEL[focus],
+                              meta: `Morale ${Math.round(pilot.morale ?? 0)}%`,
+                              group: FOCUS_LABEL[focus],
+                              tone: 'amber' as const,
+                              keywords: [focus, pilot.name],
+                            };
+                          })}
+                          placeholder="+ Designate..."
+                          searchPlaceholder="Find fleet pilot..."
+                          size="compact"
+                          triggerTone="amber"
+                          buttonStyle={{ minHeight: 26 }}
+                        />
+                      </div>
                     )}
                   </div>
                 )}
@@ -1033,9 +1095,9 @@ function FleetCard({
                   {!combatOrder && !isMoving && (
                     <button
                       onClick={() => issuePatrol(fleetId)}
-                      disabled={!hasPatrolReq}
+                      disabled={!hasPatrolReq || hasWingDispatch}
                       className="text-[9px] px-2 py-0.5 rounded border border-amber-400/30 text-amber-300/70 hover:border-amber-300 hover:text-amber-200 disabled:opacity-40 disabled:cursor-not-allowed"
-                      title={hasPatrolReq ? 'Continuously engage weakest NPC group' : 'Requires Spaceship Command II'}
+                      title={hasWingDispatch ? 'Unavailable while a hauling wing is dispatched' : hasPatrolReq ? 'Continuously engage weakest NPC group' : 'Requires Spaceship Command II'}
                     >
                       ⚔ Patrol
                     </button>
@@ -1070,6 +1132,7 @@ function FleetCard({
             {isMoving ? (
               <button
                 onClick={() => cancelGroupOrder(fleetId)}
+                disabled={hasWingDispatch}
                 className="text-[9px] px-2 py-0.5 rounded border border-red-400/30 text-red-300/70 hover:border-red-300 hover:text-red-200 self-start"
               >
                 ✕ Cancel movement
@@ -1077,40 +1140,64 @@ function FleetCard({
             ) : (
               <div className="flex flex-col gap-1">
                 <div className="flex gap-1">
-                  <select
-                    value={destSystemId}
-                    onChange={e => setDestSystemId(e.target.value)}
-                    className="flex-1 text-[9px] bg-slate-900/60 border border-slate-700/40 rounded px-1.5 py-0.5 text-slate-400"
-                  >
-                    <option value="">— destination —</option>
-                    {galaxy.filter(s => s.id !== fleet.currentSystemId).map(sys => (
-                      <option key={sys.id} value={sys.id}>{sys.name} [{sys.security}]</option>
-                    ))}
-                  </select>
-                  <select
-                    value={secFilter}
-                    onChange={e => setSecFilter(e.target.value as RouteSecurityFilter)}
-                    className="text-[9px] bg-slate-900/60 border border-slate-700/40 rounded px-1.5 py-0.5 text-slate-400"
-                  >
-                    <option value="shortest">Shortest</option>
-                    <option value="safest">Safest</option>
-                    <option value="avoid-null">Avoid null</option>
-                    <option value="avoid-low">Avoid low</option>
-                  </select>
+                  <div className="flex-1">
+                    <GameDropdown
+                      value={destSystemId}
+                      onChange={setDestSystemId}
+                      options={galaxy
+                        .filter(s => s.id !== fleet.currentSystemId)
+                        .map(sys => ({
+                          value: sys.id,
+                          label: sys.name,
+                          description: `${sys.security} destination`,
+                          group: sys.security,
+                          tone: sys.security === 'highsec' ? 'emerald' : sys.security === 'lowsec' ? 'amber' : 'rose',
+                          badges: [{ label: sys.starType, color: '#94a3b8' }],
+                          keywords: [sys.name, sys.security, sys.starType],
+                        }))}
+                      placeholder="Destination..."
+                      emptyOptionLabel="No destination"
+                      emptyOptionDescription="Pick a target system for fleet movement"
+                      searchPlaceholder="Search systems..."
+                      size="compact"
+                      menuWidth={300}
+                    />
+                  </div>
+                  <div className="w-32">
+                    <GameDropdown
+                      value={secFilter}
+                      onChange={value => setSecFilter(value as RouteSecurityFilter)}
+                      options={[
+                        { value: 'shortest', label: 'Shortest', description: 'Fewest hops', group: 'Routing', tone: 'cyan' },
+                        { value: 'safest', label: 'Safest', description: 'Prefer safer systems', group: 'Routing', tone: 'violet' },
+                        { value: 'avoid-null', label: 'Avoid null', description: 'No nullsec intermediates', group: 'Routing', tone: 'amber' },
+                        { value: 'avoid-low', label: 'Avoid low', description: 'Highsec only where possible', group: 'Routing', tone: 'emerald' },
+                      ]}
+                      placeholder="Route policy..."
+                      searchPlaceholder="Search route policies..."
+                      searchable={false}
+                      filterable={false}
+                      size="compact"
+                      menuWidth={220}
+                    />
+                  </div>
                 </div>
                 <button
-                  disabled={!destSystemId}
+                  disabled={!destSystemId || hasWingDispatch}
                   onClick={() => { issueGroupOrder(fleetId, destSystemId, secFilter); setDestSystemId(''); }}
                   className="text-[9px] px-2 py-0.5 rounded border border-cyan-400/30 text-cyan-300/70 hover:border-cyan-300 hover:text-cyan-200 disabled:opacity-30 disabled:cursor-not-allowed self-start"
                 >
                   ▶ Move Fleet
                 </button>
+                {hasWingDispatch && (
+                  <span className="text-[8px] text-amber-400/70">Whole-fleet movement is locked while a hauling wing is in transit.</span>
+                )}
               </div>
             )}
           </div>
 
           {/* Add ship */}
-          {joinableShips.length > 0 && fleet.fleetOrder === null && (
+          {joinableShips.length > 0 && fleet.fleetOrder === null && !hasWingDispatch && (
             <div className="flex flex-col gap-1">
               <span className="text-[8px] uppercase tracking-widest text-slate-500">Add Ship</span>
               <div className="flex flex-wrap gap-1">
@@ -1131,7 +1218,7 @@ function FleetCard({
           )}
 
           {/* Disband */}
-          {fleet.fleetOrder === null && (
+          {fleet.fleetOrder === null && !hasWingDispatch && (
             <button
               onClick={() => disband(fleetId)}
               className="text-[9px] text-red-400/60 hover:text-red-300 border border-red-400/20 rounded px-2 py-0.5 self-start"
@@ -1639,6 +1726,19 @@ function ShipCard({ ship, state, expanded, onToggle }: {
               const availableForSlot = Object.values(MODULE_DEFINITIONS).filter(
                 m => m.slotType === slot && (state.resources[m.id] ?? 0) > 0,
               );
+              const moduleOptions: DropdownOption[] = availableForSlot.map(module => ({
+                value: module.id,
+                label: module.name,
+                description: module.description,
+                meta: `x${Math.floor(state.resources[module.id] ?? 0)} in stock`,
+                group: `${slot.toUpperCase()} slot`,
+                tone: slot === 'high' ? 'cyan' : slot === 'mid' ? 'emerald' : 'violet',
+                badges: Object.entries(module.effects).map(([effectKey, effectValue]) => ({
+                  label: `${effectKey.replace(/-/g, ' ')} +${Math.round(effectValue * 100)}%`,
+                  color: slot === 'high' ? '#22d3ee' : slot === 'mid' ? '#34d399' : '#a78bfa',
+                })),
+                keywords: [module.id, module.name, ...Object.keys(module.effects)],
+              }));
               return (
                 <div key={slot} className="flex items-start gap-2">
                   <span className="text-[9px] text-slate-600 w-7 uppercase shrink-0 pt-0.5">{slot}</span>
@@ -1660,20 +1760,51 @@ function ShipCard({ ship, state, expanded, onToggle }: {
                           >✕</button>
                         </div>
                       ) : (
-                        <select
-                          key={i}
-                          defaultValue=""
-                          onChange={e => { if (e.target.value) { fitMod(ship.id, slot, e.target.value); e.currentTarget.value = ''; } }}
-                          className="text-[8px] px-1 py-0.5 rounded border border-slate-700/30 bg-slate-800/40 text-slate-500 cursor-pointer"
-                          title="Fit module"
-                        >
-                          <option value="">+ fit…</option>
-                          {availableForSlot.map(m => (
-                            <option key={m.id} value={m.id}>
-                              {m.name} ×{Math.floor(state.resources[m.id] ?? 0)}
-                            </option>
-                          ))}
-                        </select>
+                        <div key={i} className="min-w-[182px] max-w-[240px]">
+                          <GameDropdown
+                            value=""
+                            onChange={nextValue => {
+                              if (nextValue) fitMod(ship.id, slot, nextValue);
+                            }}
+                            options={moduleOptions}
+                            placeholder="+ fit..."
+                            searchPlaceholder={`Fit ${slot} slot...`}
+                            size="compact"
+                            triggerTone={slot === 'high' ? 'cyan' : slot === 'mid' ? 'emerald' : 'violet'}
+                            menuWidth={420}
+                            renderDetail={option => {
+                              const module = option ? MODULE_DEFINITIONS[option.value] : null;
+                              if (!module) return null;
+                              return (
+                                <div className="flex flex-col gap-2 text-[10px]">
+                                  <div>
+                                    <div className="text-[11px] font-semibold text-slate-100">{module.name}</div>
+                                    <div className="text-slate-500 leading-relaxed mt-1">{module.description}</div>
+                                  </div>
+                                  <div className="flex flex-wrap gap-1">
+                                    {Object.entries(module.effects).map(([effectKey, effectValue]) => (
+                                      <span key={effectKey} className="px-1.5 py-0.5 rounded-full border border-slate-700/60 bg-slate-900/70 text-slate-300">
+                                        {effectKey.replace(/-/g, ' ')} +{Math.round(effectValue * 100)}%
+                                      </span>
+                                    ))}
+                                  </div>
+                                  <div className="flex flex-col gap-1">
+                                    <div className="text-[9px] uppercase tracking-widest text-slate-600">Build Cost</div>
+                                    {Object.entries(module.buildCost).map(([resourceId, amount]) => (
+                                      <div key={resourceId} className="flex items-center justify-between gap-2 text-slate-400">
+                                        <span>{resourceId.replace(/-/g, ' ')}</span>
+                                        <span className="font-mono text-slate-500">{amount}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              );
+                            }}
+                            detailTitle="Module Intel"
+                            detailEmpty={<div className="text-[10px] text-slate-600">Select a module to inspect its fit bonuses and build cost.</div>}
+                            buttonStyle={{ minHeight: 24 }}
+                          />
+                        </div>
                       );
                     })}
                   </div>

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useGameStore } from '@/stores/gameStore';
+import { getSystemById } from '@/game/galaxy/galaxy.gen';
 import { MANUFACTURING_RECIPES, RECIPE_ORDER, BLUEPRINT_DEFINITIONS } from '@/game/systems/manufacturing/manufacturing.config';
 import { FlairProgressBar } from '@/ui/components/FlairProgressBar';
 import { ActivityBar } from '@/ui/effects/ActivityBar';
@@ -11,9 +12,30 @@ import {
 } from '@/game/systems/manufacturing/manufacturing.logic';
 import { StatTooltip } from '@/ui/tooltip/StatTooltip';
 import { NavTag } from '@/ui/components/NavTag';
+import { GameDropdown, type DropdownOption } from '@/ui/components/GameDropdown';
 import type { Blueprint, ResearchJob, CopyJob } from '@/types/game.types';
 
 const QTY_PRESETS = [1, 5, 10, 25] as const;
+
+function ManufacturingHqBanner() {
+  const state = useGameStore(s => s.state);
+  const homeSystemId = state.systems.factions.homeStationSystemId;
+
+  if (!homeSystemId) {
+    return (
+      <div className="rounded-xl border border-amber-700/30 bg-amber-950/15 px-3 py-2 text-xs text-amber-300">
+        No Corp HQ registered. Dock at a station in the System panel and register it to queue manufacturing, research, or copy jobs.
+      </div>
+    );
+  }
+
+  const homeSystem = getSystemById(state.galaxy.seed, homeSystemId);
+  return (
+    <div className="rounded-xl border border-cyan-700/20 bg-cyan-950/10 px-3 py-2 text-xs text-slate-400">
+      Corp HQ anchored at <span className="text-cyan-300 font-semibold">{homeSystem.name}</span>. Manufacturing and research jobs route through this station network.
+    </div>
+  );
+}
 
 // --- Helpers ------------------------------------------------------------------
 
@@ -119,6 +141,7 @@ function RecipeCard({ recipeId }: { recipeId: string }) {
 
   const recipe = MANUFACTURING_RECIPES[recipeId];
   if (!recipe) return null;
+  const hasCorpHq = !!state.systems.factions.homeStationId && !!state.systems.factions.homeStationSystemId;
 
   const skillLevels = state.systems.skills.levels;
   const isLocked    = !!(recipe.requiredSkill && (skillLevels[recipe.requiredSkill.skillId] ?? 0) < recipe.requiredSkill.minLevel);
@@ -137,8 +160,21 @@ function RecipeCard({ recipeId }: { recipeId: string }) {
 
   const maxQty = isTech2 ? maxAffordable(recipeId, state.resources) : maxAffordable(recipeId, state.resources);
   const activeBpcId = isTech2 ? (selectedBpc || availableBpcs[0]?.id || '') : undefined;
+  const bpcOptions: DropdownOption[] = availableBpcs.map(bpc => ({
+    value: bpc.id,
+    label: `${MANUFACTURING_RECIPES[bpc.itemId]?.name ?? bpc.itemId}`,
+    description: bpc.copiesRemaining === null ? 'Unlimited runs' : `${bpc.copiesRemaining} runs remaining`,
+    meta: `Research ${bpc.researchLevel}`,
+    group: bpc.type === 'copy' ? 'Blueprint Copies' : 'Blueprint Originals',
+    tone: 'amber',
+    badges: [
+      { label: `T${bpc.tier}`, color: bpc.tier === 2 ? '#fb923c' : '#34d399' },
+      ...(bpc.isLocked ? [{ label: 'Locked', color: '#fb7185' }] : []),
+    ],
+    keywords: [bpc.itemId, String(bpc.researchLevel)],
+  }));
 
-  const canQueue = !isLocked && maxQty >= qty && (!isTech2 || !!activeBpcId);
+  const canQueue = hasCorpHq && !isLocked && maxQty >= qty && (!isTech2 || !!activeBpcId);
 
   return (
     <div
@@ -199,17 +235,41 @@ function RecipeCard({ recipeId }: { recipeId: string }) {
           ) : (
             <div className="flex items-center gap-2">
               <span className="text-xs text-slate-500 shrink-0">T2 BPC:</span>
-              <select
-                value={activeBpcId}
-                onChange={e => setSelectedBpc(e.target.value)}
-                className="flex-1 px-2 py-1 rounded text-xs font-mono border border-orange-800/40 bg-slate-900 text-orange-300 focus:outline-none focus:border-orange-600/60"
-              >
-                {availableBpcs.map(b => (
-                  <option key={b.id} value={b.id}>
-                    {MANUFACTURING_RECIPES[b.itemId]?.name ?? b.itemId} ({b.copiesRemaining === null ? '8' : b.copiesRemaining} runs)
-                  </option>
-                ))}
-              </select>
+              <div className="flex-1 min-w-[220px]">
+                <GameDropdown
+                  value={activeBpcId ?? ''}
+                  onChange={setSelectedBpc}
+                  options={bpcOptions}
+                  placeholder="Select T2 BPC"
+                  searchPlaceholder="Find blueprint copy..."
+                  triggerTone="amber"
+                  menuWidth={430}
+                  renderDetail={option => {
+                    const blueprint = availableBpcs.find(bpc => bpc.id === option?.value) ?? null;
+                    if (!blueprint) return null;
+                    return (
+                      <div className="flex flex-col gap-2 text-[10px]">
+                        <div>
+                          <div className="text-[11px] font-semibold text-orange-200">{MANUFACTURING_RECIPES[blueprint.itemId]?.name ?? blueprint.itemId}</div>
+                          <div className="text-slate-500 mt-1">{blueprint.type === 'copy' ? 'Consumable blueprint copy for Tech II production.' : 'Reusable blueprint original.'}</div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 text-slate-400">
+                          <div className="rounded border border-slate-800/70 bg-slate-950/60 px-2 py-1">
+                            <div className="text-[8px] uppercase tracking-widest text-slate-600">Runs</div>
+                            <div className="font-mono text-slate-200">{blueprint.copiesRemaining === null ? 'Unlimited' : blueprint.copiesRemaining}</div>
+                          </div>
+                          <div className="rounded border border-slate-800/70 bg-slate-950/60 px-2 py-1">
+                            <div className="text-[8px] uppercase tracking-widest text-slate-600">Research</div>
+                            <div className="font-mono text-slate-200">Lv {blueprint.researchLevel}</div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  }}
+                  detailTitle="Blueprint Intel"
+                  detailEmpty={<div className="text-[10px] text-slate-600">Pick the copy you want to consume for this Tech II run.</div>}
+                />
+              </div>
             </div>
           )}
         </div>
@@ -235,7 +295,7 @@ function RecipeCard({ recipeId }: { recipeId: string }) {
               : 'bg-slate-800/40 border-slate-700/40 text-slate-600 cursor-not-allowed'
           }`}
         >
-          {isLocked ? 'Locked' : queueLen >= 50 ? 'Queue Full' : `Queue �${qty}`}
+          {!hasCorpHq ? 'HQ Required' : isLocked ? 'Locked' : queueLen >= 50 ? 'Queue Full' : `Queue �${qty}`}
         </button>
       </div>
     </div>
@@ -415,8 +475,9 @@ function BlueprintCard({ blueprint }: { blueprint: Blueprint }) {
   const isOriginal     = blueprint.type === 'original';
   const isTech2        = blueprint.tier === 2;
   const atMaxLevel     = blueprint.researchLevel >= 10;
-  const canResearch    = isOriginal && !blueprint.isLocked && scienceLevel >= 1 && hasSlot && hasDatacore && !atMaxLevel;
-  const canCopy        = isOriginal && !blueprint.isLocked && scienceLevel >= 1 && hasSlot;
+  const hasCorpHq      = !!state.systems.factions.homeStationId && !!state.systems.factions.homeStationSystemId;
+  const canResearch    = hasCorpHq && isOriginal && !blueprint.isLocked && scienceLevel >= 1 && hasSlot && hasDatacore && !atMaxLevel;
+  const canCopy        = hasCorpHq && isOriginal && !blueprint.isLocked && scienceLevel >= 1 && hasSlot;
 
   const researchingThis = mfg.researchJobs.find(j => j.blueprintId === blueprint.id);
   const copyingThis     = mfg.copyJobs.find(j => j.blueprintId === blueprint.id);
@@ -513,6 +574,7 @@ function BlueprintCard({ blueprint }: { blueprint: Blueprint }) {
               disabled={!canResearch}
               onClick={() => researchBp(blueprint.id)}
               title={
+                !hasCorpHq ? 'Corp HQ required' :
                 scienceLevel < 1 ? 'Science I required' :
                 !hasDatacore ? `Need 1� ${RESOURCE_REGISTRY[datacoreId ?? '']?.name ?? 'datacore'}` :
                 !hasSlot ? 'No research slot available' :
@@ -560,7 +622,7 @@ function BlueprintCard({ blueprint }: { blueprint: Blueprint }) {
               </div>
               <button
                 onClick={() => { copyBp(blueprint.id, copyRuns); setShowCopyPicker(false); }}
-                className="px-3 py-1 rounded-lg text-xs font-bold border bg-teal-900/50 border-teal-600/60 text-teal-200 hover:bg-teal-800/60 transition-colors"
+                className="px-3 py-1 rounded-lg text-xs font-bold border bg-teal-900/50 border-teal-600/60 text-teal-200 hover:bg-teal-800/60 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               >Start Copy</button>
             </div>
           )}
@@ -847,6 +909,8 @@ export function ManufacturingPanel() {
           Queue production jobs, manage blueprints, and research T2 technology.
         </p>
       </div>
+
+      <ManufacturingHqBanner />
 
       {/* Tab bar */}
       <div className="flex gap-1 border-b border-slate-800/60 pb-1">

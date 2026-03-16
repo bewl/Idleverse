@@ -1,6 +1,7 @@
 import type { GameState, TradeRoute } from '@/types/game.types';
 import type { GalaxyState } from '@/types/galaxy.types';
 import { issueFleetGroupOrder } from '@/game/systems/fleet/fleet.orders';
+import { getCorpHqBonusFromState } from '@/game/systems/factions/faction.logic';
 
 // ─── Result type ────────────────────────────────────────────────────────────
 
@@ -29,7 +30,9 @@ export function getEffectiveSellPrice(state: GameState, resourceId: string): num
     (state.modifiers['broker-fee-reduction'] ?? 0) +
     (state.modifiers['sales-tax-reduction']  ?? 0);
 
-  return Math.floor(base * (1 + tradeBonus));
+  const hqSellBonus = getCorpHqBonusFromState(state)?.marketSellPriceBonus ?? 0;
+
+  return Math.floor(base * (1 + tradeBonus + hqSellBonus));
 }
 
 /** Total ISK gained from selling `amount` units of `resourceId`. */

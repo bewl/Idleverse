@@ -13,7 +13,7 @@ import { useGameStore } from '@/stores/gameStore';
 import { useUiStore } from '@/stores/uiStore';
 import { getSystemById } from '@/game/galaxy/galaxy.gen';
 import { formatEta, getWarpProgress, warpEtaSeconds } from '@/game/galaxy/travel.logic';
-import { getBeltsForSystem, getBeltRichness } from '@/game/systems/mining/mining.logic';
+import { getBeltsForSystem, getBeltRichnessForSystem } from '@/game/systems/mining/mining.logic';
 import { ORE_BELTS } from '@/game/systems/mining/mining.config';
 import { RESOURCE_REGISTRY } from '@/game/resources/resourceRegistry';
 import { getStationInSystem } from '@/game/systems/factions/faction.logic';
@@ -638,9 +638,21 @@ function temperatureInfo(orbitFrac: number): { label: string; color: string } {
   return                        { label: 'Frozen',    color: '#67e8f9' };
 }
 
-function BodyDetail({ body, inWarp, maxOrbit }: { body: CelestialBody; inWarp: boolean; maxOrbit: number }) {
+function BodyDetail({ body, inWarp, maxOrbit, systemId }: { body: CelestialBody; inWarp: boolean; maxOrbit: number; systemId: string }) {
   const state      = useGameStore(s => s.state);
-  const toggleBelt = useGameStore(s => s.toggleMiningBelt);
+
+  const assignedMiningShipsByBelt = Object.values(state.systems.fleet.fleets)
+    .filter(fleet => fleet.currentSystemId === systemId)
+    .reduce<Record<string, number>>((counts, fleet) => {
+      const operationalShipIds = new Set((fleet.wings ?? []).flatMap(wing => wing.shipIds));
+      for (const shipId of operationalShipIds) {
+        const ship = state.systems.fleet.ships[shipId];
+        if (ship?.activity === 'mining' && ship.assignedBeltId) {
+          counts[ship.assignedBeltId] = (counts[ship.assignedBeltId] ?? 0) + 1;
+        }
+      }
+      return counts;
+    }, {});
 
   const comp = compositionInfo(body.type);
   const temp = temperatureInfo(body.orbitRadius / Math.max(maxOrbit, 1));
@@ -682,8 +694,9 @@ function BodyDetail({ body, inWarp, maxOrbit }: { body: CelestialBody; inWarp: b
           {body.beltIds.map(beltId => {
             const def       = ORE_BELTS[beltId];
             if (!def) return null;
-            const richness  = getBeltRichness(state, beltId);
-            const isActive  = state.systems.mining.targets[beltId] ?? false;
+            const richness  = getBeltRichnessForSystem(state.galaxy, beltId, systemId);
+            const assignedMiningShips = assignedMiningShipsByBelt[beltId] ?? 0;
+            const isActive  = assignedMiningShips > 0;
             const respawnAt = state.systems.mining.beltRespawnAt[beltId] ?? 0;
             const isDepleted = respawnAt > 0 && state.lastUpdatedAt < respawnAt;
             const req = def.requiredSkill;
@@ -752,25 +765,23 @@ function BodyDetail({ body, inWarp, maxOrbit }: { body: CelestialBody; inWarp: b
                       </button>
                     </GameTooltip>
                   ) : (
-                    <button
-                      disabled={inWarp || isDepleted}
-                      onClick={() => toggleBelt(beltId)}
+                    <span
                       style={{
                         marginLeft: 'auto',
                         padding: '2px 8px', fontSize: 9, fontWeight: 700,
                         border: isDepleted ? '1px solid rgba(30,41,59,0.5)'
-                          : isActive ? '1px solid rgba(248,113,113,0.4)' : '1px solid rgba(34,211,238,0.3)',
+                          : isActive ? '1px solid rgba(34,197,94,0.28)' : '1px solid rgba(71,85,105,0.28)',
                         borderRadius: 3,
                         background: isDepleted ? 'rgba(15,23,42,0.3)'
-                          : isActive ? 'rgba(127,29,29,0.2)' : 'rgba(8,51,68,0.3)',
+                          : isActive ? 'rgba(20,83,45,0.2)' : 'rgba(15,23,42,0.35)',
                         color: isDepleted ? '#334155'
-                          : isActive ? '#f87171' : '#22d3ee',
-                        cursor: (inWarp || isDepleted) ? 'not-allowed' : 'pointer',
+                          : isActive ? '#4ade80' : '#64748b',
                         opacity: inWarp ? 0.5 : 1,
                       }}
+                      title={isActive ? `${assignedMiningShips} operational ship${assignedMiningShips !== 1 ? 's' : ''} assigned here` : 'No operational fleet ships assigned here'}
                     >
-                      {isDepleted ? 'Depleted' : isActive ? 'Stop' : 'Mine'}
-                    </button>
+                      {isDepleted ? 'Depleted' : isActive ? `${assignedMiningShips} mining` : 'No fleet assigned'}
+                    </span>
                   )}
                 </div>
               </div>
@@ -1045,6 +1056,7 @@ function SystemPanelInner() {
   const state           = useGameStore(s => s.state);
   const dockAction      = useGameStore(s => s.dockAtStation);
   const undockAction    = useGameStore(s => s.undockFromStation);
+  const registerAction  = useGameStore(s => s.registerWithStation);
   const setHomeStation  = useGameStore(s => s.setHomeStation);
   // galaxy is guaranteed non-null here (checked by wrapper)
   const galaxy    = state.galaxy!;
@@ -1129,7 +1141,18 @@ function SystemPanelInner() {
 
   // Available belt count for this system
   const systemBeltIds = getBeltsForSystem(system.id, galaxy.seed);
-  const activeBeltCount = systemBeltIds.filter(id => state.systems.mining.targets[id]).length;
+  const activeBeltCount = Object.values(state.systems.fleet.fleets)
+    .filter(fleet => fleet.currentSystemId === system.id)
+    .reduce((count, fleet) => {
+      const activeBelts = new Set(
+        (fleet.wings ?? [])
+          .flatMap(wing => wing.shipIds)
+          .map(shipId => state.systems.fleet.ships[shipId])
+          .filter(ship => ship?.activity === 'mining' && ship.assignedBeltId)
+          .map(ship => ship!.assignedBeltId!),
+      );
+      return count + activeBelts.size;
+    }, 0);
 
   // Anomaly badge for the tab
   const systemAnomalies: Anomaly[] = galaxy.anomalies?.[system.id] ?? [];
@@ -1143,11 +1166,30 @@ function SystemPanelInner() {
   );
   const dockedStationId    = state.systems.factions.dockedStationId;
   const homeStationSystemId = state.systems.factions.homeStationSystemId;
+  const registeredStations  = state.systems.factions.registeredStations ?? [];
   const isHqSystem          = homeStationSystemId === system.id;
   const isDocked            = !!dockedStationId && stationDef?.id === dockedStationId;
   const canDockHere         = !!stationDef && !isDocked && !inWarp;
   const rep                 = stationDef ? (state.systems.factions.rep[stationDef.factionId] ?? 0) : 0;
   const canAffordDock       = rep >= (stationDef?.minRepToDock ?? -1000);
+  const credits             = state.resources['credits'] ?? 0;
+  const hasHomeHq           = !!state.systems.factions.homeStationId && !!state.systems.factions.homeStationSystemId;
+  const isRegisteredHere    = !!stationDef && registeredStations.includes(stationDef.id);
+  const canRegisterHere     = !!stationDef
+    && isDocked
+    && !isRegisteredHere
+    && rep >= stationDef.registrationRepRequired
+    && credits >= stationDef.registrationCost;
+  const canSetHqHere        = !!stationDef && isRegisteredHere && !isHqSystem;
+  const registerTitle = !stationDef
+    ? ''
+    : !isDocked
+      ? 'Dock at this station to register it as a corp facility.'
+      : rep < stationDef.registrationRepRequired
+        ? `Standing too low (${rep} / ${stationDef.registrationRepRequired} required).`
+        : credits < stationDef.registrationCost
+          ? `Need ${stationDef.registrationCost.toLocaleString()} credits.`
+          : `Register for ${stationDef.registrationCost.toLocaleString()} credits.`;
 
   // Local fleets in this system
   const localFleets = Object.values(state.systems.fleet.fleets).filter(
@@ -1218,7 +1260,7 @@ function SystemPanelInner() {
               {activeBeltCount} mining
             </span>
           )}
-          {/* Corp HQ badge / set button */}
+          {/* Corp HQ badge / registration actions */}
           {stationDef && (
             isHqSystem ? (
               <span style={{
@@ -1228,17 +1270,40 @@ function SystemPanelInner() {
               }}>
                 ⭡ Corp HQ
               </span>
-            ) : (
+            ) : canSetHqHere ? (
               <button
                 onClick={() => { if (stationDef) setHomeStation(stationDef.id, system.id); }}
                 style={{
                   fontSize: 9, fontWeight: 700, padding: '3px 10px', borderRadius: 4, cursor: 'pointer',
-                  border: '1px solid rgba(251,191,36,0.25)', color: '#a08020',
-                  background: 'transparent',
+                  border: '1px solid rgba(251,191,36,0.25)', color: '#fbbf24',
+                  background: 'rgba(120,70,0,0.12)',
                 }}
                 title={`Set ${stationDef.name} as Corp HQ`}
               >
                 ⭡ Set Corp HQ
+              </button>
+            ) : isRegisteredHere ? (
+              <span style={{
+                fontSize: 9, fontWeight: 700, padding: '3px 10px', borderRadius: 4,
+                border: '1px solid rgba(34,211,238,0.35)', color: '#67e8f9',
+                background: 'rgba(8,51,68,0.22)',
+              }}>
+                ⬡ Registered
+              </span>
+            ) : (
+              <button
+                onClick={() => { if (stationDef) registerAction(stationDef.id); }}
+                disabled={!canRegisterHere}
+                style={{
+                  fontSize: 9, fontWeight: 700, padding: '3px 10px', borderRadius: 4,
+                  cursor: canRegisterHere ? 'pointer' : 'not-allowed',
+                  border: `1px solid ${canRegisterHere ? 'rgba(251,191,36,0.25)' : 'rgba(55,65,81,0.45)'}`,
+                  color: canRegisterHere ? '#fbbf24' : '#475569',
+                  background: canRegisterHere ? 'rgba(120,70,0,0.12)' : 'transparent',
+                }}
+                title={registerTitle}
+              >
+                ⬡ Register Station
               </button>
             )
           )}
@@ -1275,6 +1340,21 @@ function SystemPanelInner() {
           )}
         </div>
       </div>
+
+      {!hasHomeHq && (
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+          padding: '6px 16px', flexShrink: 0,
+          background: 'rgba(120,70,0,0.12)', borderBottom: '1px solid rgba(251,191,36,0.18)',
+        }}>
+          <span style={{ fontSize: 10, color: '#fbbf24' }}>
+            No Corp HQ registered. Dock at a station and register it to restore manufacturing and reprocessing access.
+          </span>
+          <span style={{ fontSize: 9, color: '#a16207', fontFamily: 'monospace' }}>
+            Credits: {credits.toLocaleString()}
+          </span>
+        </div>
+      )}
 
       {/* ── Fleets in system ── */}
       {localFleets.length > 0 && (
@@ -1531,7 +1611,16 @@ function SystemPanelInner() {
                 const renderBodyRow = (body: CelestialBody, indent: boolean) => {
                   const isSel  = body.id === selectedBodyId;
                   const isBelt = body.type === 'asteroid-belt';
-                  const hasActiveBelts = isBelt && body.beltIds.some(id => state.systems.mining.targets[id]);
+                  const hasActiveBelts = isBelt && body.beltIds.some(id =>
+                    localFleets.some(fleet =>
+                      (fleet.wings ?? []).some(wing =>
+                        wing.shipIds.some(shipId => {
+                          const ship = state.systems.fleet.ships[shipId];
+                          return ship?.activity === 'mining' && ship.assignedBeltId === id;
+                        }),
+                      ),
+                    ),
+                  );
 
                   return (
                     <div
@@ -1594,7 +1683,7 @@ function SystemPanelInner() {
           {/* Selected body detail */}
           {selectedBody ? (
             <div style={{ borderTop: '1px solid rgba(22,30,52,0.5)', paddingTop: 10 }}>
-              <BodyDetail body={selectedBody} inWarp={inWarp} maxOrbit={maxOrbit} />
+              <BodyDetail body={selectedBody} inWarp={inWarp} maxOrbit={maxOrbit} systemId={system.id} />
             </div>
           ) : (
             <div style={{ fontSize: 9, color: '#1e293b', textAlign: 'center', padding: '12px 0', lineHeight: 1.4 }}>

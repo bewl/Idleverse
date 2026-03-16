@@ -9,6 +9,7 @@ import {
 } from './combat.config';
 import { mulberry32, childSeed, randInt, randFloat, randPick } from '@/game/utils/prng';
 import { generateGalaxy } from '@/game/galaxy/galaxy.gen';
+import { getCorpHqBonusFromState } from '@/game/systems/factions/faction.logic';
 import { computeRoleAdjustedCombatStats } from '@/game/systems/fleet/fleet.logic';
 import { getOperationalFleetShipIds } from '@/game/systems/fleet/wings.logic';
 
@@ -131,6 +132,7 @@ export function resolveCombat(
 
   const combatStats = computeRoleAdjustedCombatStats(fleet, fleetShips);
   const fleetRating = combatStats.effectiveDPS;
+  const hqLootMultiplier = getCorpHqBonusFromState(state)?.combatLootQualityMultiplier ?? 1;
 
   // Seeded variance: different each engagement but deterministic for replay
   const seed = childSeed(strHash(fleetId), Math.floor(nowMs / (COMBAT_TICK_INTERVAL_SECONDS * 1000)));
@@ -160,7 +162,7 @@ export function resolveCombat(
   // Loot rolls on victory
   const lootGained: Record<string, number> = {};
   for (const entry of npcGroup.lootTable) {
-    if (rng() < entry.chance * combatStats.lootQualityMult) {
+    if (rng() < entry.chance * combatStats.lootQualityMult * hqLootMultiplier) {
       const qty = randInt(rng, entry.minQty, entry.maxQty);
       lootGained[entry.resourceId] = (lootGained[entry.resourceId] ?? 0) + qty;
     }

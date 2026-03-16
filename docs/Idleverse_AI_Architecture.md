@@ -206,6 +206,7 @@ Reusable UI primitives shared across panels.
 Key components:
 
 - `GameTooltip.tsx` — behavioral tooltip shell + `TT.*` composable content primitives
+- `GameDropdown.tsx` — behavioral dropdown shell for searchable, filterable, portal-rendered option pickers
 - `NavTag.tsx` — content-aware navigation chip (entity type → panel routing)
 - `StatTooltip.tsx` — modifier breakdown tooltip (wraps GameTooltip)
 - `UpgradeCard.tsx`, `ProgressBar.tsx`, `FlairProgressBar.tsx` — panel building blocks
@@ -306,6 +307,44 @@ export provides composable primitives for building layouts:
   <span>Alpha Fleet</span>
 </GameTooltip>
 ```
+
+  ## Dropdown System
+
+  All rich dropdowns flow through a single engine: `<GameDropdown>` in `src/ui/components/GameDropdown.tsx`.
+
+  ### Behavior
+
+  - Portal-rendered via `createPortal(…, document.body)` so menus are not clipped by panel overflow
+  - Reuses tooltip depth stacking by reading `TooltipDepthContext`, so dropdowns and tooltips layer cleanly together
+  - Searchable option list with `useDeferredValue(search)` to keep filtering responsive
+  - Auto-derived group filters from option content (`group` field) for contextual filtering without panel-specific logic
+  - Mouse-first interaction model: open from the trigger, inspect options by hover, select by click, dismiss by outside click
+  - Viewport-clamped positioning based on trigger geometry, with width anchored to trigger or an explicit menu width
+  - Optional split detail pane for dense pickers such as fleet fittings and blueprint selection, so option scanning and option inspection stay in the same popup
+
+  ### Content Model
+
+  `GameDropdown` is a behavioral shell like `GameTooltip`, but for selection workflows. Options are data objects rather than raw JSX:
+
+  ```ts
+  interface DropdownOption {
+    value: string;
+    label: string;
+    description?: string;
+    meta?: string;
+    group?: string;
+    tone?: 'cyan' | 'emerald' | 'amber' | 'violet' | 'rose' | 'slate';
+    icon?: ReactNode;
+    keywords?: string[];
+    badges?: Array<{ label: string; color?: string }>;
+    disabled?: boolean;
+  }
+  ```
+
+  Panels can override `renderValue` and `renderOption`, but the default renderer already supports
+  colored rows, metadata, badges, and group-aware filtering. Dense pickers can additionally provide
+  `renderDetail` to render a right-hand or bottom-mounted inspection pane without rewriting the
+  shell behavior.
 
 ## NavTag Routing
 
