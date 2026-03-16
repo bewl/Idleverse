@@ -15,6 +15,8 @@ import { formatEta, getWarpProgress, warpEtaSeconds } from '@/game/galaxy/travel
 import { getCurrentSystemBeltIds, getBeltRichness } from '@/game/systems/mining/mining.logic';
 import { ORE_BELTS } from '@/game/systems/mining/mining.config';
 import { RESOURCE_REGISTRY } from '@/game/resources/resourceRegistry';
+import { getStationInSystem } from '@/game/systems/factions/faction.logic';
+import { NavTag } from '@/ui/components/NavTag';
 import type { CelestialBody } from '@/types/galaxy.types';
 import type { Anomaly, AnomalyType } from '@/types/game.types';
 
@@ -595,6 +597,8 @@ function AnomaliesTab({ systemId }: { systemId: string }) {
 /** Inner panel — only rendered when galaxy state is confirmed present. */
 function SystemPanelInner() {
   const state     = useGameStore(s => s.state);
+  const dockAction   = useGameStore(s => s.dockAtStation);
+  const undockAction = useGameStore(s => s.undockFromStation);
   // galaxy is guaranteed non-null here (checked by wrapper)
   const galaxy    = state.galaxy!;
   const system    = useMemo(
@@ -623,6 +627,23 @@ function SystemPanelInner() {
   const systemAnomalies: Anomaly[] = galaxy.anomalies?.[system.id] ?? [];
   const revealedCount = systemAnomalies.filter(a => a.revealed && !a.depleted).length;
 
+  // Station in current system
+  const systemIndex = system.id === 'home' ? 0 : parseInt(system.id.replace('sys-', ''), 10);
+  const stationDef  = useMemo(
+    () => getStationInSystem(system, galaxy.seed, systemIndex),
+    [system, galaxy.seed, systemIndex],
+  );
+  const dockedStationId = state.systems.factions.dockedStationId;
+  const isDocked        = !!dockedStationId && stationDef?.id === dockedStationId;
+  const canDockHere     = !!stationDef && !isDocked && !inWarp;
+  const rep             = stationDef ? (state.systems.factions.rep[stationDef.factionId] ?? 0) : 0;
+  const canAffordDock   = rep >= (stationDef?.minRepToDock ?? -1000);
+
+  // Local fleets in this system
+  const localFleets = Object.values(state.systems.fleet.fleets).filter(
+    f => f.currentSystemId === system.id && f.shipIds.length > 0,
+  );
+
   return (
     <div style={{
       display: 'flex', flexDirection: 'column', height: '100%', minHeight: 480,
@@ -650,7 +671,7 @@ function SystemPanelInner() {
             {secLabel(system.security)}
           </span>
         </div>
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <span style={{ fontSize: 9, color: '#334155' }}>
             {system.starType}-type · {system.bodies.length} bodies · {systemBeltIds.length} ore belts
           </span>
@@ -664,8 +685,59 @@ function SystemPanelInner() {
               {activeBeltCount} mining
             </span>
           )}
+          {/* Dock / Undock */}
+          {stationDef && (
+            isDocked ? (
+              <button
+                onClick={() => undockAction()}
+                style={{
+                  fontSize: 9, fontWeight: 700, padding: '3px 10px', borderRadius: 4, cursor: 'pointer',
+                  border: '1px solid rgba(251,191,36,0.4)', color: '#fbbf24',
+                  background: 'rgba(120,70,0,0.25)',
+                }}
+              >
+                ⬡ {stationDef.name} · Undock
+              </button>
+            ) : (
+              <button
+                disabled={!canAffordDock}
+                onClick={() => { if (stationDef) dockAction(stationDef.id); }}
+                style={{
+                  fontSize: 9, fontWeight: 700, padding: '3px 10px', borderRadius: 4,
+                  cursor: canAffordDock ? 'pointer' : 'not-allowed',
+                  border: `1px solid ${canAffordDock ? 'rgba(34,211,238,0.35)' : 'rgba(55,65,81,0.4)'}`,
+                  color: canAffordDock ? '#22d3ee' : '#374151',
+                  background: canAffordDock ? 'rgba(8,51,68,0.25)' : 'transparent',
+                  opacity: inWarp ? 0.4 : 1,
+                }}
+                title={!canAffordDock ? `Rep too low to dock (${rep} / ${stationDef.minRepToDock} needed)` : `Dock at ${stationDef.name}`}
+              >
+                ⬡ {stationDef.name} · Dock
+              </button>
+            )
+          )}
         </div>
       </div>
+
+      {/* ── Fleets in system ── */}
+      {localFleets.length > 0 && (
+        <div style={{
+          padding: '6px 16px',
+          borderBottom: '1px solid rgba(22,30,52,0.6)',
+          display: 'flex', gap: 8, flexWrap: 'wrap', flexShrink: 0,
+          background: 'rgba(3,5,16,0.4)',
+        }}>
+          <span style={{ fontSize: 8, color: '#334155', textTransform: 'uppercase', letterSpacing: '0.08em', alignSelf: 'center' }}>
+            Fleets here:
+          </span>
+          {localFleets.map(fleet => (
+            <span key={fleet.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#22d3ee', flexShrink: 0 }} />
+              <NavTag entityType="fleet" entityId={fleet.id} label={fleet.name} />
+            </span>
+          ))}
+        </div>
+      )}
 
       {/* ── Tab bar ── */}
       <div style={{

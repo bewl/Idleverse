@@ -10,6 +10,7 @@ import {
   getMaxResearchSlots,
 } from '@/game/systems/manufacturing/manufacturing.logic';
 import { StatTooltip } from '@/ui/tooltip/StatTooltip';
+import { NavTag } from '@/ui/components/NavTag';
 import type { Blueprint, ResearchJob, CopyJob } from '@/types/game.types';
 
 const QTY_PRESETS = [1, 5, 10, 25] as const;
@@ -49,7 +50,7 @@ function CostBar({ resourceId, required, have }: { resourceId: string; required:
   return (
     <div className="flex items-center gap-2 text-xs">
       <span className={`w-28 shrink-0 truncate font-mono ${enough ? 'text-slate-400' : 'text-slate-300'}`}>
-        {RESOURCE_REGISTRY[resourceId]?.name ?? resourceId}
+        <NavTag entityType="resource" entityId={resourceId} label={RESOURCE_REGISTRY[resourceId]?.name ?? resourceId} />
       </span>
       <div
         className="flex-1 relative h-1.5 rounded-full overflow-hidden"
@@ -602,10 +603,10 @@ function JobsTab() {
   return (
     <div className="flex flex-col gap-4">
       {/* Stats */}
-      <div className="flex gap-2">
+      <div className="flex gap-2 flex-wrap">
         <div className="flex flex-col items-center px-2.5 py-1.5 rounded border border-slate-700/40 bg-slate-900/80">
           <StatTooltip modifierKey="manufacturing-speed">
-            <span className="text-xs font-bold font-mono text-cyan-300">�{speedMult.toFixed(2)}</span>
+            <span className="text-xs font-bold font-mono text-cyan-300">×{speedMult.toFixed(2)}</span>
           </StatTooltip>
           <span className="text-[10px] text-slate-600">Speed</span>
         </div>
@@ -613,6 +614,20 @@ function JobsTab() {
           <span className="text-xs font-bold font-mono text-violet-300">{queue.length}/50</span>
           <span className="text-[10px] text-slate-600">Queued</span>
         </div>
+        {queue.length > 0 && (
+          <div className="flex-1 min-w-[80px] flex flex-col justify-center gap-1 px-2.5 py-1.5 rounded border border-slate-700/40 bg-slate-900/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[9px] text-slate-600">Queue</span>
+              <span className="text-[9px] font-mono text-slate-500">{Math.round((queue.length / 50) * 100)}%</span>
+            </div>
+            <div className="h-1 rounded-full bg-slate-800 overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all duration-500 ${queue.length >= 45 ? 'bg-rose-500' : queue.length >= 25 ? 'bg-amber-500' : 'bg-violet-500/70'}`}
+                style={{ width: `${(queue.length / 50) * 100}%` }}
+              />
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Active job */}

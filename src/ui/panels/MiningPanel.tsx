@@ -13,6 +13,7 @@ import {
   getCurrentSystemBeltIds,
 } from '@/game/systems/mining/mining.logic';
 import { StatTooltip } from '@/ui/tooltip/StatTooltip';
+import { NavTag } from '@/ui/components/NavTag';
 import { getSystemById } from '@/game/galaxy/galaxy.gen';
 import type { OreSecurityTier } from '@/types/game.types';
 
@@ -225,8 +226,9 @@ function BeltCard({ beltId }: { beltId: string }) {
 
           {/* Lock reason */}
           {!isAccessible && def.requiredSkill && (
-            <div className="text-xs text-slate-600 mt-1">
-              🔒 Requires {def.requiredSkill.skillId} Lv{def.requiredSkill.minLevel}
+            <div className="flex items-center gap-1.5 text-xs text-slate-600 mt-1">
+              🔒 Requires{' '}
+              <NavTag entityType="skill" entityId={def.requiredSkill.skillId} label={`${def.requiredSkill.skillId} Lv${def.requiredSkill.minLevel}`} />
             </div>
           )}
         </div>
@@ -326,7 +328,7 @@ export function MiningPanel() {
         {currentSystem && (
           <div className="flex items-center gap-2 mb-2">
             <span className="text-[10px] text-slate-500">Location:</span>
-            <span className="text-[10px] text-slate-300 font-semibold">{currentSystem.name}</span>
+            <NavTag entityType="system" entityId={currentSystem.id} label={currentSystem.name} />
             <span
               className="text-[8px] px-1.5 py-0.5 rounded border font-mono uppercase tracking-wider"
               style={{

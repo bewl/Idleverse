@@ -5,9 +5,20 @@ import { RESOURCE_REGISTRY } from '@/game/resources/resourceRegistry';
 import { formatResourceAmount } from '@/game/resources/resourceRegistry';
 import { FlairProgressBar } from '@/ui/components/FlairProgressBar';
 import { StatTooltip } from '@/ui/tooltip/StatTooltip';
+import { NavTag } from '@/ui/components/NavTag';
 import { getBatchYieldPreview, getReprocessingEfficiency } from '@/game/systems/reprocessing/reprocessing.logic';
 import { BATCH_SIZE_BASE, BATCH_TIME_SECONDS, ORE_YIELD_TABLE } from '@/game/systems/reprocessing/reprocessing.config';
 import type { OreSecurityTier } from '@/types/game.types';
+
+// ─── Efficiency grade badge ────────────────────────────────────────────────
+
+function efficiencyGrade(eff: number): { grade: string; color: string } {
+  if (eff >= 1.00) return { grade: 'S', color: '#22d3ee' };
+  if (eff >= 0.85) return { grade: 'A', color: '#34d399' };
+  if (eff >= 0.70) return { grade: 'B', color: '#fbbf24' };
+  if (eff >= 0.55) return { grade: 'C', color: '#fb923c' };
+  return                  { grade: 'D', color: '#f87171' };
+}
 
 // ─── Tier styling ──────────────────────────────────────────────────────────
 
@@ -255,7 +266,23 @@ export function ReprocessingPanel() {
 
       {/* ── Header ── */}
       <div>
-        <h2 className="text-lg font-bold text-slate-100 tracking-tight">Reprocessing Facility</h2>
+        <div className="flex items-center gap-3 mb-1">
+          <h2 className="text-lg font-bold text-slate-100 tracking-tight">Reprocessing Facility</h2>
+          {(() => {
+            const state = useGameStore.getState().state;
+            const eff = getReprocessingEfficiency(state);
+            const { grade, color } = efficiencyGrade(eff);
+            return (
+              <span
+                className="text-sm font-black px-2 py-0.5 rounded border font-mono"
+                style={{ color, background: `${color}18`, border: `1px solid ${color}44` }}
+                title={`Efficiency: ${(eff * 100).toFixed(1)}%`}
+              >
+                {grade}
+              </span>
+            );
+          })()}
+        </div>
         <p className="text-xs text-slate-500 mt-0.5">
           Convert raw ores into refined minerals. Efficiency scales with the{' '}
           <StatTooltip modifierKey="reprocessing-efficiency">
@@ -263,7 +290,7 @@ export function ReprocessingPanel() {
               Reprocessing Efficiency
             </span>
           </StatTooltip>{' '}
-          modifier.
+          modifier. Train <NavTag entityType="skill" entityId="reprocessing" label="Reprocessing" /> to improve yield.
         </p>
       </div>
 

@@ -13,6 +13,7 @@ import { getAliveNpcGroupsInSystem } from '@/game/systems/combat/combat.logic';
 import { StarfieldBackground } from '@/ui/effects/StarfieldBackground';
 import { generateGalaxy } from '@/game/galaxy/galaxy.gen';
 import type { RouteSecurityFilter } from '@/types/faction.types';
+import { NavTag } from '@/ui/components/NavTag';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -173,7 +174,7 @@ function FleetCard({
             </div>
           )}
           <div className="flex gap-2 mt-0.5">
-            <span className="text-[9px] text-slate-500">{fleet.currentSystemId}</span>
+            <NavTag entityType="system" entityId={fleet.currentSystemId} label={galaxy.find(s => s.id === fleet.currentSystemId)?.name ?? fleet.currentSystemId} />
             <span className="text-[9px] text-slate-600">·</span>
             <span className="text-[9px] text-slate-500">{fleetShips.length} ship{fleetShips.length !== 1 ? 's' : ''}</span>
             {isMoving && <span className="text-[9px] text-cyan-400/70">· In transit</span>}
@@ -382,7 +383,7 @@ function FleetCard({
                 </div>
 
                 {!hasPatrolReq && !combatOrder && (
-                  <span className="text-[8px] text-slate-600">Patrol: requires Spaceship Command II · Raid: requires Military Operations I</span>
+                  <span className="text-[8px] text-slate-600">Patrol: requires <NavTag entityType="skill" entityId="spaceship-command" label="Spaceship Command II" /> · Raid: requires <NavTag entityType="skill" entityId="military-operations" label="Military Operations I" /></span>
                 )}
               </div>
             );
@@ -394,7 +395,7 @@ function FleetCard({
               <span className="text-[8px] uppercase tracking-widest text-slate-500">Navigation</span>
               {isMoving && (
                 <span className="text-[8px] font-mono text-cyan-400/70">
-                  → {galaxy.find(s => s.id === fleet.fleetOrder?.destinationSystemId)?.name ?? fleet.fleetOrder?.destinationSystemId}
+                  → <NavTag entityType="system" entityId={fleet.fleetOrder?.destinationSystemId ?? ''} label={galaxy.find(s => s.id === fleet.fleetOrder?.destinationSystemId)?.name ?? fleet.fleetOrder?.destinationSystemId ?? ''} />
                 </span>
               )}
             </div>
@@ -644,8 +645,10 @@ function PilotCard({
           <span className="text-[9px] text-slate-500">{displayState}</span>
         </div>
         <div className="text-right">
-          {activeSkillName && (
-            <div className="text-[9px] text-cyan-400 truncate max-w-20">{activeSkillName}</div>
+          {pilot.skills.activeSkillId && (
+            <div className="text-[9px] text-cyan-400 truncate max-w-20">
+              <NavTag entityType="skill" entityId={pilot.skills.activeSkillId} label={SKILL_DEFINITIONS[pilot.skills.activeSkillId]?.name ?? pilot.skills.activeSkillId} />
+            </div>
           )}
           {eta > 0 && (
             <div className="text-[9px] font-mono text-slate-500">{formatTrainingEta(eta)}</div>

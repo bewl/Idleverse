@@ -11,6 +11,7 @@ import { skillTrainingSeconds } from '@/game/balance/constants';
 import type { SkillCategory } from '@/types/game.types';
 import { StarfieldBackground } from '@/ui/effects/StarfieldBackground';
 import { StatTooltip } from '@/ui/tooltip/StatTooltip';
+import { NavTag } from '@/ui/components/NavTag';
 
 // ─── Design tokens ─────────────────────────────────────────────────────────
 
@@ -59,6 +60,33 @@ function totalQueueEta(
     projectedLevels[entry.skillId] = targetLv;
   }
   return total;
+}
+
+// ─── Queue ETA badge ───────────────────────────────────────────────────────
+
+function QueueEtaBadge() {
+  const skillsState = useGameStore(s => s.state.systems.skills);
+  const [, forceUpdate] = useState(0);
+
+  useEffect(() => {
+    const t = setInterval(() => forceUpdate(n => n + 1), 10_000);
+    return () => clearInterval(t);
+  }, []);
+
+  const totalEta = totalQueueEta(
+    skillsState.levels,
+    skillsState.queue,
+    skillsState.activeSkillId,
+    skillsState.activeProgress,
+  );
+  const queueLen = skillsState.queue.length + (skillsState.activeSkillId ? 1 : 0);
+  if (queueLen === 0) return null;
+
+  return (
+    <span className="text-[9px] font-mono text-cyan-600 px-2 py-0.5 rounded border border-cyan-800/40 bg-cyan-950/30">
+      {queueLen} training · {formatTrainingEta(totalEta)} total
+    </span>
+  );
 }
 
 // ─── Skill pip row ─────────────────────────────────────────────────────────
@@ -464,7 +492,7 @@ function SkillDetail({ skillId }: { skillId: string }) {
                   <span className={`text-xs font-mono ${met ? 'text-emerald-400' : 'text-rose-400'}`}>
                     {met ? '✓' : '✗'}
                   </span>
-                  <span className="text-sm text-slate-300">{reqDef?.name ?? req}</span>
+                  <NavTag entityType="skill" entityId={req} label={reqDef?.name ?? req} />
                   <span className={`text-xs font-mono px-1.5 py-0.5 rounded border ${met ? 'text-emerald-400 border-emerald-800/40 bg-emerald-900/10' : 'text-rose-400 border-rose-800/40 bg-rose-900/10'}`}>
                     Lv {minLv}
                   </span>
@@ -574,12 +602,15 @@ export function SkillsPanel() {
 
         {/* ── Header ───────────────────────────────────────────────────── */}
         <div className="shrink-0 px-4 pt-4 pb-3">
-          <h1
-            className="text-cyan-400 font-bold text-xs uppercase tracking-widest mb-1"
-            style={{ textShadow: '0 0 14px rgba(34,211,238,0.45)' }}
-          >
-            ⚡ Skill Queue
-          </h1>
+          <div className="flex items-baseline justify-between gap-2 mb-1">
+            <h1
+              className="text-cyan-400 font-bold text-xs uppercase tracking-widest"
+              style={{ textShadow: '0 0 14px rgba(34,211,238,0.45)' }}
+            >
+              ⚡ Skill Queue
+            </h1>
+            <QueueEtaBadge />
+          </div>
           <p className="text-slate-500 text-xs">
             Skills train in real time, even offline. Queue up to 50 levels at once.
           </p>

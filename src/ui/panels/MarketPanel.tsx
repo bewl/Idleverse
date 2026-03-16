@@ -5,6 +5,7 @@ import { formatResourceAmount } from '@/game/resources/resourceRegistry';
 import { getEffectiveSellPrice, getTradeBonusMultiplier } from '@/game/systems/market/market.logic';
 import { StatTooltip } from '@/ui/tooltip/StatTooltip';
 import { generateGalaxy } from '@/game/galaxy/galaxy.gen';
+import { NavTag } from '@/ui/components/NavTag';
 
 // ─── Resource categories to display in market ─────────────────────────────
 
@@ -49,12 +50,17 @@ function MarketRow({ resourceId }: { resourceId: string }) {
   if (basePrice === 0) return null;
 
   const totalValue = effectPrice * Math.floor(have);
+  const priceRatio = basePrice > 0 ? effectPrice / basePrice : 1;
+  const trendArrow = priceRatio >= 1.05 ? '▲' : priceRatio <= 0.95 ? '▼' : '─';
+  const trendColor = priceRatio >= 1.05 ? 'text-emerald-400' : priceRatio <= 0.95 ? 'text-red-400' : 'text-slate-600';
 
   return (
     <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-3 gap-y-1 items-center py-2 border-t border-slate-800/50 first:border-t-0">
       {/* Resource name + stock */}
       <div className="min-w-0">
-        <div className="text-xs font-bold text-slate-200 truncate">{resName}</div>
+        <div className="text-xs font-bold text-slate-200 truncate">
+          <NavTag entityType="resource" entityId={resourceId} label={resName} />
+        </div>
         <div className="text-[10px] font-mono text-slate-500">
           {formatResourceAmount(have, 0)} units
           {have > 0 && (
@@ -63,13 +69,16 @@ function MarketRow({ resourceId }: { resourceId: string }) {
         </div>
       </div>
 
-      {/* Price */}
+      {/* Price + trend */}
       <div className="text-right shrink-0">
-        <StatTooltip modifierKey="sell-price-bonus">
-          <span className="text-[10px] font-mono text-slate-300 cursor-help border-b border-dotted border-slate-700">
-            {formatResourceAmount(effectPrice, 0)} ISK
-          </span>
-        </StatTooltip>
+        <div className="flex items-center gap-1 justify-end">
+          <span className={`text-[10px] font-mono ${trendColor}`} title={`${(priceRatio * 100 - 100).toFixed(1)}% vs base`}>{trendArrow}</span>
+          <StatTooltip modifierKey="sell-price-bonus">
+            <span className="text-[10px] font-mono text-slate-300 cursor-help border-b border-dotted border-slate-700">
+              {formatResourceAmount(effectPrice, 0)} ISK
+            </span>
+          </StatTooltip>
+        </div>
         {effectPrice !== basePrice && (
           <div className="text-[9px] text-slate-600">base {formatResourceAmount(basePrice, 0)}</div>
         )}
@@ -211,7 +220,7 @@ function TradeRoutesTab() {
         <div className="text-2xl mb-3">🚢</div>
         <div className="text-slate-400 text-sm font-bold mb-1">Trade Routes Locked</div>
         <div className="text-slate-600 text-xs max-w-xs">
-          Reach <span className="text-cyan-400">Trade III</span> to unlock automated trade routes.
+          Reach <NavTag entityType="skill" entityId="trade" label="Trade III" /> to unlock automated trade routes.
         </div>
       </div>
     );
@@ -413,7 +422,7 @@ export function MarketPanel() {
         <div className="text-2xl mb-3">📊</div>
         <div className="text-slate-400 text-sm font-bold mb-1">Market Locked</div>
         <div className="text-slate-600 text-xs max-w-xs">
-          Train the <span className="text-cyan-400">Trade</span> skill to access the NPC market.
+          Train the <NavTag entityType="skill" entityId="trade" label="Trade" /> skill to access the NPC market.
         </div>
       </div>
     );

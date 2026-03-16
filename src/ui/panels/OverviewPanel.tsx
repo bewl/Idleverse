@@ -10,6 +10,8 @@ import { formatCredits, formatResourceAmount, RESOURCE_REGISTRY } from '@/game/r
 import { SKILL_DEFINITIONS } from '@/game/systems/skills/skills.config';
 import { activeTrainingEta, formatTrainingEta } from '@/game/systems/skills/skills.logic';
 import { skillTrainingSeconds } from '@/game/balance/constants';
+import { NavTag } from '@/ui/components/NavTag';
+import { getSystemById } from '@/game/galaxy/galaxy.gen';
 import type { AnomalyType } from '@/types/game.types';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -478,6 +480,110 @@ function CombatLogCard() {
   );
 }
 
+// ─── Fleet status card ────────────────────────────────────────────────────────
+
+function FleetStatusCard() {
+  const state  = useGameStore(s => s.state);
+  const fleets = Object.values(state.systems.fleet.fleets ?? {});
+  if (fleets.length === 0) return null;
+
+  const galaxy = state.galaxy;
+
+  function activityLabel(fleet: typeof fleets[0]) {
+    if (fleet.fleetOrder !== null)                         return { text: 'In Transit', color: '#22d3ee', dot: 'bg-cyan-400 animate-pulse' };
+    if (fleet.combatOrder?.type === 'patrol')              return { text: 'Patrol',    color: '#f43f5e', dot: 'bg-rose-400 animate-pulse' };
+    if (fleet.combatOrder?.type === 'raid')                return { text: 'Raid',      color: '#f43f5e', dot: 'bg-rose-400 animate-pulse' };
+    return                                                        { text: 'Idle',      color: '#475569', dot: 'bg-slate-600' };
+  }
+
+  return (
+    <div
+      className="rounded-xl p-4 flex flex-col gap-2"
+      style={{ background: 'rgba(3,8,20,0.7)', border: '1px solid rgba(255,255,255,0.07)' }}
+    >
+      <div className="flex items-center justify-between mb-1">
+        <div className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">🚀 Fleets</div>
+        <span className="text-[9px] font-mono text-slate-600">{fleets.length} fleet{fleets.length !== 1 ? 's' : ''}</span>
+      </div>
+      {fleets.map(fleet => {
+        const sysName = galaxy ? (() => {
+          try { return getSystemById(galaxy.seed, fleet.currentSystemId).name; } catch { return fleet.currentSystemId; }
+        })() : fleet.currentSystemId;
+        const status = activityLabel(fleet);
+        const hullPct = fleet.shipIds.length > 0
+          ? fleet.shipIds.reduce((sum, sid) => {
+              const ship = state.systems.fleet.ships[sid];
+              return sum + (ship ? (ship.hullDamage ?? 0) : 0);
+            }, 0) / fleet.shipIds.length
+          : 0;
+        return (
+          <div key={fleet.id} className="flex items-center gap-2 py-1.5 px-2 rounded-lg" style={{ background: 'rgba(255,255,255,0.02)' }}>
+            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${status.dot}`} />
+            <NavTag entityType="fleet" entityId={fleet.id} label={fleet.name} />
+            <span className="text-[9px] font-mono shrink-0" style={{ color: status.color }}>{status.text}</span>
+            <span className="flex-1" />
+            {hullPct > 0 && (
+              <span className={`text-[8px] font-mono shrink-0 ${hullPct > 50 ? 'text-rose-400' : hullPct > 20 ? 'text-amber-400' : 'text-slate-600'}`}>
+                {Math.round(hullPct)}% hull dmg
+              </span>
+            )}
+            <span className="text-[9px] text-slate-600 shrink-0">
+              <NavTag entityType="system" entityId={fleet.currentSystemId} label={sysName} />
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── Resource income card ─────────────────────────────────────────────────────
+
+function ResourceIncomeCard() {
+  const rates  = useResourceRates();
+  const state  = useGameStore(s => s.state);
+
+  // Gather ore rates from active belts
+  const oreEntries: Array<{ id: string; rate: number }> = [];
+  for (const [beltId, active] of Object.entries(state.systems.mining.targets)) {
+    if (!active) continue;
+    const def = ORE_BELTS[beltId];
+    if (!def) continue;
+    for (const o of def.outputs) {
+      const existing = oreEntries.find(e => e.id === o.resourceId);
+      if (existing) existing.rate += rates[o.resourceId] ?? 0;
+      else oreEntries.push({ id: o.resourceId, rate: rates[o.resourceId] ?? 0 });
+    }
+  }
+
+  const creditsRate = rates['credits'] ?? 0;
+
+  if (oreEntries.length === 0 && creditsRate === 0) return null;
+
+  return (
+    <div
+      className="rounded-xl px-4 py-3 flex flex-wrap gap-3"
+      style={{ background: 'rgba(3,8,20,0.55)', border: '1px solid rgba(255,255,255,0.05)' }}
+    >
+      <span className="text-[9px] text-slate-600 uppercase tracking-widest self-center w-full sm:w-auto">Income / sec</span>
+      {oreEntries.map(({ id, rate }) => (
+        <div key={id} className="flex items-center gap-1.5">
+          <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 shrink-0" />
+          <span className="text-[10px] text-slate-400">{RESOURCE_REGISTRY[id]?.name ?? id}</span>
+          <span className="text-[10px] font-mono text-cyan-300">+{rate.toFixed(2)}/s</span>
+        </div>
+      ))}
+      {creditsRate > 0 && (
+        <div className="flex items-center gap-1.5">
+          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />
+          <span className="text-[10px] text-slate-400">Credits</span>
+          <span className="text-[10px] font-mono text-amber-300">+{formatCredits(creditsRate)}/s</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main panel ───────────────────────────────────────────────────────────────
 
 export function OverviewPanel() {
@@ -487,12 +593,14 @@ export function OverviewPanel() {
 
       <PilotCard />
       <ActiveSkillCard />
+      <ResourceIncomeCard />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <MiningCard />
         <ManufacturingCard />
       </div>
 
+      <FleetStatusCard />
       <StatsRow />
       <DiscoveriesCard />
       <CombatLogCard />
