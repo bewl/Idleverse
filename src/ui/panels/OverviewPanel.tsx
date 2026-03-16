@@ -12,6 +12,7 @@ import { NavTag } from '@/ui/components/NavTag';
 import { getStationInSystem } from '@/game/systems/factions/faction.logic';
 import { getSystemById } from '@/game/galaxy/galaxy.gen';
 import { computeFleetCargoCapacity } from '@/game/systems/fleet/fleet.logic';
+import { getFleetStoredCargo, getFleetStorageCapacity, getOperationalFleetShipIds } from '@/game/systems/fleet/wings.logic';
 
 import type { AnomalyType } from '@/types/game.types';
 
@@ -177,8 +178,8 @@ function AlertsCard() {
 
   for (const fleet of fleets) {
     // Cargo ≥80% with no haul order
-    const cargoUsed = Object.values(fleet.cargoHold).reduce((sum, amt) => sum + amt, 0);
-    const cargoCap = computeFleetCargoCapacity(fleet, ships);
+    const cargoUsed = getFleetStoredCargo(fleet);
+    const cargoCap = getFleetStorageCapacity(fleet, ships, state.systems.fleet.pilots);
     const cargoFill = cargoCap > 0 ? (cargoUsed / cargoCap) * 100 : 0;
 
     if (cargoFill >= 80 && fleet.fleetOrder === null) {
@@ -194,9 +195,10 @@ function AlertsCard() {
     }
 
     // Idle with ships
-    if (fleet.shipIds.length > 0 && fleet.fleetOrder === null && !fleet.combatOrder) {
-      const anyMining = fleet.shipIds.some(sid => ships[sid]?.assignedBeltId);
-      if (!anyMining) {
+    const operationalShipIds = getOperationalFleetShipIds(fleet);
+    if (operationalShipIds.length > 0 && fleet.fleetOrder === null && !fleet.combatOrder) {
+      const anyMining = operationalShipIds.some(sid => ships[sid]?.assignedBeltId);
+      if (!anyMining && !fleet.isScanning) {
         alerts.push({ type: 'idle', fleetId: fleet.id, fleetName: fleet.name, detail: 'No orders' });
       }
     }
@@ -526,6 +528,7 @@ function FleetStatusCard() {
           try { return getSystemById(galaxy.seed, fleet.currentSystemId).name; } catch { return fleet.currentSystemId; }
         })() : fleet.currentSystemId;
         const status = activityLabel(fleet);
+        const operationalShipIds = getOperationalFleetShipIds(fleet);
         const hullPct = fleet.shipIds.length > 0
           ? fleet.shipIds.reduce((sum, sid) => {
               const ship = ships[sid];
@@ -534,8 +537,8 @@ function FleetStatusCard() {
           : 0;
 
         // Cargo fill %
-        const cargoUsed = Object.values(fleet.cargoHold).reduce((sum, amt) => sum + amt, 0);
-        const cargoCap = computeFleetCargoCapacity(fleet, ships);
+        const cargoUsed = getFleetStoredCargo(fleet);
+        const cargoCap = getFleetStorageCapacity(fleet, ships, state.systems.fleet.pilots);
         const cargoFillPct = cargoCap > 0 ? Math.round((cargoUsed / cargoCap) * 100) : 0;
 
         return (
@@ -548,6 +551,9 @@ function FleetStatusCard() {
                 cargo {cargoFillPct}%
               </span>
             )}
+            <span className="text-[8px] font-mono text-slate-600 shrink-0">
+              ops {operationalShipIds.length}/{fleet.shipIds.length}
+            </span>
             <span className="flex-1" />
             {hullPct > 0 && (
               <span className={`text-[8px] font-mono shrink-0 ${hullPct > 50 ? 'text-rose-400' : hullPct > 20 ? 'text-amber-400' : 'text-slate-600'}`}>

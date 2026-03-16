@@ -100,9 +100,10 @@ src/
       energy/       — stub
       exploration/  — implemented in fleet/exploration.logic.ts
       factions/     — faction.config.ts, rep tracking, station generation
-      fleet/        — fleet.config.ts, fleet.logic.ts, fleet.tick.ts,
+      fleet/        — commander.config.ts, commander.logic.ts,
+      |               fleet.config.ts, fleet.logic.ts, fleet.tick.ts,
       |               fleet.orders.ts, fleet.gen.ts, pilot.logic.ts,
-      |               exploration.logic.ts
+      |               exploration.logic.ts, wings.logic.ts
       manufacturing/ — manufacturing.config.ts, manufacturing.logic.ts (T1 + T2 + research)
       market/       — market.config.ts, market.logic.ts (dynamic pricing + trade routes)
       mining/       — mining.config.ts, mining.logic.ts, mining.tick.ts
@@ -329,26 +330,31 @@ Actual top-level GameState shape (from `src/types/game.types.ts`):
 
 ```ts
 interface GameState {
-  version: number;       // save migration version
-  lastUpdatedAt: number; // unix-ms, used for offline catch-up
+  version: number;
+  lastUpdatedAt: number;
+  corp: CorpState;
+  pilot?: PilotState;    // legacy migration field only
   resources: Record<string, number>;
-  modifiers: Record<string, number>;  // additive bonuses from skills/modules
-  unlocks: Record<string, boolean>;
   systems: {
+    skills: SkillsState;
     mining: MiningState;
     reprocessing: ReprocessingState;
     manufacturing: ManufacturingState;
-    skills: SkillsState;
     market: MarketState;
-    fleet: FleetState;   // ships, pilots, named fleets, combat log
+    fleet: FleetState;
+    structures: StructuresState;
+    factions: FactionsState;
   };
-  galaxy: GalaxyState;   // systems, connections, npcGroupStates, visited
-  factions: FactionsState;
-  combat: { log: CombatLogEntry[] };
+  unlocks: Record<string, boolean>;
+  modifiers: Record<string, number>;
+  settings: GameSettings;
+  galaxy: GalaxyState;
 }
 ```
 
 Avoid deeply tangled state relationships when possible.
+
+Fleet state now includes fleet commanders, wing commanders, hauling-wing cargo holds, and typed `wings` on each `PlayerFleet`. New-game defaults in `src/stores/initialState.ts` seed a starter fleet, starter ship, Corp HQ, and an initial populated mining wing so the opening state is immediately operational.
 
 ## Tick / Simulation Model
 

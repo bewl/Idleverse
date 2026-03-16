@@ -137,12 +137,58 @@ export function createInitialState(): GameState {
       },
 
       fleet: {
-        ships: {},
+        ships: {
+          'ship-starter': {
+            id: 'ship-starter',
+            shipDefinitionId: 'mining-frigate',
+            customName: 'Starter',
+            activity: 'mining',
+            assignedBeltId: 'belt-ferrock',
+            assignedPilotId: 'pilot-0',
+            systemId: 'home',
+            fittedModules: { high: [], mid: [], low: [] },
+            deployedAt: Date.now(),
+            fleetOrder: null,
+            fleetId: 'fleet-starter',
+            role: 'unassigned',
+            hullDamage: 0,
+          },
+        },
         pilots: {
-          'pilot-0': generateFoundingPilot(DEFAULT_GALAXY_SEED),
+          'pilot-0': {
+            ...generateFoundingPilot(DEFAULT_GALAXY_SEED),
+            assignedShipId: 'ship-starter',
+            status: 'active',
+            commandSkills: { levels: {}, queue: [], activeSkillId: null, activeProgress: 0 },
+          },
         },
         recruitmentOffers: [],
-        fleets: {},
+        fleets: {
+          'fleet-starter': {
+            id: 'fleet-starter',
+            name: 'Mining Wing Alpha',
+            shipIds: ['ship-starter'],
+            currentSystemId: 'home',
+            fleetOrder: null,
+            maxJumpRangeLY: 5,
+            doctrine: 'balanced',
+            combatOrder: null,
+            isScanning: false,
+            cargoHold: {},
+            commanderId: null,
+            wings: [{
+              id: 'wing-starter-mining',
+              name: 'Starter Mining Wing',
+              type: 'mining',
+              shipIds: ['ship-starter'],
+              commanderId: null,
+              cargoHold: {},
+              escortWingId: null,
+              isDispatched: false,
+              haulingOriginSystemId: null,
+            }],
+          },
+        },
         maxFleets: 5,
         combatLog: [],
         tradeRoutes: [],
@@ -162,8 +208,8 @@ export function createInitialState(): GameState {
         },
         dockedStationId: null,
         outposts: {},
-        homeStationId: null,
-        homeStationSystemId: null,
+        homeStationId: 'station-home',
+        homeStationSystemId: 'home',
         registeredStations: [],
       },
     },
@@ -171,6 +217,7 @@ export function createInitialState(): GameState {
     unlocks: {
       'system-skills':   true,
       'system-mining':   true,
+      'system-fleet':    true,  // granted at start — player has a starter fleet
       // All others unlock via skill training
     },
 

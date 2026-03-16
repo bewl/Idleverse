@@ -3,8 +3,8 @@ import { ORE_BELTS } from '@/game/systems/mining/mining.config';
 import { formatResourceAmount, RESOURCE_REGISTRY } from '@/game/resources/resourceRegistry';
 import { NavTag } from '@/ui/components/NavTag';
 import { getSystemById } from '@/game/galaxy/galaxy.gen';
-import { computeFleetCargoCapacity } from '@/game/systems/fleet/fleet.logic';
 import type { PlayerFleet } from '@/types/game.types';
+import { getFleetStorageCapacity, getFleetStoredCargo, getOperationalFleetShipIds } from '@/game/systems/fleet/wings.logic';
 
 // ─── Tier color helper ───────────────────────────────────────────────────────
 
@@ -25,11 +25,15 @@ function secLabel(sec: string) {
 function FleetMiningCard({ fleet }: { fleet: PlayerFleet }) {
   const state = useGameStore(s => s.state);
   const issueHaul = useGameStore(s => s.issueFleetGroupOrder);
+  const dispatchHaulingWingToHQ = useGameStore(s => s.dispatchHaulingWingToHQ);
   const ships = state.systems.fleet.ships;
   const galaxy = state.galaxy;
+  const operationalShipIds = new Set(getOperationalFleetShipIds(fleet));
+  const haulingWings = (fleet.wings ?? []).filter(wing => wing.type === 'hauling');
 
   // Mining ships in this fleet
   const miningShips = fleet.shipIds
+    .filter(sid => operationalShipIds.has(sid))
     .map(sid => ships[sid])
     .filter(ship => ship && ship.assignedBeltId);
 
@@ -39,8 +43,8 @@ function FleetMiningCard({ fleet }: { fleet: PlayerFleet }) {
   const system = galaxy ? getSystemById(galaxy.seed, fleet.currentSystemId) : null;
 
   // Cargo stats
-  const totalCargoUsed = Object.values(fleet.cargoHold).reduce((sum, amt) => sum + amt, 0);
-  const capacity = computeFleetCargoCapacity(fleet, ships);
+  const totalCargoUsed = getFleetStoredCargo(fleet);
+  const capacity = getFleetStorageCapacity(fleet, ships, state.systems.fleet.pilots);
   const fillPct = capacity > 0 ? Math.min(100, (totalCargoUsed / capacity) * 100) : 0;
 
   // Belts active in this fleet
@@ -57,7 +61,9 @@ function FleetMiningCard({ fleet }: { fleet: PlayerFleet }) {
     }
   }
 
-  const canHaul = state.systems.factions.homeStationSystemId !== null && totalCargoUsed > 0;
+  const canHaul = haulingWings.length === 1
+    ? !haulingWings[0].isDispatched && state.systems.factions.homeStationSystemId !== null && state.systems.factions.homeStationSystemId !== fleet.currentSystemId && totalCargoUsed > 0
+    : haulingWings.length === 0 && state.systems.factions.homeStationSystemId !== null && state.systems.factions.homeStationSystemId !== fleet.currentSystemId && totalCargoUsed > 0;
 
   return (
     <div
@@ -88,7 +94,7 @@ function FleetMiningCard({ fleet }: { fleet: PlayerFleet }) {
             </>
           )}
         </div>
-        <div className="text-xs font-mono text-cyan-400">{miningShips.length} mining</div>
+        <div className="text-xs font-mono text-cyan-400">{miningShips.length} mining · {operationalShipIds.size}/{fleet.shipIds.length} operational</div>
       </div>
 
       {/* Active belts */}
@@ -135,7 +141,11 @@ function FleetMiningCard({ fleet }: { fleet: PlayerFleet }) {
         <button
           onClick={() => {
             if (state.systems.factions.homeStationSystemId) {
-              issueHaul(fleet.id, state.systems.factions.homeStationSystemId);
+              if (haulingWings.length === 1) {
+                dispatchHaulingWingToHQ(fleet.id, haulingWings[0].id);
+              } else {
+                issueHaul(fleet.id, state.systems.factions.homeStationSystemId);
+              }
             }
           }}
           className="text-[10px] px-3 py-1.5 rounded border border-cyan-700/40 bg-cyan-900/20 text-cyan-400 hover:bg-cyan-800/30 transition-all"
@@ -155,7 +165,9 @@ export function MiningPanel() {
 
   // Filter fleets that have ≥1 ship assigned to a belt
   const miningFleets = fleets.filter(fleet => {
+    const operationalShipIds = new Set(getOperationalFleetShipIds(fleet));
     return fleet.shipIds.some(sid => {
+      if (!operationalShipIds.has(sid)) return false;
       const ship = state.systems.fleet.ships[sid];
       return ship && ship.assignedBeltId;
     });
@@ -164,6 +176,7 @@ export function MiningPanel() {
   // Compute totals
   const totalOreRate = miningFleets.reduce((sum, fleet) => {
     const miningShips = fleet.shipIds
+      .filter(sid => getOperationalFleetShipIds(fleet).includes(sid))
       .map(sid => state.systems.fleet.ships[sid])
       .filter(ship => ship && ship.assignedBeltId);
     return sum + miningShips.reduce((shipSum, ship) => {
@@ -175,8 +188,8 @@ export function MiningPanel() {
 
   const avgCargoFill = miningFleets.length > 0
     ? miningFleets.reduce((sum, fleet) => {
-        const used = Object.values(fleet.cargoHold).reduce((a, b) => a + b, 0);
-        const cap = computeFleetCargoCapacity(fleet, state.systems.fleet.ships);
+        const used = getFleetStoredCargo(fleet);
+        const cap = getFleetStorageCapacity(fleet, state.systems.fleet.ships, state.systems.fleet.pilots);
         return sum + (cap > 0 ? (used / cap) * 100 : 0);
       }, 0) / miningFleets.length
     : 0;

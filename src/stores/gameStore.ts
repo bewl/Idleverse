@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { GameState, OfflineSummary, ManufacturingJob, SkillQueueEntry, ReprocessingJob, FleetActivity, PilotTrainingFocus } from '@/types/game.types';
+import type { GameState, OfflineSummary, ManufacturingJob, SkillQueueEntry, ReprocessingJob, FleetActivity, PilotTrainingFocus, WingType } from '@/types/game.types';
 import type { FactionId, RouteSecurityFilter } from '@/types/faction.types';
 import { createInitialState } from './initialState';
 import { runTick } from '@/game/core/tickRunner';
@@ -15,7 +15,7 @@ import {
   buildUnlocksFromSkills,
 } from '@/game/systems/skills/skills.logic';
 import { upgradeCost } from '@/game/balance/constants';
-import { saveGame, loadGame } from '@/game/persistence/saveLoad';
+import { saveGame, loadGame, deleteSave } from '@/game/persistence/saveLoad';
 import { processOfflineProgress } from '@/game/offline/offlineCalc';
 import { calculateSellValue } from '@/game/systems/market/market.logic';
 import type { TradeRoute } from '@/types/game.types';
@@ -55,6 +55,8 @@ import {
   dequeuePilotSkill,
 } from '@/game/systems/fleet/pilot.logic';
 import { generatePilot, generateRecruitmentOffers } from '@/game/systems/fleet/fleet.gen';
+import { COMMANDER_SKILL_DEFINITIONS } from '@/game/systems/fleet/commander.config';
+import { dispatchHaulerWing, getOperationalFleetShipIds } from '@/game/systems/fleet/wings.logic';
 
 // ─── Store interface ───────────────────────────────────────────────────────
 
@@ -128,11 +130,18 @@ interface GameStore {
   movePlayerFleet: (fleetId: string, direction: 'up' | 'down') => void;
   issueFleetGroupOrder: (fleetId: string, destinationId: string, securityFilter?: RouteSecurityFilter, pauseOnArrival?: boolean) => boolean;
   cancelFleetGroupOrder: (fleetId: string) => boolean;
+  dispatchHaulingWingToHQ: (fleetId: string, wingId?: string) => boolean;
   setShipRole: (shipId: string, role: import('@/types/game.types').ShipRole) => boolean;
   setFleetDoctrine: (fleetId: string, doctrine: import('@/types/game.types').FleetDoctrine) => boolean;
   issuePatrolOrder: (fleetId: string) => boolean;
   issueCombatRaidOrder: (fleetId: string, npcGroupId: string) => boolean;
   cancelCombatOrder: (fleetId: string) => boolean;
+  createFleetWing: (fleetId: string, type: WingType, name: string) => boolean;
+  renameFleetWing: (fleetId: string, wingId: string, name: string) => boolean;
+  deleteFleetWing: (fleetId: string, wingId: string) => boolean;
+  designateWingCommander: (fleetId: string, wingId: string, pilotId: string | null) => boolean;
+  assignShipToWing: (fleetId: string, shipId: string, wingId: string | null) => boolean;
+  setWingEscort: (fleetId: string, wingId: string, escortWingId: string | null) => boolean;
 
   // Trade routes
   createTradeRoute: (params: {
@@ -170,6 +179,14 @@ interface GameStore {
   lootSite: (fleetId: string, anomalyId: string) => boolean;
   /** Activate a revealed ore-pocket anomaly to receive an immediate bonus ore yield. */
   activateOrePocket: (fleetId: string, anomalyId: string) => boolean;
+
+  // Fleet Commander
+  /** Designate a pilot (who must be in the fleet) as Fleet Commander. Pass null to remove. */
+  designateFleetCommander: (fleetId: string, pilotId: string | null) => boolean;
+  /** Add a command skill to a pilot's commander training queue. */
+  queueCommanderSkill: (pilotId: string, skillId: string, targetLevel: 1 | 2 | 3 | 4 | 5) => boolean;
+  /** Remove an entry from a pilot's commander skill training queue by index. */
+  removeCommanderSkillFromQueue: (pilotId: string, index: number) => void;
 
   // Persistence
   saveToStorage: () => void;
@@ -1024,6 +1041,22 @@ export const useGameStore = create<GameStore>((set, get) => ({
     return true;
   },
 
+  dispatchHaulingWingToHQ: (fleetId, wingId) => {
+    const { state } = get();
+    const homeSystemId = state.systems.factions.homeStationSystemId;
+    if (!homeSystemId) return false;
+    const fleet = state.systems.fleet.fleets[fleetId];
+    if (!fleet) return false;
+    if (fleet.fleetOrder) return false;
+    const targetWingId = wingId
+      ?? (fleet.wings ?? []).find(wing => wing.type === 'hauling' && !wing.isDispatched)?.id;
+    if (!targetWingId) return false;
+    const newState = dispatchHaulerWing(state, fleetId, targetWingId, homeSystemId);
+    if (!newState) return false;
+    set({ state: newState });
+    return true;
+  },
+
   cancelFleetGroupOrder: (fleetId) => {
     const newState = cancelFleetGroupOrder(get().state, fleetId);
     if (!newState) return false;
@@ -1276,6 +1309,332 @@ export const useGameStore = create<GameStore>((set, get) => ({
     return generateGalaxy(get().state.galaxy.seed);
   },
 
+  // ── Fleet Commander ───────────────────────────────────────────────────────
+
+  designateFleetCommander: (fleetId, pilotId) => {
+    const { state } = get();
+    const fleet = state.systems.fleet.fleets[fleetId];
+    if (!fleet) return false;
+
+    if (pilotId !== null) {
+      const pilot = state.systems.fleet.pilots[pilotId];
+      if (!pilot) return false;
+      const pilotShipId = pilot.assignedShipId;
+      const inFleet = pilotShipId && fleet.shipIds.includes(pilotShipId);
+      if (!inFleet) return false;
+    }
+
+    set({
+      state: {
+        ...state,
+        systems: {
+          ...state.systems,
+          fleet: {
+            ...state.systems.fleet,
+            fleets: {
+              ...state.systems.fleet.fleets,
+              [fleetId]: { ...fleet, commanderId: pilotId },
+            },
+          },
+        },
+      },
+    });
+    return true;
+  },
+
+  queueCommanderSkill: (pilotId, skillId, targetLevel) => {
+    const { state } = get();
+    const pilot = state.systems.fleet.pilots[pilotId];
+    if (!pilot) return false;
+
+    if (!COMMANDER_SKILL_DEFINITIONS[skillId]) return false;
+
+    const currentLevel = pilot.commandSkills?.levels[skillId] ?? 0;
+    if (targetLevel <= currentLevel) return false;
+
+    const existing = pilot.commandSkills?.queue ?? [];
+    if (existing.some(e => e.skillId === skillId && e.targetLevel === targetLevel)) return false;
+
+    const newQueue = [...existing, { skillId, targetLevel }];
+    const cs = pilot.commandSkills ?? { levels: {}, queue: [], activeSkillId: null, activeProgress: 0 };
+
+    set({
+      state: {
+        ...state,
+        systems: {
+          ...state.systems,
+          fleet: {
+            ...state.systems.fleet,
+            pilots: {
+              ...state.systems.fleet.pilots,
+              [pilotId]: {
+                ...pilot,
+                commandSkills: {
+                  ...cs,
+                  queue: newQueue,
+                  activeSkillId: cs.activeSkillId ?? skillId,
+                  activeProgress: cs.activeSkillId ? cs.activeProgress : 0,
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+    return true;
+  },
+
+  removeCommanderSkillFromQueue: (pilotId, index) => {
+    const { state } = get();
+    const pilot = state.systems.fleet.pilots[pilotId];
+    if (!pilot) return;
+    const cs = pilot.commandSkills ?? { levels: {}, queue: [], activeSkillId: null, activeProgress: 0 };
+    const newQueue = cs.queue.filter((_, i) => i !== index);
+    set({
+      state: {
+        ...state,
+        systems: {
+          ...state.systems,
+          fleet: {
+            ...state.systems.fleet,
+            pilots: {
+              ...state.systems.fleet.pilots,
+              [pilotId]: { ...pilot, commandSkills: { ...cs, queue: newQueue } },
+            },
+          },
+        },
+      },
+    });
+  },
+
+  createFleetWing: (fleetId, type, name) => {
+    const { state } = get();
+    const fleet = state.systems.fleet.fleets[fleetId];
+    if (!fleet) return false;
+    if (fleet.fleetOrder) return false;
+
+    const wingId = `wing-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+    const newWing = {
+      id: wingId,
+      name: name.trim() || `${type[0].toUpperCase()}${type.slice(1)} Wing`,
+      type,
+      shipIds: [],
+      commanderId: null,
+      cargoHold: {},
+      escortWingId: null,
+      isDispatched: false,
+      haulingOriginSystemId: null,
+    };
+
+    set({
+      state: {
+        ...state,
+        systems: {
+          ...state.systems,
+          fleet: {
+            ...state.systems.fleet,
+            fleets: {
+              ...state.systems.fleet.fleets,
+              [fleetId]: { ...fleet, wings: [...(fleet.wings ?? []), newWing] },
+            },
+          },
+        },
+      },
+    });
+    return true;
+  },
+
+  renameFleetWing: (fleetId, wingId, name) => {
+    const { state } = get();
+    const fleet = state.systems.fleet.fleets[fleetId];
+    if (!fleet) return false;
+    if (fleet.fleetOrder) return false;
+
+    const trimmed = name.trim();
+    if (!trimmed) return false;
+
+    const nextWings = (fleet.wings ?? []).map(wing =>
+      wing.id === wingId ? { ...wing, name: trimmed } : wing,
+    );
+    if (nextWings.every(wing => wing.id !== wingId)) return false;
+
+    set({
+      state: {
+        ...state,
+        systems: {
+          ...state.systems,
+          fleet: {
+            ...state.systems.fleet,
+            fleets: {
+              ...state.systems.fleet.fleets,
+              [fleetId]: { ...fleet, wings: nextWings },
+            },
+          },
+        },
+      },
+    });
+    return true;
+  },
+
+  deleteFleetWing: (fleetId, wingId) => {
+    const { state } = get();
+    const fleet = state.systems.fleet.fleets[fleetId];
+    if (!fleet) return false;
+    if (fleet.fleetOrder) return false;
+
+    const targetWing = (fleet.wings ?? []).find(wing => wing.id === wingId);
+    if (!targetWing) return false;
+    if (targetWing.isDispatched) return false;
+
+    const nextWings = (fleet.wings ?? [])
+      .filter(wing => wing.id !== wingId)
+      .map(wing => wing.escortWingId === wingId ? { ...wing, escortWingId: null } : wing);
+    const nextCargoHold = { ...fleet.cargoHold };
+    for (const [resourceId, amount] of Object.entries(targetWing.cargoHold ?? {})) {
+      if (amount > 0) nextCargoHold[resourceId] = (nextCargoHold[resourceId] ?? 0) + amount;
+    }
+
+    set({
+      state: {
+        ...state,
+        systems: {
+          ...state.systems,
+          fleet: {
+            ...state.systems.fleet,
+            fleets: {
+              ...state.systems.fleet.fleets,
+              [fleetId]: { ...fleet, cargoHold: nextCargoHold, wings: nextWings },
+            },
+          },
+        },
+      },
+    });
+    return true;
+  },
+
+  designateWingCommander: (fleetId, wingId, pilotId) => {
+    const { state } = get();
+    const fleet = state.systems.fleet.fleets[fleetId];
+    if (!fleet) return false;
+    if (fleet.fleetOrder) return false;
+
+    const targetWing = (fleet.wings ?? []).find(wing => wing.id === wingId);
+    if (!targetWing || targetWing.isDispatched) return false;
+
+    if (pilotId !== null) {
+      const pilot = state.systems.fleet.pilots[pilotId];
+      if (!pilot?.assignedShipId) return false;
+      if (!targetWing.shipIds.includes(pilot.assignedShipId)) return false;
+    }
+
+    const nextWings = (fleet.wings ?? []).map(wing => {
+      if (pilotId !== null && wing.commanderId === pilotId) {
+        return wing.id === wingId ? { ...wing, commanderId: pilotId } : { ...wing, commanderId: null };
+      }
+      return wing.id === wingId ? { ...wing, commanderId: pilotId } : wing;
+    });
+
+    set({
+      state: {
+        ...state,
+        systems: {
+          ...state.systems,
+          fleet: {
+            ...state.systems.fleet,
+            fleets: {
+              ...state.systems.fleet.fleets,
+              [fleetId]: { ...fleet, wings: nextWings },
+            },
+          },
+        },
+      },
+    });
+    return true;
+  },
+
+  assignShipToWing: (fleetId, shipId, wingId) => {
+    const { state } = get();
+    const fleet = state.systems.fleet.fleets[fleetId];
+    if (!fleet) return false;
+    if (fleet.fleetOrder) return false;
+    if (!fleet.shipIds.includes(shipId)) return false;
+    const wings = fleet.wings ?? [];
+    const sourceWing = wings.find(wing => wing.shipIds.includes(shipId));
+    const targetWing = wingId !== null ? wings.find(wing => wing.id === wingId) : null;
+    if (wingId !== null && !targetWing) return false;
+    if (sourceWing?.isDispatched || targetWing?.isDispatched) return false;
+
+    const ship = state.systems.fleet.ships[shipId];
+    if (ship?.fleetOrder) return false;
+
+    const nextWings = wings.map(wing => {
+      const withoutShip = wing.shipIds.filter(id => id !== shipId);
+      const nextShipIds = wing.id === wingId ? [...withoutShip, shipId] : withoutShip;
+      const commanderShipId = wing.commanderId ? state.systems.fleet.pilots[wing.commanderId]?.assignedShipId : null;
+      return {
+        ...wing,
+        shipIds: nextShipIds,
+        commanderId: commanderShipId && nextShipIds.includes(commanderShipId) ? wing.commanderId : null,
+      };
+    });
+
+    set({
+      state: {
+        ...state,
+        systems: {
+          ...state.systems,
+          fleet: {
+            ...state.systems.fleet,
+            fleets: {
+              ...state.systems.fleet.fleets,
+              [fleetId]: { ...fleet, wings: nextWings },
+            },
+          },
+        },
+      },
+    });
+    return true;
+  },
+
+  setWingEscort: (fleetId, wingId, escortWingId) => {
+    const { state } = get();
+    const fleet = state.systems.fleet.fleets[fleetId];
+    if (!fleet) return false;
+    if (fleet.fleetOrder) return false;
+
+    const wings = fleet.wings ?? [];
+    const targetWing = wings.find(wing => wing.id === wingId);
+    if (!targetWing) return false;
+    if (targetWing.isDispatched) return false;
+    if (escortWingId === wingId) return false;
+    if (escortWingId !== null) {
+      const escortWing = wings.find(wing => wing.id === escortWingId);
+      if (!escortWing || escortWing.type !== 'combat' || escortWing.isDispatched) return false;
+      if (wings.some(wing => wing.id !== wingId && wing.escortWingId === escortWingId)) return false;
+    }
+
+    const nextWings = wings.map(wing =>
+      wing.id === wingId ? { ...wing, escortWingId } : wing,
+    );
+
+    set({
+      state: {
+        ...state,
+        systems: {
+          ...state.systems,
+          fleet: {
+            ...state.systems.fleet,
+            fleets: {
+              ...state.systems.fleet.fleets,
+              [fleetId]: { ...fleet, wings: nextWings },
+            },
+          },
+        },
+      },
+    });
+    return true;
+  },
+
   // ── Exploration ───────────────────────────────────────────────────────────
 
   setFleetScanning: (fleetId, scanning) => {
@@ -1356,7 +1715,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
     if (!anomaly || !anomaly.revealed || anomaly.depleted || anomaly.type !== 'ore-pocket') return false;
 
     // Award a bonus ore haul proportional to the fleet's mining power
-    const shipCount = fleet.shipIds.length;
+    const shipCount = getOperationalFleetShipIds(fleet).length;
     const bonusOre  = 200 + shipCount * 80;
     const newResources = { ...state.resources };
     newResources['ferrite'] = (newResources['ferrite'] ?? 0) + bonusOre;
@@ -1448,7 +1807,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       patchedSystems.manufacturing = { ...patchedSystems.manufacturing, copyJobs: [] };
     }
 
-    // Patch fleet Phase 4 — discoveries feed, isScanning flag on every fleet; FC-1b cargoHold
+    // Patch fleet Phase 4 — discoveries feed, isScanning flag on every fleet; FC-1b cargoHold; FC-3 wings
     if (!patchedSystems.fleet.discoveries) {
       patchedSystems.fleet = { ...patchedSystems.fleet, discoveries: [] };
     }
@@ -1456,6 +1815,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
     for (const [id, fleet] of Object.entries(patchedSystems.fleet.fleets)) {
       let f = fleet.isScanning === undefined ? { ...fleet, isScanning: false } : fleet;
       if (f.cargoHold === undefined) f = { ...f, cargoHold: {} };
+      if (!Array.isArray(f.wings)) f = { ...f, wings: [] };
+      f = {
+        ...f,
+        wings: (f.wings ?? []).map(wing => ({ ...wing, commanderId: wing.commanderId ?? null, cargoHold: wing.cargoHold ?? {} })),
+      };
       patchedFleets4[id] = f;
     }
     patchedSystems.fleet = { ...patchedSystems.fleet, fleets: patchedFleets4 };
@@ -1499,7 +1863,6 @@ export const useGameStore = create<GameStore>((set, get) => ({
   dismissOfflineSummary: () => set({ offlineSummary: null }),
 
   clearSave: () => {
-    const { deleteSave } = require('@/game/persistence/saveLoad') as typeof import('@/game/persistence/saveLoad');
     deleteSave();
     set({ state: createInitialState(), offlineSummary: null });
   },

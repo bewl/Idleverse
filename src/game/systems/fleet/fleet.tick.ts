@@ -1,8 +1,11 @@
 import type { GameState, PilotInstance, FleetState } from '@/types/game.types';
 import { HULL_DEFINITIONS, MODULE_DEFINITIONS } from './fleet.config';
 import { tickPilotSkillTraining, tickMorale, getPilotMoraleMultiplier, getPilotMiningBonus } from './pilot.logic';
+import { tickCommanderSkillTraining, getCombinedCommanderBonus } from './commander.logic';
 import { IDLE_REPAIR_RATE_PER_SEC } from '@/game/balance/constants';
 import { ORE_BELTS } from '@/game/systems/mining/mining.config';
+import { getBeltRichnessForSystem } from '@/game/systems/mining/mining.logic';
+import { getOperationalFleetShipIds, getWingByShipId } from './wings.logic';
 
 // ─── Tick result ───────────────────────────────────────────────────────────
 
@@ -13,6 +16,12 @@ export interface FleetTickResult {
    * Apply each fleet's deltas to its cargoHold in tickRunner.
    */
   oreDeltas: Record<string, Record<string, number>>;
+  /**
+   * Belt pool units consumed by fleet mining this tick.
+   * beltId → total units removed from pool.
+   * Applied in tickRunner step 8 with depletion/respawn handling.
+   */
+  beltPoolDeltas: Record<string, number>;
   /** Updated fleet state (pilot skills, morale, statuses). */
   newFleetState: FleetState;
 }
@@ -44,9 +53,22 @@ function getModuleBonus(ship: import('@/types/game.types').ShipInstance, effectK
 export function tickFleet(state: GameState, deltaSeconds: number): FleetTickResult {
   const fleet = state.systems.fleet;
   const oreDeltas: Record<string, Record<string, number>> = {};
+  const beltPoolDeltas: Record<string, number> = {};
 
   // Corp-wide mining skill multiplier (Mining, Astrogeology skills etc.)
   const corpSkillMult = 1 + (state.modifiers['mining-yield'] ?? 0);
+  const deepOreBonus  = 1 + (state.modifiers['deep-ore-yield'] ?? 0);
+  const beltRespawnAt = state.systems.mining.beltRespawnAt ?? {};
+
+  // Build map: pilotId → fleet for fast commander lookup.
+  // Wing commanders train command skills too; a fleet commander can also be a wing commander.
+  const commanderFleetMap = new Map<string, import('@/types/game.types').PlayerFleet>();
+  for (const f of Object.values(fleet.fleets)) {
+    if (f.commanderId) commanderFleetMap.set(f.commanderId, f);
+    for (const wing of f.wings ?? []) {
+      if (wing.commanderId) commanderFleetMap.set(wing.commanderId, f);
+    }
+  }
 
   const newPilots: Record<string, PilotInstance> = {};
 
@@ -54,6 +76,16 @@ export function tickFleet(state: GameState, deltaSeconds: number): FleetTickResu
   for (const [pilotId, pilot] of Object.entries(fleet.pilots)) {
     const skillResult = tickPilotSkillTraining(pilot, deltaSeconds);
     const newMorale   = tickMorale(pilot, deltaSeconds);
+
+    // Tick commander skill training if this pilot commands a fleet
+    const commandedFleet = commanderFleetMap.get(pilotId);
+    const commandResult = commandedFleet
+      ? tickCommanderSkillTraining(
+          { ...pilot, skills: skillResult.newSkillState, morale: newMorale },
+          commandedFleet,
+          deltaSeconds,
+        )
+      : null;
 
     // Accumulate stats if the pilot is flying a mining ship this tick
     let oreMinedDelta = 0;
@@ -74,6 +106,7 @@ export function tickFleet(state: GameState, deltaSeconds: number): FleetTickResu
       ...pilot,
       morale:     newMorale,
       skills:     skillResult.newSkillState,
+      commandSkills: commandResult ? commandResult.newCommandSkills : (pilot.commandSkills ?? { levels: {}, queue: [], activeSkillId: null, activeProgress: 0 }),
       experience: pilot.experience + deltaSeconds * (assignedShip?.activity !== 'idle' ? 1 : 0),
       stats: {
         ...pilot.stats,
@@ -86,6 +119,10 @@ export function tickFleet(state: GameState, deltaSeconds: number): FleetTickResu
   for (const ship of Object.values(fleet.ships)) {
     if (ship.activity !== 'mining') continue;
     if (!ship.assignedPilotId) continue;
+
+    const fleetGroupForShip = fleet.fleets[ship.fleetId ?? ''];
+    const shipWing = fleetGroupForShip ? getWingByShipId(fleetGroupForShip, ship.id) : null;
+    if (fleetGroupForShip && !shipWing) continue;
 
     const hull = HULL_DEFINITIONS[ship.shipDefinitionId];
     if (!hull) continue;
@@ -100,22 +137,48 @@ export function tickFleet(state: GameState, deltaSeconds: number): FleetTickResu
     const beltDef = ORE_BELTS[ship.assignedBeltId];
     if (!beltDef) continue;
 
+    // Skip belt if currently in respawn state
+    if ((beltRespawnAt[ship.assignedBeltId] ?? 0) > 0) continue;
+
     const hullMining   = hull.baseMiningBonus;
     const moduleMining = getModuleBonus(ship, 'mining-yield');
     const pilotMining  = getPilotMiningBonus(pilot);
     const moraleMult   = getPilotMoraleMultiplier(pilot);
 
+    // Belt richness from the fleet's current system
+    const fleetGroup = fleetGroupForShip;
+    const fleetSystemId = fleetGroup?.currentSystemId;
+    const richnessFactor = (fleetSystemId && state.galaxy)
+      ? getBeltRichnessForSystem(state.galaxy, ship.assignedBeltId, fleetSystemId)
+      : 1.0;
+
+    const isDeep     = beltDef.securityTier === 'lowsec' || beltDef.securityTier === 'nullsec';
+    const deepFactor = isDeep ? deepOreBonus : 1;
+
     // Total yield multiplier for this ship this tick
-    const yieldMultiplier = (hullMining + moduleMining + pilotMining) * moraleMult * corpSkillMult * deltaSeconds;
+    const yieldMultiplier = (hullMining + moduleMining + pilotMining) * moraleMult * corpSkillMult * richnessFactor * deepFactor * deltaSeconds;
+
+    // Apply commander mining bonus if this ship's fleet has a designated commander
+    const commanderMiningBonus = fleetGroupForShip
+      ? getCombinedCommanderBonus(newPilots, fleetGroupForShip, shipWing, 'mining-yield')
+      : 0;
+    const commanderMult = 1 + commanderMiningBonus;
 
     // Resolve actual ore outputs from belt definition
+    let tickTotal = 0;
     const fleetId = ship.fleetId ?? 'standalone';
     if (!oreDeltas[fleetId]) oreDeltas[fleetId] = {};
     for (const output of beltDef.outputs) {
-      const amount = output.baseRate * yieldMultiplier;
+      const amount = output.baseRate * yieldMultiplier * commanderMult;
       if (amount > 0) {
         oreDeltas[fleetId][output.resourceId] = (oreDeltas[fleetId][output.resourceId] ?? 0) + amount;
+        tickTotal += amount;
       }
+    }
+
+    // Accumulate pool consumption for depletion handling in tickRunner
+    if (tickTotal > 0) {
+      beltPoolDeltas[ship.assignedBeltId] = (beltPoolDeltas[ship.assignedBeltId] ?? 0) + tickTotal;
     }
   }
 
@@ -124,7 +187,7 @@ export function tickFleet(state: GameState, deltaSeconds: number): FleetTickResu
   const combatActiveShipIds = new Set<string>();
   for (const f of Object.values(fleet.fleets)) {
     if (f.combatOrder) {
-      for (const sid of f.shipIds) combatActiveShipIds.add(sid);
+      for (const sid of getOperationalFleetShipIds(f)) combatActiveShipIds.add(sid);
     }
   }
 
@@ -139,6 +202,7 @@ export function tickFleet(state: GameState, deltaSeconds: number): FleetTickResu
 
   return {
     oreDeltas,
+    beltPoolDeltas,
     newFleetState: {
       ...fleet,
       ships: repairedShips,

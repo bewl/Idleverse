@@ -13,12 +13,14 @@ import { useGameStore } from '@/stores/gameStore';
 import { useUiStore } from '@/stores/uiStore';
 import { getSystemById } from '@/game/galaxy/galaxy.gen';
 import { formatEta, getWarpProgress, warpEtaSeconds } from '@/game/galaxy/travel.logic';
-import { getCurrentSystemBeltIds, getBeltRichness } from '@/game/systems/mining/mining.logic';
+import { getBeltsForSystem, getBeltRichness } from '@/game/systems/mining/mining.logic';
 import { ORE_BELTS } from '@/game/systems/mining/mining.config';
 import { RESOURCE_REGISTRY } from '@/game/resources/resourceRegistry';
 import { getStationInSystem } from '@/game/systems/factions/faction.logic';
 import { NavTag } from '@/ui/components/NavTag';
 import { HULL_DEFINITIONS } from '@/game/systems/fleet/fleet.config';
+import { GameTooltip } from '@/ui/components/GameTooltip';
+import { SKILL_DEFINITIONS } from '@/game/systems/skills/skills.config';
 import type { CelestialBody } from '@/types/galaxy.types';
 import type { Anomaly, AnomalyType, PlayerFleet } from '@/types/game.types';
 
@@ -684,6 +686,9 @@ function BodyDetail({ body, inWarp, maxOrbit }: { body: CelestialBody; inWarp: b
             const isActive  = state.systems.mining.targets[beltId] ?? false;
             const respawnAt = state.systems.mining.beltRespawnAt[beltId] ?? 0;
             const isDepleted = respawnAt > 0 && state.lastUpdatedAt < respawnAt;
+            const req = def.requiredSkill;
+            const isLocked = req ? (state.systems.skills.levels[req.skillId] ?? 0) < req.minLevel : false;
+            const reqSkillName = req ? (SKILL_DEFINITIONS[req.skillId]?.name ?? req.skillId) : '';
             const resNames  = def.outputs.map(o => RESOURCE_REGISTRY[o.resourceId]?.name ?? o.resourceId).join(', ');
 
             return (
@@ -692,8 +697,9 @@ function BodyDetail({ body, inWarp, maxOrbit }: { body: CelestialBody; inWarp: b
                 style={{
                   padding: '7px 9px',
                   borderRadius: 5,
-                  border: isActive ? '1px solid rgba(34,211,238,0.3)' : '1px solid rgba(22,30,52,0.6)',
-                  background: isActive ? 'rgba(8,51,68,0.3)' : 'rgba(6,9,20,0.5)',
+                  border: isLocked ? '1px solid rgba(71,85,105,0.3)' : isActive ? '1px solid rgba(34,211,238,0.3)' : '1px solid rgba(22,30,52,0.6)',
+                  background: isLocked ? 'rgba(6,9,20,0.5)' : isActive ? 'rgba(8,51,68,0.3)' : 'rgba(6,9,20,0.5)',
+                  opacity: isLocked ? 0.7 : 1,
                   display: 'flex', flexDirection: 'column', gap: 4,
                 }}
               >
@@ -725,25 +731,47 @@ function BodyDetail({ body, inWarp, maxOrbit }: { body: CelestialBody; inWarp: b
                       </span>
                     );
                   })}
-                  <button
-                    disabled={inWarp || isDepleted}
-                    onClick={() => toggleBelt(beltId)}
-                    style={{
-                      marginLeft: 'auto',
-                      padding: '2px 8px', fontSize: 9, fontWeight: 700,
-                      border: isDepleted ? '1px solid rgba(30,41,59,0.5)'
-                        : isActive ? '1px solid rgba(248,113,113,0.4)' : '1px solid rgba(34,211,238,0.3)',
-                      borderRadius: 3,
-                      background: isDepleted ? 'rgba(15,23,42,0.3)'
-                        : isActive ? 'rgba(127,29,29,0.2)' : 'rgba(8,51,68,0.3)',
-                      color: isDepleted ? '#334155'
-                        : isActive ? '#f87171' : '#22d3ee',
-                      cursor: (inWarp || isDepleted) ? 'not-allowed' : 'pointer',
-                      opacity: inWarp ? 0.5 : 1,
-                    }}
-                  >
-                    {isDepleted ? 'Depleted' : isActive ? 'Stop' : 'Mine'}
-                  </button>
+                  {isLocked ? (
+                    <GameTooltip
+                      content={<span style={{ fontSize: 11 }}>Requires <strong>{reqSkillName}</strong> Lv {req!.minLevel}</span>}
+                      width={180}
+                    >
+                      <button
+                        disabled
+                        style={{
+                          marginLeft: 'auto',
+                          padding: '2px 8px', fontSize: 9, fontWeight: 700,
+                          border: '1px solid rgba(71,85,105,0.3)',
+                          borderRadius: 3,
+                          background: 'rgba(6,9,20,0.3)',
+                          color: '#475569',
+                          cursor: 'not-allowed',
+                        }}
+                      >
+                        🔒 Locked
+                      </button>
+                    </GameTooltip>
+                  ) : (
+                    <button
+                      disabled={inWarp || isDepleted}
+                      onClick={() => toggleBelt(beltId)}
+                      style={{
+                        marginLeft: 'auto',
+                        padding: '2px 8px', fontSize: 9, fontWeight: 700,
+                        border: isDepleted ? '1px solid rgba(30,41,59,0.5)'
+                          : isActive ? '1px solid rgba(248,113,113,0.4)' : '1px solid rgba(34,211,238,0.3)',
+                        borderRadius: 3,
+                        background: isDepleted ? 'rgba(15,23,42,0.3)'
+                          : isActive ? 'rgba(127,29,29,0.2)' : 'rgba(8,51,68,0.3)',
+                        color: isDepleted ? '#334155'
+                          : isActive ? '#f87171' : '#22d3ee',
+                        cursor: (inWarp || isDepleted) ? 'not-allowed' : 'pointer',
+                        opacity: inWarp ? 0.5 : 1,
+                      }}
+                    >
+                      {isDepleted ? 'Depleted' : isActive ? 'Stop' : 'Mine'}
+                    </button>
+                  )}
                 </div>
               </div>
             );
@@ -1100,7 +1128,7 @@ function SystemPanelInner() {
   const warpEta       = warp ? warpEtaSeconds(warp, Date.now()) : 0;
 
   // Available belt count for this system
-  const systemBeltIds = getCurrentSystemBeltIds(state);
+  const systemBeltIds = getBeltsForSystem(system.id, galaxy.seed);
   const activeBeltCount = systemBeltIds.filter(id => state.systems.mining.targets[id]).length;
 
   // Anomaly badge for the tab

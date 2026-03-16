@@ -22,7 +22,31 @@ export function loadGame(): SaveFile | null {
     if (!raw) return null;
     const save = JSON.parse(raw) as SaveFile;
     if (typeof save.version !== 'number') return null;
-    // Future: run version migrations here before returning
+    // Migrate: ensure all pilots have commandSkills (FC-2)
+    const fleetState = save.state?.systems?.fleet;
+    if (fleetState) {
+      for (const pilot of Object.values(fleetState.pilots ?? {}) as any[]) {
+        if (!pilot.commandSkills) {
+          pilot.commandSkills = { levels: {}, queue: [], activeSkillId: null, activeProgress: 0 };
+        }
+      }
+      for (const fleet of Object.values(fleetState.fleets ?? {}) as any[]) {
+        if (!('commanderId' in fleet)) {
+          fleet.commanderId = null;
+        }
+        if (!Array.isArray(fleet.wings)) {
+          fleet.wings = [];
+        }
+        for (const wing of fleet.wings) {
+          if (!('commanderId' in wing)) {
+            wing.commanderId = null;
+          }
+          if (!wing.cargoHold) {
+            wing.cargoHold = {};
+          }
+        }
+      }
+    }
     return save;
   } catch (e) {
     console.error('[Idleverse] Failed to load game:', e);

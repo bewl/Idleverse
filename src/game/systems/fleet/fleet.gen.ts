@@ -82,6 +82,7 @@ export function generateFoundingPilot(galaxySeed: number): PilotInstance {
     experience: 0,
     stats: { oreMinedTotal: 0, iskEarnedTotal: 0, systemsVisited: 1, combatKills: 0 },
     payrollPerDay: 0,
+    commandSkills: { levels: {}, queue: [], activeSkillId: null, activeProgress: 0 },
   };
 }
 
@@ -120,6 +121,7 @@ export function generatePilot(globalSeed: number, pilotSeed: number): PilotInsta
     experience: 0,
     stats: { oreMinedTotal: 0, iskEarnedTotal: 0, systemsVisited: 1, combatKills: 0 },
     payrollPerDay: randInt(rng, 1000, 5000),
+    commandSkills: { levels: {}, queue: [], activeSkillId: null, activeProgress: 0 },
   };
 }
 

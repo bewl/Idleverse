@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useGameStore } from '@/stores/gameStore';
-import type { PilotInstance, ShipInstance, PilotTrainingFocus, ShipRole, FleetDoctrine } from '@/types/game.types';
+import type { PilotInstance, ShipInstance, PilotTrainingFocus, ShipRole, FleetDoctrine, FleetWing, WingType, PlayerFleet } from '@/types/game.types';
 import { HULL_DEFINITIONS, PILOT_SKILL_FOCUS_TREES, DOCTRINE_DEFINITIONS, MODULE_DEFINITIONS } from '@/game/systems/fleet/fleet.config';
 import { SKILL_DEFINITIONS } from '@/game/systems/skills/skills.config';
 import {
@@ -15,6 +15,9 @@ import { generateGalaxy } from '@/game/galaxy/galaxy.gen';
 import type { RouteSecurityFilter } from '@/types/faction.types';
 import { NavTag } from '@/ui/components/NavTag';
 import { useUiStore } from '@/stores/uiStore';
+import { COMMANDER_SKILL_DEFINITIONS, COMMANDER_BONUS_LABELS } from '@/game/systems/fleet/commander.config';
+import { commanderSkillEtaSeconds, getCombinedCommanderBonus } from '@/game/systems/fleet/commander.logic';
+import { getFleetStoredCargo, getFleetStorageCapacity, getOperationalFleetShipIds, getWingCargoCapacity, getWingCargoTotals, getWingCargoUsed } from '@/game/systems/fleet/wings.logic';
 
 const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V'];
 
@@ -41,6 +44,12 @@ const FLEET_ROLE_COLOR: Record<ShipRole, string> = {
   tank: '#4ade80', dps: '#f87171', support: '#60a5fa', scout: '#a78bfa', unassigned: '#475569',
 };
 const FLEET_COLOURS = ['#a78bfa', '#fb923c', '#34d399', '#f472b6', '#60a5fa'];
+const WING_LABELS: Record<WingType, string> = {
+  mining: 'Mining', hauling: 'Hauling', combat: 'Combat', recon: 'Recon', industrial: 'Industrial',
+};
+const WING_TINT: Record<WingType, string> = {
+  mining: '#22d3ee', hauling: '#f59e0b', combat: '#f87171', recon: '#34d399', industrial: '#c084fc',
+};
 
 // ─── Role minibar ──────────────────────────────────────────────────────────
 
@@ -66,6 +75,257 @@ function RoleMinibar({ ships }: { ships: ShipInstance[] }) {
         <span className="text-[8px] font-mono px-1 rounded text-slate-500" title="Unassigned">
           ?{ships.filter(s => s.role === 'unassigned').length}
         </span>
+      )}
+    </div>
+  );
+}
+
+function WingRow({
+  fleetId,
+  fleet,
+  wing,
+  wings,
+  fleetShips,
+  allShips,
+  allPilots,
+  homeSystemId,
+  onRename,
+  onDelete,
+  onDesignateCommander,
+  onAssignShip,
+  onSetEscort,
+  onDispatch,
+}: {
+  fleetId: string;
+  fleet: PlayerFleet;
+  wing: FleetWing;
+  wings: FleetWing[];
+  fleetShips: ShipInstance[];
+  allShips: Record<string, ShipInstance>;
+  allPilots: Record<string, PilotInstance>;
+  homeSystemId: string | null;
+  onRename: (fleetId: string, wingId: string, name: string) => boolean;
+  onDelete: (fleetId: string, wingId: string) => boolean;
+  onDesignateCommander: (fleetId: string, wingId: string, pilotId: string | null) => boolean;
+  onAssignShip: (fleetId: string, shipId: string, wingId: string | null) => boolean;
+  onSetEscort: (fleetId: string, wingId: string, escortWingId: string | null) => boolean;
+  onDispatch: (fleetId: string, wingId: string) => boolean;
+}) {
+  const [expanded, setExpanded] = useState(wing.isDispatched);
+  const [editingName, setEditingName] = useState(false);
+  const [nameInput, setNameInput] = useState(wing.name);
+
+  useEffect(() => {
+    setNameInput(wing.name);
+  }, [wing.name]);
+
+  const wingShips = wing.shipIds.map(id => allShips[id]).filter(Boolean) as ShipInstance[];
+  const wingPilots = wingShips
+    .map(ship => ship.assignedPilotId ? allPilots[ship.assignedPilotId] : null)
+    .filter(Boolean) as PilotInstance[];
+  const wingCommander = wing.commanderId ? allPilots[wing.commanderId] ?? null : null;
+  const escortOptions = wings.filter(candidate => candidate.type === 'combat' && candidate.id !== wing.id);
+  const cargoCommanderBonus = getCombinedCommanderBonus(allPilots, fleet, wing, 'commander-cargo-capacity');
+  const haulingCapacity = wing.type === 'hauling' ? getWingCargoCapacity(wing, allShips, cargoCommanderBonus) : 0;
+  const haulingUsed = wing.type === 'hauling' ? getWingCargoUsed(wing) : 0;
+  const haulingPct = haulingCapacity > 0 ? haulingUsed / haulingCapacity : 0;
+  const wingLabel = WING_LABELS[wing.type];
+  const wingTint = WING_TINT[wing.type];
+  const isActive = wing.isDispatched;
+  const isPending = wing.type === 'hauling' && haulingPct >= 0.9 && !wing.isDispatched;
+  const isConfigured = wing.shipIds.length > 0 && !isActive && !isPending;
+  const dotClass = isActive
+    ? 'bg-cyan-400 animate-pulse'
+    : isConfigured
+      ? 'bg-emerald-400'
+      : isPending
+        ? 'bg-amber-400/70'
+        : 'bg-slate-600';
+
+  const saveName = () => {
+    const nextName = nameInput.trim();
+    if (!nextName) {
+      setNameInput(wing.name);
+      setEditingName(false);
+      return;
+    }
+    onRename(fleetId, wing.id, nextName);
+    setEditingName(false);
+  };
+
+  return (
+    <div className="rounded-md border overflow-hidden border-slate-700/20 bg-slate-950/25">
+      <div
+        className="flex items-center gap-1.5 px-2 py-1.5 cursor-pointer select-none hover:bg-white/[0.03] transition-colors"
+        onClick={() => setExpanded(value => !value)}
+      >
+        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dotClass}`} />
+        <span className="flex-1 min-w-0 truncate text-[11px] font-semibold" style={{ color: wingTint }}>
+          {wing.name}
+        </span>
+        <span className="text-[8px] px-1.5 py-0.5 rounded border text-slate-300 shrink-0" style={{ borderColor: wingTint + '44', background: wingTint + '11' }}>
+          {wingLabel}
+        </span>
+        <span className="text-[9px] font-mono text-slate-500 shrink-0">{wing.shipIds.length} ships</span>
+        {wing.type === 'hauling' && haulingCapacity > 0 && (
+          <span className="text-[9px] font-mono text-slate-500 shrink-0">
+            {Math.round(haulingUsed).toLocaleString()} / {Math.round(haulingCapacity).toLocaleString()} m³
+          </span>
+        )}
+        {wingCommander && (
+          <span className="text-[8px] text-slate-500 shrink-0">
+            cmdr {wingCommander.name}
+          </span>
+        )}
+        <span className="text-[9px] text-slate-500 shrink-0">
+          {wing.isDispatched ? 'hauling' : isPending ? 'ready' : wing.shipIds.length > 0 ? 'configured' : 'idle'}
+        </span>
+        <span className="text-[10px] text-slate-600 shrink-0">{expanded ? '▴' : '▾'}</span>
+        <button
+          onClick={e => { e.stopPropagation(); onDelete(fleetId, wing.id); }}
+          className="text-[10px] text-red-500/40 hover:text-red-300 transition-colors pl-1"
+          title={wing.isDispatched ? 'Wing cannot be deleted while dispatched' : 'Delete wing'}
+        >
+          ✕
+        </button>
+      </div>
+
+      {!expanded && wing.type === 'hauling' && haulingCapacity > 0 && (
+        <div className="px-2 pb-1.5">
+          <div className="flex-1 bg-slate-800/70 rounded-full h-1 overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all duration-500 ${wing.isDispatched ? 'bg-cyan-500/70' : haulingPct >= 0.9 ? 'bg-amber-600/60' : 'bg-emerald-500'}`}
+              style={{ width: `${Math.min(1, haulingPct) * 100}%` }}
+            />
+          </div>
+        </div>
+      )}
+
+      {expanded && (
+        <div className="flex flex-col gap-1.5 px-2 pb-2 pt-1 border-t border-slate-800/70">
+          <div className="flex items-center gap-2">
+            <span className="text-[8px] uppercase tracking-widest text-slate-500">Name</span>
+            {editingName ? (
+              <input
+                autoFocus
+                value={nameInput}
+                onChange={e => setNameInput(e.target.value)}
+                onBlur={saveName}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') saveName();
+                  if (e.key === 'Escape') {
+                    setNameInput(wing.name);
+                    setEditingName(false);
+                  }
+                }}
+                className="flex-1 min-w-0 text-[10px] font-semibold bg-transparent border-b border-slate-600 focus:outline-none focus:border-cyan-500"
+                style={{ color: wingTint }}
+                maxLength={32}
+              />
+            ) : (
+              <button
+                onClick={() => setEditingName(true)}
+                className="text-[10px] text-slate-300 hover:text-white text-left"
+              >
+                {wing.name}
+              </button>
+            )}
+          </div>
+
+          {wing.type === 'hauling' && haulingCapacity > 0 && (
+            <div className="flex flex-col gap-1">
+              <div className="flex items-center justify-between">
+                <span className="text-[8px] uppercase tracking-widest text-slate-500">Hold</span>
+                <span className="text-[9px] font-mono text-slate-500">
+                  {Math.round(haulingUsed).toLocaleString()} / {Math.round(haulingCapacity).toLocaleString()} m³
+                </span>
+              </div>
+              <div className="flex-1 bg-slate-800/70 rounded-full h-1 overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all duration-500 ${wing.isDispatched ? 'bg-cyan-500/70' : haulingPct >= 0.9 ? 'bg-amber-600/60' : 'bg-emerald-500'}`}
+                  style={{ width: `${Math.min(1, haulingPct) * 100}%` }}
+                />
+              </div>
+            </div>
+          )}
+
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-[8px] uppercase tracking-widest text-slate-500">Commander</span>
+            <select
+              value={wing.commanderId ?? ''}
+              onChange={e => onDesignateCommander(fleetId, wing.id, e.target.value || null)}
+              className="text-[9px] bg-slate-900/60 border border-slate-700/40 rounded px-1.5 py-0.5 text-slate-400"
+            >
+              <option value="">No wing commander</option>
+              {wingPilots.map(pilot => (
+                <option key={pilot.id} value={pilot.id}>{pilot.name}</option>
+              ))}
+            </select>
+            {wingCommander && (
+              <span className="text-[8px] text-slate-500">command bonuses apply to this wing's ships</span>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-[8px] uppercase tracking-widest text-slate-500">Escort</span>
+            <select
+              value={wing.escortWingId ?? ''}
+              onChange={e => onSetEscort(fleetId, wing.id, e.target.value || null)}
+              className="text-[9px] bg-slate-900/60 border border-slate-700/40 rounded px-1.5 py-0.5 text-slate-400"
+            >
+              <option value="">No escort</option>
+              {escortOptions.map(option => (
+                <option key={option.id} value={option.id}>{option.name}</option>
+              ))}
+            </select>
+            {wing.escortWingId && (
+              <span className="text-[8px] text-slate-500">combat wing travels with this wing on haul trips</span>
+            )}
+          </div>
+
+          {wing.type === 'hauling' && haulingUsed > 0 && !wing.isDispatched && homeSystemId !== null && fleet.currentSystemId !== homeSystemId && (
+            <button
+              onClick={() => onDispatch(fleetId, wing.id)}
+              className="text-[9px] px-2 py-1 rounded border border-amber-400/30 text-amber-300 hover:border-amber-300 hover:text-amber-200 self-start"
+            >
+              ↵ Dispatch Wing To HQ
+            </button>
+          )}
+
+          <div className="flex flex-col gap-1">
+            {fleetShips.map(ship => {
+              const hull = HULL_DEFINITIONS[ship.shipDefinitionId];
+              const assignedWing = wings.find(candidate => candidate.shipIds.includes(ship.id));
+              return (
+                <div key={ship.id} className="flex items-center justify-between gap-2">
+                  <span className="text-[9px] text-slate-300 flex-1 min-w-0 truncate">
+                    {ship.customName ?? hull?.name ?? ship.id}
+                  </span>
+                  <select
+                    value={assignedWing?.id ?? ''}
+                    onChange={e => onAssignShip(fleetId, ship.id, e.target.value || null)}
+                    className="text-[9px] bg-slate-900/60 border border-slate-700/40 rounded px-1.5 py-0.5 text-slate-400 min-w-[120px]"
+                  >
+                    <option value="">Unassigned</option>
+                    {wings.map(option => (
+                      <option key={option.id} value={option.id}>{option.name}</option>
+                    ))}
+                  </select>
+                </div>
+              );
+            })}
+          </div>
+
+          {wingShips.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {wingShips.map(ship => (
+                <span key={ship.id} className="text-[8px] px-1.5 py-0.5 rounded border border-slate-700 text-slate-400">
+                  {ship.customName ?? HULL_DEFINITIONS[ship.shipDefinitionId]?.name ?? ship.id}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
@@ -101,6 +361,16 @@ function FleetCard({
   const issueGroupOrder  = useGameStore(s => s.issueFleetGroupOrder);
   const cancelGroupOrder = useGameStore(s => s.cancelFleetGroupOrder);
   const setFleetScanning = useGameStore(s => s.setFleetScanning);
+  const designateCommander     = useGameStore(s => s.designateFleetCommander);
+  const queueCmdSkill          = useGameStore(s => s.queueCommanderSkill);
+  const removeCmdSkillFromQueue = useGameStore(s => s.removeCommanderSkillFromQueue);
+  const createFleetWing = useGameStore(s => s.createFleetWing);
+  const renameFleetWing = useGameStore(s => s.renameFleetWing);
+  const deleteFleetWing = useGameStore(s => s.deleteFleetWing);
+  const designateWingCommander = useGameStore(s => s.designateWingCommander);
+  const assignShipToWing = useGameStore(s => s.assignShipToWing);
+  const setWingEscort = useGameStore(s => s.setWingEscort);
+  const dispatchHaulingWingToHQ = useGameStore(s => s.dispatchHaulingWingToHQ);
 
   const [editingName,  setEditingName]  = useState(false);
   const [nameInput,    setNameInput]    = useState('');
@@ -113,7 +383,12 @@ function FleetCard({
   if (!fleet) return null;
 
   const allShips   = state.systems.fleet.ships;
+  const allPilots  = state.systems.fleet.pilots;
   const fleetShips = fleet.shipIds.map(id => allShips[id]).filter(Boolean) as ShipInstance[];
+  const wings = fleet.wings ?? [];
+  const haulingWings = wings.filter(wing => wing.type === 'hauling');
+  const operationalShipIds = getOperationalFleetShipIds(fleet);
+  const operationalFleetShips = operationalShipIds.map(id => allShips[id]).filter(Boolean) as ShipInstance[];
   const doctrine   = fleet.doctrine ?? 'balanced'; // guard stale persisted state
   const docDef     = DOCTRINE_DEFINITIONS[doctrine] ?? DOCTRINE_DEFINITIONS['balanced'];
   const docMet     = getDoctrineRequirementsMet(doctrine, fleetShips);
@@ -125,11 +400,21 @@ function FleetCard({
   const isMoving   = fleet.fleetOrder !== null;
 
   // Cargo hold
-  const cargoCapacity = computeFleetCargoCapacity(fleet, allShips);
-  const cargoUsed     = Object.values(fleet.cargoHold).reduce((a, v) => a + v, 0);
+  const cargoTotals = haulingWings.length > 0
+    ? Object.entries(fleet.cargoHold).reduce((totals, [resourceId, qty]) => ({
+        ...totals,
+        [resourceId]: (totals[resourceId] ?? 0) + qty,
+      }), getWingCargoTotals(fleet))
+    : fleet.cargoHold;
+  const cargoCapacity = getFleetStorageCapacity(fleet, allShips, allPilots);
+  const cargoUsed     = haulingWings.length > 0
+    ? haulingWings.reduce((sum, wing) => sum + getWingCargoUsed(wing), 0) + Object.values(fleet.cargoHold).reduce((sum, qty) => sum + qty, 0)
+    : getFleetStoredCargo(fleet);
   const cargoPct      = cargoCapacity > 0 ? Math.min(1, cargoUsed / cargoCapacity) : 0;
   const hqSystemId    = state.systems.factions.homeStationSystemId;
-  const canHaulNow    = !isMoving && hqSystemId !== null && hqSystemId !== fleet.currentSystemId && cargoUsed > 0;
+  const canHaulNow    = haulingWings.length === 1
+    ? !haulingWings[0].isDispatched && hqSystemId !== null && hqSystemId !== fleet.currentSystemId && cargoUsed > 0
+    : haulingWings.length === 0 && !isMoving && hqSystemId !== null && hqSystemId !== fleet.currentSystemId && cargoUsed > 0;
 
   const dotColor   = isMoving
     ? 'bg-cyan-400 animate-pulse'
@@ -143,6 +428,8 @@ function FleetCard({
   const joinableShips = Object.values(allShips).filter(
     s => s.fleetId === null && s.systemId === fleet.currentSystemId,
   );
+  const assignedWingShipIds = new Set(wings.flatMap(wing => wing.shipIds));
+  const unassignedWingShips = fleetShips.filter(ship => !assignedWingShipIds.has(ship.id));
 
   return (
     <div
@@ -213,6 +500,7 @@ function FleetCard({
             </span>
             <span className="text-[9px] text-slate-600">·</span>
             <span className="text-[9px] text-slate-500">{fleetShips.length} ship{fleetShips.length !== 1 ? 's' : ''}</span>
+            <span className="text-[9px] text-slate-600">· {operationalFleetShips.length} operational</span>
             {isMoving && <span className="text-[9px] text-cyan-400/70">· In transit</span>}
             {!isMoving && fleet.combatOrder && (
               <span className={`text-[9px] ${fleet.combatOrder.type === 'patrol' ? 'text-amber-400/70' : 'text-red-400/70'}`}>
@@ -252,7 +540,7 @@ function FleetCard({
           {cargoCapacity > 0 && (
             <div className="flex flex-col gap-1.5">
               <div className="flex items-center justify-between">
-                <span className="text-[8px] uppercase tracking-widest text-slate-500">Cargo Hold</span>
+                <span className="text-[8px] uppercase tracking-widest text-slate-500">{haulingWings.length > 1 ? 'Hauling Network' : haulingWings.length === 1 ? 'Hauling Hold' : 'Cargo Hold'}</span>
                 <span className="text-[9px] font-mono text-slate-400">
                   {Math.round(cargoUsed).toLocaleString()} / {Math.round(cargoCapacity).toLocaleString()} m³
                 </span>
@@ -265,9 +553,9 @@ function FleetCard({
                   style={{ width: `${cargoPct * 100}%` }}
                 />
               </div>
-              {Object.entries(fleet.cargoHold).filter(([, v]) => v > 0).length > 0 && (
+              {Object.entries(cargoTotals).filter(([, v]) => v > 0).length > 0 && (
                 <div className="flex flex-wrap gap-x-3 gap-y-0.5">
-                  {Object.entries(fleet.cargoHold)
+                  {Object.entries(cargoTotals)
                     .filter(([, v]) => v > 0)
                     .map(([resId, qty]) => (
                       <span key={resId} className="text-[9px] text-slate-400">
@@ -279,11 +567,16 @@ function FleetCard({
               {canHaulNow && (
                 <button
                   onClick={() => {
-                    if (hqSystemId) issueGroupOrder(fleetId, hqSystemId);
+                    if (!hqSystemId) return;
+                    if (haulingWings.length === 1) {
+                      dispatchHaulingWingToHQ(fleetId, haulingWings[0].id);
+                    } else {
+                      issueGroupOrder(fleetId, hqSystemId);
+                    }
                   }}
                   className="text-[9px] px-2 py-0.5 rounded border border-amber-400/40 text-amber-300/80 hover:border-amber-300 hover:text-amber-200 self-start"
                 >
-                  ↵ Haul to HQ
+                  {haulingWings.length === 1 ? '↵ Dispatch Hauling Wing' : '↵ Haul to HQ'}
                 </button>
               )}
             </div>
@@ -292,6 +585,17 @@ function FleetCard({
           {/* Current Activity */}
           <div className="flex flex-col gap-1.5">
             <span className="text-[8px] uppercase tracking-widest text-slate-500">Current Activity</span>
+            <div className="flex items-center gap-1.5 flex-wrap text-[8px] text-slate-600">
+              <span>{fleetShips.length} total ship{fleetShips.length !== 1 ? 's' : ''}</span>
+              <span>·</span>
+              <span>{operationalFleetShips.length} operational</span>
+              {unassignedWingShips.length > 0 && (
+                <>
+                  <span>·</span>
+                  <span>{unassignedWingShips.length} inactive</span>
+                </>
+              )}
+            </div>
             <div className="flex items-center gap-2 flex-wrap">
               {isMoving && (
                 <span className="text-[9px] px-2 py-0.5 rounded bg-cyan-900/40 text-cyan-300 border border-cyan-400/25">
@@ -315,21 +619,263 @@ function FleetCard({
               {!isMoving && !fleet.combatOrder && !fleet.isScanning && (
                 <span className="text-[9px] text-slate-500">Idle</span>
               )}
+              {!isMoving && haulingWings.some(wing => wing.isDispatched) && (
+                <span className="text-[9px] px-2 py-0.5 rounded bg-amber-900/40 text-amber-300 border border-amber-400/25">
+                  ↵ {haulingWings.filter(wing => wing.isDispatched).length} hauling wing{haulingWings.filter(wing => wing.isDispatched).length !== 1 ? 's' : ''} in transit
+                </span>
+              )}
             </div>
             {/* Scan toggle */}
             {!isMoving && (
               <button
                 onClick={() => setFleetScanning(fleetId, !fleet.isScanning)}
+                disabled={operationalFleetShips.length === 0}
                 className={`text-[9px] px-2 py-0.5 rounded border self-start transition-all ${
                   fleet.isScanning
                     ? 'border-violet-400/30 text-violet-300/80 hover:text-violet-200 hover:border-violet-300'
                     : 'border-slate-600 text-slate-400 hover:border-violet-400/40 hover:text-violet-300'
-                }`}
+                } disabled:opacity-40 disabled:cursor-not-allowed`}
               >
                 {fleet.isScanning ? '▫ Stop Scanning' : '◉ Start Scanning'}
               </button>
             )}
+            {!isMoving && operationalFleetShips.length === 0 && (
+              <span className="text-[8px] text-slate-600">Scanning requires at least one ship assigned to a wing.</span>
+            )}
           </div>
+
+          {/* Fleet Wings */}
+          <div className="flex flex-col gap-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[8px] uppercase tracking-widest text-slate-500">Fleet Wings</span>
+              <div className="flex flex-wrap justify-end gap-1">
+                {(['mining', 'hauling', 'combat', 'recon', 'industrial'] as WingType[]).map(type => {
+                  const count = wings.filter(wing => wing.type === type).length;
+                  return (
+                    <button
+                      key={type}
+                      onClick={() => createFleetWing(fleetId, type, `${WING_LABELS[type]} Wing ${count + 1}`)}
+                      className="text-[8px] px-1.5 py-0.5 rounded border text-slate-400 hover:text-slate-200 transition-all"
+                      style={{ borderColor: WING_TINT[type] + '44' }}
+                    >
+                      + {WING_LABELS[type]}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {wings.length === 0 && (
+              <div className="rounded border border-slate-800 bg-slate-950/40 px-2 py-2 text-[9px] text-slate-500">
+                No wings configured. Ships can stay in the fleet, but they will not mine, scan, haul, or fight until assigned to a wing.
+              </div>
+            )}
+
+            {wings.map(wing => {
+              return (
+                <WingRow
+                  key={wing.id}
+                  fleetId={fleetId}
+                  fleet={fleet}
+                  wing={wing}
+                  wings={wings}
+                  fleetShips={fleetShips}
+                  allShips={allShips}
+                  allPilots={allPilots}
+                  homeSystemId={hqSystemId}
+                  onRename={renameFleetWing}
+                  onDelete={deleteFleetWing}
+                  onDesignateCommander={designateWingCommander}
+                  onAssignShip={assignShipToWing}
+                  onSetEscort={setWingEscort}
+                  onDispatch={dispatchHaulingWingToHQ}
+                />
+              );
+            })}
+
+            {unassignedWingShips.length > 0 && (
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-[8px] uppercase tracking-widest text-slate-500">Unassigned</span>
+                {unassignedWingShips.map(ship => (
+                  <span key={ship.id} className="text-[8px] px-1.5 py-0.5 rounded border border-slate-700 text-slate-500">
+                    {ship.customName ?? HULL_DEFINITIONS[ship.shipDefinitionId]?.name ?? ship.id}
+                  </span>
+                ))}
+                <span className="text-[8px] text-slate-600">inactive until assigned to a wing</span>
+              </div>
+            )}
+          </div>
+
+          {/* Fleet Commander */}
+          {(() => {
+            const pilots   = state.systems.fleet.pilots;
+            const commander = fleet.commanderId ? pilots[fleet.commanderId] ?? null : null;
+            const cmdSkills = (skillId: string) => COMMANDER_SKILL_DEFINITIONS[skillId];
+
+            // Pilots in this fleet (have a ship in fleet.shipIds)
+            const pilotsInFleet = fleet.shipIds
+              .map(sid => state.systems.fleet.ships[sid]?.assignedPilotId)
+              .filter(Boolean)
+              .map(pid => pilots[pid!])
+              .filter(Boolean);
+
+            // Active bonuses (non-zero) for display
+            const bonusKeys = Object.keys(COMMANDER_BONUS_LABELS);
+            const activeBonuses = commander
+              ? bonusKeys.filter(key => {
+                  const sk = Object.entries(COMMANDER_SKILL_DEFINITIONS);
+                  return sk.some(([, def]) =>
+                    def.effectPerLevel.some(e => e.key === key) &&
+                    (commander.commandSkills?.levels[def.id] ?? 0) > 0,
+                  );
+                })
+              : [];
+
+            return (
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[8px] uppercase tracking-widest text-slate-500">Fleet Commander</span>
+                  {commander && (
+                    <button
+                      onClick={() => designateCommander(fleetId, null)}
+                      className="text-[8px] text-slate-600 hover:text-red-400 px-1"
+                      title="Remove commander"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+
+                {/* Commander pick / current */}
+                {commander ? (
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />
+                    <span className="text-[10px] font-semibold text-amber-300">{commander.name}</span>
+                    <span className="text-[8px] text-slate-500">· Fleet Commander</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <span className="text-[9px] text-slate-500 italic">None assigned</span>
+                    {pilotsInFleet.length > 0 && (
+                      <select
+                        defaultValue=""
+                        onChange={e => {
+                          if (e.target.value) designateCommander(fleetId, e.target.value);
+                          e.target.value = '';
+                        }}
+                        className="text-[9px] bg-slate-900/60 border border-slate-700/40 rounded px-1.5 py-0.5 text-slate-400"
+                      >
+                        <option value="">+ Designate…</option>
+                        {pilotsInFleet.map(p => (
+                          <option key={p.id} value={p.id}>{p.name}</option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                )}
+
+                {/* Active bonus chips */}
+                {activeBonuses.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {activeBonuses.map(key => {
+                      const val = commander
+                        ? Object.entries(COMMANDER_SKILL_DEFINITIONS).reduce((acc, [, def]) => {
+                            const eff = def.effectPerLevel.find(e => e.key === key);
+                            const lvl = commander.commandSkills?.levels[def.id] ?? 0;
+                            return acc + (eff ? eff.value * lvl : 0);
+                          }, 0)
+                        : 0;
+                      return (
+                        <span
+                          key={key}
+                          className="text-[8px] px-1.5 py-0.5 rounded border border-amber-400/30 bg-amber-900/20 text-amber-300"
+                          title={COMMANDER_BONUS_LABELS[key]}
+                        >
+                          {COMMANDER_BONUS_LABELS[key]} +{Math.round(val * 100)}%
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Command skill queue */}
+                {commander && (
+                  <div className="flex flex-col gap-1">
+                    {/* Active training */}
+                    {commander.commandSkills?.activeSkillId && (() => {
+                      const activeId = commander.commandSkills.activeSkillId!;
+                      const def = COMMANDER_SKILL_DEFINITIONS[activeId];
+                      const lvl = (commander.commandSkills.levels[activeId] ?? 0) + 1;
+                      const totalTime = [7200, 14400, 28800, 57600, 172800][lvl - 1] ?? 7200;
+                      const pct = totalTime > 0 ? Math.min(1, commander.commandSkills.activeProgress / totalTime) : 0;
+                      const remaining = Math.max(0, totalTime - commander.commandSkills.activeProgress);
+                      return (
+                        <div className="flex flex-col gap-0.5">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[9px] text-amber-300/80">{def?.name ?? activeId} {ROMAN[lvl]}</span>
+                            <span className="text-[8px] font-mono text-slate-400">{formatTrainingEta(remaining)}</span>
+                          </div>
+                          <div className="h-1 bg-slate-800 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-amber-400 rounded-full transition-all"
+                              style={{ width: `${pct * 100}%` }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    {/* Queue entries */}
+                    {commander.commandSkills?.queue?.length > 0 && commander.commandSkills.queue.map((entry, idx) => (
+                      <div key={idx} className="flex items-center justify-between gap-1">
+                        <span className="text-[9px] text-slate-400 flex-1">
+                          {cmdSkills(entry.skillId)?.name ?? entry.skillId} {ROMAN[entry.targetLevel]}
+                        </span>
+                        <span className="text-[8px] font-mono text-slate-500">
+                          {formatTrainingEta(commanderSkillEtaSeconds(commander, entry.skillId, entry.targetLevel))}
+                        </span>
+                        <button
+                          onClick={() => removeCmdSkillFromQueue(commander.id, idx)}
+                          className="text-[8px] text-slate-600 hover:text-red-400 px-0.5"
+                          title="Remove"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+
+                    {/* Add skill buttons */}
+                    <div className="flex flex-wrap gap-1 pt-0.5">
+                      {Object.values(COMMANDER_SKILL_DEFINITIONS).map(def => {
+                        const currentLvl = commander.commandSkills?.levels[def.id] ?? 0;
+                        const nextLvl = Math.min(5, currentLvl + 1) as 1|2|3|4|5;
+                        if (currentLvl >= 5) return null;
+                        const alreadyQueued = commander.commandSkills?.queue?.some(
+                          e => e.skillId === def.id,
+                        );
+                        return (
+                          <button
+                            key={def.id}
+                            disabled={alreadyQueued}
+                            onClick={() => queueCmdSkill(commander.id, def.id, nextLvl)}
+                            className="text-[8px] px-1.5 py-0.5 rounded border transition-all"
+                            style={alreadyQueued ? {
+                              color: '#475569', borderColor: '#1e293b',
+                            } : {
+                              color: '#fbbf24', borderColor: '#78350f',
+                            }}
+                            title={`Train ${def.name} to level ${ROMAN[nextLvl]}`}
+                          >
+                            + {def.name} {ROMAN[nextLvl]}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* Doctrine selector */}
           <div className="flex flex-col gap-1">
@@ -430,7 +976,7 @@ function FleetCard({
           {(() => {
             const aliveGroups = getAliveNpcGroupsInSystem(state, fleet.currentSystemId);
             const combatOrder = fleet.combatOrder;
-            const fleetPilots = fleet.shipIds
+            const fleetPilots = operationalShipIds
               .map(id => state.systems.fleet.ships[id]?.assignedPilotId)
               .filter(Boolean)
               .map(pid => state.systems.fleet.pilots[pid!])

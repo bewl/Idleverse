@@ -40,9 +40,9 @@ impact. Each phase is independently shippable and leaves the game in a playable,
 | UI Overhaul — navigation, tooltips, data density | ✅ Complete | GameTooltip + NavTag + useUiStore + DevPanel overhaul + 8-panel renovation (Stream D) |
 | Fleet-centric remodel — cargo hold + auto-haul (FC-1b/c/d/e) | ✅ Complete | oreDeltas wired to fleet cargoHold; auto-haul to Corp HQ; HQ dump on arrival |
 | Corp identity migration (FC-1G partial) | ✅ Complete | state.pilot → state.corp; OverviewPanel → corp command center (CorpCard + CorpHQCard) |
-| **FC-1a/1f — Remove currentSystemId mining gate; MiningPanel fleet dashboard** | **⚡ FC-1 NEXT** | **isBeltAccessible still skill-only but MiningPanel still filters to currentSystemId; fleet dashboard redesign pending** |
-| **Fleet commander skills** | **⚡ FC-2 TOP PRIORITY** | **Designate pilot as commander; command skill trees; fleet-wide bonuses** |
-| **Fleet wings (hauling + escort)** | **⚡ FC-3 TOP PRIORITY** | **Sub-fleets; hauling wing auto-hauls to HQ with security escort** |
+| Fleet-centric foundation (FC-1: cargo holds, auto-haul, corp identity, richness wiring) | ✅ Complete | All FC-1 steps shipped |
+| **Fleet commander skills** | **✅ FC-2 COMPLETE** | **Designate pilot as commander; command skill trees; fleet-wide bonuses** |
+| **Fleet wings (hauling + escort)** | **⚡ FC-3 ACTIVE** | **Core wing model shipped: wing commanders, multi-hauler logistics, inactive unwinged ships, per-wing dispatch; escort/combat follow-ons remain** |
 | **Corp HQ — station registration & POS** | **⚡ FC-4 TOP PRIORITY** | **Register with faction station or build own POS; gate manufacturing/reprocessing** |
 | **On-site fleet reprocessing** | **⚡ FC-5 TOP PRIORITY** | **Ore refinery module; industrial hull; refine ore in-field** |
 | **Dynamic mining threats & fleet defense** | **⚡ FC-6 TOP PRIORITY** | **Mining attracts NPC threats; resource claims; fleet reputation** |
@@ -507,6 +507,7 @@ n-levels deep with their own clickable tags.
 - **C5** ✅ — New **Factions** tab: docked-station indicator + Undock button, per-faction rep bars (reactive), ±10/±100 rep buttons via `adjustReputation`
 - **C6** ✅ — New **State** tab: key metrics grid (credits, ships, pilots, mfg jobs, unlock count), Dump-to-Console button, active unlocks list, state keys reference
 - **C7** ✅ — Fleet tab enhanced: **Ship Integrity** section with live hull % bars (colour-coded green/amber/red) + per-ship **REPAIR** button via `repairShip`
+- **C8** ✅ — ScenariosTab: **Wipe Save** danger zone added at bottom with inline two-click confirmation (no `window.confirm`); calls `clearSave()` which deletes the persisted save and resets state to `createInitialState()`; old RESET GAME footer button removed
 
 ### ✅ COMPLETED — Stream D — Panel Renovations
 > **Status:** ✅ Shipped — June 2025
@@ -577,203 +578,61 @@ All 8 targeted panels renovated with NavTag entity links, data density additions
 
 ---
 
-# ✅ PARTIAL — FC-1 — Fleet-Centric Foundation
+# ✅ COMPLETED — FC-1 — Fleet-Centric Foundation
 
-> **Status:** 🔄 Partially shipped — March 2026
-> **Files changed:** `game.types.ts`, `faction.types.ts`, `fleet.logic.ts`, `fleet.tick.ts`, `tickRunner.ts`, `initialState.ts`, `gameStore.ts`, `FleetPanel.tsx`, `OverviewPanel.tsx`
+> **Status:** ✅ Shipped — March 2026
+> **Files changed:** `game.types.ts`, `faction.types.ts`, `fleet.logic.ts`, `fleet.tick.ts`, `mining.logic.ts`, `tickRunner.ts`, `initialState.ts`, `gameStore.ts`, `FleetPanel.tsx`, `OverviewPanel.tsx`, `SystemPanel.tsx`
 
-## What Was Shipped (FC-1b / FC-1c / FC-1d / FC-1e / FC-1G)
+## What Was Shipped
 
 | Step | Status | Notes |
 |---|---|---|
-| **FC-1a** — Remove `currentSystemId` mining gate | ⬜ Pending | `isBeltAccessible` is now skill-only (location removed), but MiningPanel still filters belts to current system |
+| **FC-1a** — Remove `currentSystemId` mining gate | ✅ Shipped | `getBeltRichnessForSystem(galaxy, beltId, systemId)` pure fn added; legacy `tickMining` mine-loop removed; belt pool depletion now driven by fleet ships |
 | **FC-1b** — Wire fleet `oreDeltas` to `cargoHold` | ✅ Shipped | `tickRunner` applies `oreDeltas` to each fleet's `cargoHold` each tick, capped by cargo capacity |
 | **FC-1c** — Fleet cargo hold model | ✅ Shipped | `PlayerFleet.cargoHold: Record<string, number>` added; `computeFleetCargoCapacity()` in `fleet.logic.ts` |
-| **FC-1d** — Corp HQ concept | ✅ Shipped | `FactionsState.homeStationId / homeStationSystemId / registeredStations`; `setHomeStation` store action |
-| **FC-1e** — Fleet auto-haul to HQ | ✅ Shipped | Auto-dispatch at ≥80% cargo fill; HQ dump on arrival; FleetPanel "Haul to HQ" button + fill bar |
-| **FC-1f** — Clean remaining UI gates | ⬜ Pending | MiningPanel fleet dashboard redesign; remove `isBrowsing` reset in SystemPanel |
+| **FC-1d** — Corp HQ concept | ✅ Shipped | `FactionsState.homeStationId / homeStationSystemId / registeredStations`; `setHomeStation` store action; pre-seeded with `homeStationId: 'station-home'`, `homeStationSystemId: 'home'` in `initialState.ts` |
+| **FC-1e** — Fleet auto-haul to HQ | ✅ Shipped | Full round-trip loop: fleet at HQ dumps immediately inline; fleet away stamps `miningOriginSystemId`, dispatches haul trip; on HQ arrival ore dumped + fleet dispatched back; on return `activity: 'mining'` restored per ship and `miningOriginSystemId` cleared; FleetPanel "Haul to HQ" button + fill bar |
+| **FC-1f** — Clean remaining UI gates | ✅ Shipped | MiningPanel fully fleet-centric; `getCurrentSystemBeltIds` removed; `ORE_BELTS` richness wired into fleet mining yield |
 | **FC-1G** — Corp identity (state.pilot → state.corp) | ✅ Shipped | `state.corp: CorpState` replaces deprecated `state.pilot`; save migration included; OverviewPanel → CorpCard + CorpHQCard |
+| **FC-1H** — Belt skill gates | ✅ Shipped | `ORE_BELTS[beltId].requiredSkill` checked in `setShipActivity()`; `SystemPanel` shows locked belt cards with 🔒 tooltip; dead `unlocks` arrays removed from `skills.config.ts` |
 
-## Remaining Work
+## Key Architecture Changes
 
-- **FC-1a / FC-1f**: Redesign MiningPanel as a fleet-centric mining dashboard (all fleets across all systems, per-fleet cargoHold bars). Remove `currentSystemId`-based belt filtering from MiningPanel.
+- `tickMining()` now only handles **belt pool respawn timers** — the mine-loop that wrote to `oreHold` is removed
+- Fleet ore production flows entirely through `fleet.tick.ts` → `oreDeltas` → `fleet.cargoHold` → Corp HQ dump
+- Belt pool depletion is now driven by `fleetResult.beltPoolDeltas` in `tickRunner` step 8; depleted belts unassign mining ships automatically
+- `getBeltRichnessForSystem(galaxy, beltId, systemId)` is a new pure function; all fleet mining applies system richness multipliers correctly
+- Deep-ore yield bonus (`deep-ore-yield` modifier) now correctly applied in fleet mining
+- `getCurrentSystemBeltIds` removed; `SystemPanel` uses `getBeltsForSystem(system.id, galaxy.seed)`
+- **Auto-haul is two-branch**: fleet already at HQ → ore dumped inline immediately (no haul trip); fleet away from HQ → `miningOriginSystemId` stamped on `PlayerFleet`, haul trip dispatched; dump block only fires for fleets with `miningOriginSystemId` set (prevents instant ore drain for stationary miners at HQ)
+- **Re-mining round-trip**: after dumping at HQ, fleet auto-dispatches back to `miningOriginSystemId`; on arrival, ships with `assignedBeltId` have `activity: 'mining'` restored and `miningOriginSystemId` cleared
+- Belt skill gates: `ORE_BELTS[beltId].requiredSkill` checked in `setShipActivity()`; `SystemPanel` renders locked belt cards with a 🔒 disabled button and `GameTooltip` showing the required skill name and level
 
 ---
 
-# ⚡ FC-1 (REMAINING) — Fleet-Centric Foundation
+# ✅ COMPLETED — FC-2 — Fleet Commander System
+> **Status:** ✅ Shipped — July 2025
+> **Files changed:** `game.types.ts`, `commander.config.ts` (new), `commander.logic.ts` (new), `fleet.tick.ts`, `initialState.ts`, `gameStore.ts`, `FleetPanel.tsx`, `saveLoad.ts`
 
-> **Status:** Steps FC-1a and FC-1f remain. Core data model is shipped.
-> **Priority:** High — MiningPanel still shows wrong data without this.
-> **Depends on:** Nothing new.
+## What Was Built
 
-## Goal
-
-Remove `galaxy.currentSystemId` as a gate on any gameplay system. The CEO is an abstract director with no physical location. All mining, hauling, and production flows through **fleets**. Fleet cargo holds are the primary ore storage layer; haul trips to Corp HQ deposit ore into the corp-wide resource pool.
-
-## Steps
-
-### FC-1a — Remove `galaxy.currentSystemId` as mining gate
-
-- `src/game/systems/mining/mining.logic.ts`: Replace `isBeltAccessible()` (checks `galaxy.currentSystemId`) with `isBeltInSystem(beltId, systemId)` — pure function, takes explicit `systemId` arg.
-- Replace `getCurrentSystemBeltIds(state)` with `getBeltsForSystem(systemId, galaxy)` — no longer reads from player state.
-- `src/game/core/tickRunner.ts`: Remove warp-arrival guard that resets belt targets; remove mining skip-during-warp.
-- `src/ui/panels/MiningPanel.tsx`: Stop filtering belts to `galaxy.currentSystemId`; show all active mining fleets across all systems.
-
-### FC-1b — Wire fleet mining `oreDeltas` (dead code fix)
-
-- `src/game/systems/fleet/fleet.tick.ts`: Confirm `oreDeltas: Record<string, Record<string, number>>` is computed per mining ship — it is, but the result is discarded.
-- `src/game/core/tickRunner.ts` step 8: Capture `fleetResult.oreDeltas` and apply to each fleet's `cargoHold` (new field — FC-1c) instead of discarding.
-
-### FC-1c — Add fleet cargo hold model
-
-**Type changes** (`src/types/game.types.ts`):
-```ts
-interface PlayerFleet {
-  // existing fields unchanged...
-  cargoHold: Record<string, number>;    // oreId → quantity
-  cargoCapacity: number;               // total m³ (computed from ship hulls)
-}
-```
-- `src/stores/initialState.ts`: Add `cargoHold: {}`, `cargoCapacity: 0` to initial fleet shape.
-- `src/game/systems/fleet/fleet.logic.ts`: Add `computeFleetCargoCapacity(fleet, ships)` — sums `hull.baseCargoMultiplier × baseCargoM3` for all fleet ships.
-- Mining pauses automatically when `cargoHold total >= cargoCapacity`.
-
-### FC-1d — Corp HQ concept
-
-**Type changes** (`src/types/game.types.ts`):
-```ts
-interface FactionsState {
-  // existing fields unchanged...
-  homeStationId: string | null;
-  registeredStations: string[];
-}
-```
-- `src/stores/initialState.ts`: `homeStationId: null`, `registeredStations: []`.
-- `src/stores/gameStore.ts`: Add `setHomeStation(stationId: string): void`.
-- `src/ui/panels/SystemPanel.tsx`: Show "Register Corp HQ here" button when viewing a system with a station and `homeStationId` is null or a different station.
-
-### FC-1e — Fleet auto-haul to HQ
-
-- `src/game/core/tickRunner.ts`: After applying oreDeltas — if fleet cargo ≥ 80% full AND `homeStationId` is set AND fleet has at least one hauler-class ship AND fleet has no active `fleetOrder`: auto-issue haul order to HQ system.
-- On fleet arrival at HQ system: dump `cargoHold` contents into `state.resources` ore pool; clear fleet `cargoHold`.
-- `src/ui/panels/FleetPanel.tsx`: Expose "Haul Now" manual button in fleet card.
-
-### FC-1f — Clean remaining UI gates
-
-- `src/ui/panels/SystemPanel.tsx`: Remove any `isBrowsing` logic that resets to player system on warp arrival.
-- `src/ui/panels/MiningPanel.tsx`: Redesign as "Fleet Mining Dashboard" — all mining fleets, all systems, per-fleet cargoHold fill bars.
-
-## Files Changed
-
-| File | Change |
-|---|---|
-| `src/types/game.types.ts` | Add `cargoHold`, `cargoCapacity` to `PlayerFleet`; add `homeStationId`, `registeredStations` to `FactionsState` |
-| `src/stores/initialState.ts` | New fields with defaults |
-| `src/stores/gameStore.ts` | `setHomeStation` action |
-| `src/game/systems/mining/mining.logic.ts` | Remove currentSystemId gate; add `isBeltInSystem`, `getBeltsForSystem` |
-| `src/game/core/tickRunner.ts` | Wire oreDeltas to fleet cargo; remove warp-skip mining guard |
-| `src/game/systems/fleet/fleet.logic.ts` | Add `computeFleetCargoCapacity` |
-| `src/ui/panels/MiningPanel.tsx` | Fleet Mining Dashboard (all fleets/systems) |
-| `src/ui/panels/SystemPanel.tsx` | Remove isBrowsing reset; add "Set Corp HQ" button |
-| `src/ui/panels/FleetPanel.tsx` | "Haul Now" button; cargoHold fill bar in fleet card |
+- Any pilot in a fleet can be designated **Fleet Commander** via a new UI section in FleetPanel above the Doctrine selector.
+- Commanders have a separate `commandSkills: CommanderSkillState` queue trained independently of corp skills.
+- Five command skill trees (5 levels each): `mining-command` (+4%/lvl yield), `combat-command` (+5%/lvl DPS +3%/lvl tank), `logistics-command` (+8%/lvl cargo −5%/lvl haul), `industrial-command` (+6%/lvl on-site refining), `recon-command` (+10%/lvl scan −8%/lvl sig).
+- Training times: 2h / 4h / 8h / 16h / 48h per level. Active fleets train 1.5× faster.
+- Commander mining bonus wired directly into `fleet.tick.ts` yield per ship.
+- Old saves are patched on load (`saveLoad.ts` migration) to add `commandSkills` and `commanderId` defaults.
+- UI shows: commander name, active training bar with ETA, queued skills, per-level queue buttons, and live bonus chips for non-zero bonuses.
 
 ---
 
 ---
 
-# ⚡ FC-2 — Fleet Commander System (TOP PRIORITY)
+# ⚡ FC-3 — Fleet Wings
 
-> **Status:** Designed, not yet implemented.
-> **Priority:** Highest — primary new skill loop for the CEO model.
-> **Depends on:** FC-1 (fleet cargo model must exist; commander bonuses feed into mining tick).
+> **Status:** In progress — initial implementation shipped March 2026.
+> **Priority:** Highest — core wing automation is live; remaining follow-ons build on the shipped model.
 
-## Goal
-
-Any pilot can be designated Fleet Commander. Commanders have a separate manually-queued skill tree — **command skills** — whose trained levels apply fleet-wide bonuses (yield, combat, logistics, recon). Organic pilot skill training is unchanged; command skills are additive.
-
-## Data Model
-
-**Type changes** (`src/types/game.types.ts`):
-```ts
-interface PlayerFleet {
-  // existing...
-  commanderId: string | null;  // pilotId of designated commander
-}
-
-interface CommanderSkillState {
-  levels: Record<string, number>;       // commandSkillId → level 0–5
-  queue: CommanderSkillQueueEntry[];
-  activeSkillId: string | null;
-  activeProgress: number;               // 0–1
-}
-
-interface CommanderSkillQueueEntry {
-  skillId: string;
-  targetLevel: 1 | 2 | 3 | 4 | 5;
-}
-
-interface PilotInstance {
-  // existing...
-  commandSkills: CommanderSkillState;  // populated for all pilots; active only when pilot is commanderId
-}
-```
-
-## Commander Skill Trees
-
-New file: `src/game/systems/fleet/commander.config.ts`
-
-Five trees, each 5 levels. Training time: 2–48 h per level (exponential, same formula pattern as pilot skills).
-
-| Skill ID | Effect per level | Milestone unlock |
-|---|---|---|
-| `mining-command` | +4% fleet mining yield | L3: multi-belt assignment |
-| `combat-command` | +5% fleet DPS, +3% fleet tank | L4: patrol + raid combo order |
-| `logistics-command` | +8% fleet cargo capacity, −5% haul trip duration | L3: −5% haul time triggers |
-| `industrial-command` | +6% on-site refining yield | L2: unlocks `ore-refinery` module (FC-5) |
-| `recon-command` | +10% fleet scan strength, −8% anomaly signature radius | L5: deep-space probe module |
-
-## Logic
-
-- `src/game/systems/fleet/commander.config.ts` *(new)*: `COMMANDER_SKILL_DEFINITIONS`
-- `src/game/systems/fleet/commander.logic.ts` *(new)*: Getter fns — `getCommanderMiningBonus(pilot)`, `getCommanderCargoBonus(pilot)`, `getCommanderCombatBonus(pilot)`, `getCommanderScanBonus(pilot)`, `getCommanderIndustrialBonus(pilot)`. Also fixes the existing `getFleetMiningMultiplier()` TODO by wiring it to `mining-command` level.
-- `src/game/systems/fleet/fleet.tick.ts`: Add `tickCommanderSkillTraining(pilot, fleet)` — mirrors `tickPilotSkillTraining`; only runs when `fleet.commanderId === pilot.id`; experience accrues 1.5× while fleet is active (mining/scanning/combat).
-- Commander bonuses applied as multipliers in existing fleet mining yield, combat resolution, cargo capacity, scan strength calculations.
-
-## UI: Commander Section in Fleet Card
-
-- `src/ui/panels/FleetPanel.tsx`: New "Fleet Commander" section above Doctrine.
-  - Assigned commander: pilot name + portrait placeholder.
-  - Or: "No Commander" empty state with prompt.
-  - Dropdown to assign any pilot currently in the fleet as commander.
-  - Command skill queue: same visual style as pilot skill queue — skill name, target level picker, ETA, ✕ to remove.
-  - Active bonus chips below queue: `⛏ +8% Yield` `⚔ +10% DPS` etc. (only non-zero bonuses shown).
-
-## Store Actions
-
-- `designateFleetCommander(fleetId, pilotId | null): void`
-- `queueCommanderSkill(pilotId, skillId, targetLevel): void`
-- `removeCommanderSkillFromQueue(pilotId, index): void`
-
-## Files Changed
-
-| File | Change |
-|---|---|
-| `src/types/game.types.ts` | Add `commanderId` to `PlayerFleet`; add `CommanderSkillState`, `CommanderSkillQueueEntry`; add `commandSkills` to `PilotInstance` |
-| `src/stores/initialState.ts` | Default `commanderId: null`; default `commandSkills: { levels:{}, queue:[], activeSkillId:null, activeProgress:0 }` |
-| `src/stores/gameStore.ts` | `designateFleetCommander`, `queueCommanderSkill`, `removeCommanderSkillFromQueue` |
-| `src/game/systems/fleet/commander.config.ts` | *(new)* `COMMANDER_SKILL_DEFINITIONS` |
-| `src/game/systems/fleet/commander.logic.ts` | *(new)* bonus getter fns; fixes `getFleetMiningMultiplier()` |
-| `src/game/systems/fleet/fleet.tick.ts` | Add `tickCommanderSkillTraining` |
-| `src/ui/panels/FleetPanel.tsx` | Commander section with skill queue + bonus chips |
-
----
-
----
-
-# ⚡ FC-3 — Fleet Wings (TOP PRIORITY)
-
-> **Status:** Designed, not yet implemented.
-> **Priority:** Highest — enables the hauler auto-escort loop that makes fleet mining self-sustaining.
 > **Depends on:** FC-1 (fleet cargo model), FC-2 (commander skills feed wing-level bonuses).
 
 ## Goal
@@ -791,8 +650,11 @@ interface FleetWing {
   name: string;
   type: WingType;
   shipIds: string[];
-  wingCommanderId: string | null;   // pilot in the lead ship of this wing
+  commanderId: string | null;
+  cargoHold: Record<string, number>;
   escortWingId: string | null;      // combat wing that escorts this wing on haul trips
+  isDispatched: boolean;            // true while the wing is hauling to HQ
+  haulingOriginSystemId: string | null;
 }
 
 interface PlayerFleet {
@@ -801,47 +663,70 @@ interface PlayerFleet {
 }
 ```
 
-Ships can be unassigned (no wing) or assigned to exactly one wing.
+Ships can be unassigned (no wing) or assigned to exactly one wing. Unassigned fleet ships remain in the fleet for organization and travel, but they do not contribute to wing-driven gameplay systems until assigned to a wing.
 
 ## Logic
 
 New file: `src/game/systems/fleet/wings.logic.ts`
-- `getWingCargoCapacity(wing, ships)` — sum hauler ships' cargo in the wing.
-- `isHaulingWingFull(wing, fleet)` — hauling wing's ore share ≥ 90% of wing capacity.
-- `dispatchHaulerWing(wingId, fleet, homeSystemId)` — issues a sub-group haul order with escort; returns new fleet orders state.
-- `getMiningWingShips(fleet)` — all ships across mining wings.
+- `getWingCargoCapacity(wing, ships)` — sum ship cargo capacity within the wing.
+- `getWingCargoUsed(wing)` — sum ore currently stored in the wing's cargo hold.
+- `dispatchHaulerWing(fleetId, wingId, homeSystemId)` — issues sub-group haul orders for a specific hauling wing and its optional escort wing.
+- `processWingArrivalAtHQ(fleetId, wingId, homeSystemId)` — dumps a hauling wing cargo hold when that wing's dispatched ships reach HQ, then issues the return trip.
+- `processWingReturn(fleetId, wingId)` — restores activity and clears dispatch state after the specified wing returns.
 
 **Tick behavior:**
-- Mining wing ships mine ore → fills hauling wing's cargo hold (tracked separately from whole-fleet cargo).
-- When hauling wing is full: `dispatchHaulerWing` fires automatically in tickRunner.
-- Escort combat wing travels same route as hauling wing during the trip.
-- On HQ arrival: ore deposited; wings return to mining wing's last known system.
+- If one or more hauling wings exist, mined ore is distributed across non-dispatched hauling wings before falling back to the legacy fleet hold.
+- Fleet ships that are not assigned to any wing are ignored by fleet mining, scanning, and combat resolution until assigned to a wing.
+- Each hauling wing checks its own capacity threshold; when a wing reaches 90% fill, `dispatchHaulerWing` fires for that wing only.
+- Only ships in the dispatched hauling wing plus its optional combat escort wing are sent to HQ; the rest of the fleet stays on station.
+- Wing commanders apply command-skill bonuses to their own wing scope; a fleet commander may also be a wing commander at the same time without duplicate-stacking the same pilot twice.
+- On HQ arrival: the dispatched wing cargo is deposited, the dispatched ships receive return orders, and the wing dispatch state is cleared when they reach origin.
 
 ## UI: Wing Management in Fleet Card
 
 - `src/ui/panels/FleetPanel.tsx`: "Fleet Wings" collapsible section in expanded fleet card.
   - "+ Create Wing" buttons per wing type.
-  - Each wing: editable name, ship assignment list (drag or dropdown), escort assignment dropdown.
-  - Wing status chip: `Hauling Wing — 2 ships — 3,400 / 4,000 m³ (85%) → hauling to HQ`.
+  - Each wing: compact expandable row with inline rename, wing commander selector, ship assignment dropdowns, escort assignment dropdown, and per-wing dispatch button for hauling wings.
+  - Hauling wing status chip: `Hauling Wing — 2 ships — 3,400 / 4,000 m³ (85%) → hauling to HQ`.
+  - Top cargo module switches to **Hauling Hold** or **Hauling Network** when hauling wings exist and shows aggregate hauling storage.
   - Ships not in any wing shown as "Unassigned" at the bottom.
 
 ## Store Actions
 
 - `createFleetWing(fleetId, type, name): void`
+- `renameFleetWing(fleetId, wingId, name): void`
 - `deleteFleetWing(fleetId, wingId): void`
+- `designateWingCommander(fleetId, wingId, pilotId | null): void`
 - `assignShipToWing(fleetId, shipId, wingId | null): void`
 - `setWingEscort(fleetId, wingId, escortWingId | null): void`
+- `dispatchHaulingWingToHQ(fleetId, wingId?): void`
 
 ## Files Changed
 
 | File | Change |
 |---|---|
-| `src/types/game.types.ts` | Add `FleetWing`, `WingType`; add `wings` to `PlayerFleet` |
-| `src/stores/initialState.ts` | `wings: []` default on fleet |
-| `src/stores/gameStore.ts` | `createFleetWing`, `deleteFleetWing`, `assignShipToWing`, `setWingEscort` |
+| `src/types/game.types.ts` | Add `FleetWing`, `WingType`; add `wings` to `PlayerFleet`; add `commanderId` on `FleetWing` |
+| `src/stores/initialState.ts` | Starter fleet seeded with `Starter Mining Wing` |
+| `src/stores/gameStore.ts` | `createFleetWing`, `renameFleetWing`, `deleteFleetWing`, `designateWingCommander`, `assignShipToWing`, `setWingEscort`, targeted hauling-wing dispatch |
 | `src/game/systems/fleet/wings.logic.ts` | *(new)* wing capacity + dispatch logic |
-| `src/game/core/tickRunner.ts` | Wing-aware haul dispatch trigger |
-| `src/ui/panels/FleetPanel.tsx` | Wing management section |
+| `src/game/core/tickRunner.ts` | Multi-hauler cargo distribution, per-wing auto-haul dispatch, HQ arrival, and return processing |
+| `src/game/systems/fleet/fleet.tick.ts` | Wing-command training eligibility and wing-scope mining bonuses |
+| `src/game/systems/fleet/exploration.logic.ts` | Wing-scope recon bonus propagation for scan strength |
+| `src/ui/panels/FleetPanel.tsx` | Wing management section with compact expandable rows, commander assignment, and per-wing dispatch |
+| `src/game/persistence/saveLoad.ts` | Patch old saves with `wings: []` and `wing.commanderId` |
+
+## What Was Built So Far
+
+- Fleets now support typed `wings` with persistent assignment state.
+- The Fleet panel can create wings, rename them, assign wing commanders, assign ships into them, set combat escorts, and manually dispatch individual hauling wings.
+- New fleets and the starter fleet now begin with an initial populated wing so the opening experience is immediately usable.
+- Hauling wings now own cargo directly via `wing.cargoHold`, and fleets with multiple hauling wings distribute ore across available wing holds.
+- Auto-haul now dispatches ready hauling wings independently, sending only the selected hauling wing and its escort to HQ.
+- Fleet and wing commander bonuses now propagate at ship scope for mining and exploration, and at wing scope for hauling capacity.
+- Wing mutation rules are hardened: wings cannot be mutated while dispatched or while the whole fleet is in transit, and deleting a wing transfers stored cargo back into the fleet hold.
+- A pilot can be both fleet commander and wing commander at the same time; the same pilot's command bonus is only counted once per ship/wing calculation.
+- Fleets with no hauling wing keep the prior FC-1 whole-fleet auto-haul behavior.
+- Fleet, mining, and overview summaries now distinguish total fleet members from operational wing-assigned ships so inactive unwinged ships remain visible without being misreported as active contributors.
 
 ---
 

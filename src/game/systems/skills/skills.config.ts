@@ -12,7 +12,6 @@ export const SKILL_DEFINITIONS: Record<string, SkillDefinition> = {
     id: 'mining', name: 'Mining', description: 'Proficiency with mining lasers. Each level increases ore yield from all active belts.',
     category: 'mining', rank: 2,
     effects: [{ modifier: 'mining-yield', valuePerLevel: 0.05 }],
-    unlocks: ['belt-ferrock', 'belt-corite'],
     pilotTrainable: true,
   },
 
@@ -25,7 +24,6 @@ export const SKILL_DEFINITIONS: Record<string, SkillDefinition> = {
       { modifier: 'belt-pool-size',  valuePerLevel: 0.20 },
     ],
     prerequisiteSkills: { 'mining': 3 },
-    unlocks: ['belt-silisite', 'belt-platonite'],
     pilotTrainable: true,
   },
 
@@ -37,7 +35,6 @@ export const SKILL_DEFINITIONS: Record<string, SkillDefinition> = {
       { modifier: 'belt-respawn-speed',  valuePerLevel: 0.10 },
     ],
     prerequisiteSkills: { 'mining': 4 },
-    unlocks: ['belt-darkstone', 'belt-hematite'],
     pilotTrainable: true,
   },
 
@@ -66,7 +63,6 @@ export const SKILL_DEFINITIONS: Record<string, SkillDefinition> = {
       { modifier: 'haul-speed',          valuePerLevel: 0.10 },
     ],
     prerequisiteSkills: { 'advanced-mining': 3 },
-    unlocks: ['belt-voidite', 'belt-arkonite'],
     pilotTrainable: true,
   },
 
@@ -76,7 +72,6 @@ export const SKILL_DEFINITIONS: Record<string, SkillDefinition> = {
     id: 'spaceship-command', name: 'Spaceship Command', description: 'Core starship operations training. Reduces all skill penalties and improves general ship performance.',
     category: 'spaceship', rank: 1,
     effects: [{ modifier: 'ship-bonus', valuePerLevel: 0.02 }],
-    unlocks: ['system-fleet'],
     pilotTrainable: true,
   },
 

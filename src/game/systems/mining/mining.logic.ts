@@ -1,4 +1,5 @@
 ﻿import type { GameState } from '@/types/game.types';
+import type { GalaxyState } from '@/types/galaxy.types';
 import { ORE_BELTS, MINING_UPGRADES } from './mining.config';
 import { getSkillLevel } from '@/game/systems/skills/skills.logic';
 import {
@@ -12,9 +13,12 @@ import { HULL_DEFINITIONS } from '@/game/systems/fleet/fleet.config';
 // ─── Result type ────────────────────────────────────────────────────────────
 
 export interface MiningTickResult {
-  /** Ore units added to the hold this tick, keyed by resourceId. */
+  /**
+   * Always empty — belt ore production is now handled by fleet.tick.ts → fleet cargoHolds.
+   * Kept for type compatibility with existing save/load code.
+   */
   oreHoldDeltas: Record<string, number>;
-  /** Updated pool levels for each belt that was mined (or respawned). */
+  /** Updated pool levels for each belt that has respawned this tick. */
   newBeltPool: Record<string, number>;
   /** Updated respawn timestamps (0 = belt is active). */
   newBeltRespawnAt: Record<string, number>;
@@ -108,14 +112,18 @@ export function getBeltsForSystem(systemId: string, galaxySeed: number): string[
 }
 
 /**
- * Returns the belt IDs available in the current system, respecting skill gates.
- * Used by MiningPanel to know which tabs/belts to show.
- * @deprecated Prefer getBeltsForSystem(systemId, seed) for fleet-centric code.
+ * Richness multiplier for a belt in a specific system (1.0 = nominal).
+ * Pure function — does not depend on player location.
  */
-export function getCurrentSystemBeltIds(state: GameState): string[] {
-  if (!state.galaxy) return Object.keys(ORE_BELTS);
-  const system = getSystemById(state.galaxy.seed, state.galaxy.currentSystemId);
-  return getSystemBeltIds(system);
+export function getBeltRichnessForSystem(galaxy: GalaxyState, beltId: string, systemId: string): number {
+  const system = getSystemById(galaxy.seed, systemId);
+  for (const body of system.bodies) {
+    if (body.beltIds.includes(beltId)) {
+      const override = galaxy.beltRichnessOverride?.[systemId]?.[beltId];
+      return override ?? body.richness[beltId] ?? 1.0;
+    }
+  }
+  return 1.0;
 }
 
 /**
@@ -124,18 +132,11 @@ export function getCurrentSystemBeltIds(state: GameState): string[] {
  */
 export function getBeltRichness(state: GameState, beltId: string): number {
   if (!state.galaxy) return 1.0;
-  const system = getSystemById(state.galaxy.seed, state.galaxy.currentSystemId);
-  for (const body of system.bodies) {
-    if (body.beltIds.includes(beltId)) {
-      const override = state.galaxy.beltRichnessOverride?.[state.galaxy.currentSystemId]?.[beltId];
-      return override ?? body.richness[beltId] ?? 1.0;
-    }
-  }
-  return 1.0;
+  return getBeltRichnessForSystem(state.galaxy, beltId, state.galaxy.currentSystemId);
 }
 
 /** Effective pool size for a belt after upgrades/skills. */
-function getEffectiveBeltPool(state: GameState, beltId: string): number {
+export function getEffectiveBeltPool(state: GameState, beltId: string): number {
   const def = ORE_BELTS[beltId];
   if (!def) return 0;
   const poolMod = state.modifiers['belt-pool-size'] ?? 0;
@@ -144,91 +145,26 @@ function getEffectiveBeltPool(state: GameState, beltId: string): number {
 
 // ─── Main tick function ──────────────────────────────────────────────────────
 
-/** Produces ore into the hold, handles pool depletion and respawning. */
+/**
+ * Ticks belt pool respawn timers only.
+ * Ore production is now handled exclusively by fleet.tick.ts → fleet cargoHolds.
+ * This function restores depleted belt pools when their respawn timer expires.
+ */
 export function tickMining(state: GameState, deltaSeconds: number): MiningTickResult {
-  const { targets } = state.systems.mining;
-  const beltPool       = state.systems.mining.beltPool ?? {};
-  const beltRespawnAt  = state.systems.mining.beltRespawnAt ?? {};
-  const upgradeMultiplier = getMiningUpgradeMultiplier(state);
-  const skillMultiplier   = getMiningSkillMultiplier(state);
-  const fleetMultiplier   = getFleetMiningMultiplier(state);
-  const deepOreBonus      = 1 + (state.modifiers['deep-ore-yield'] ?? 0);
-  const nowMs             = state.lastUpdatedAt + Math.round(deltaSeconds * 1000);
+  const beltRespawnAt = state.systems.mining.beltRespawnAt ?? {};
+  const nowMs = state.lastUpdatedAt + Math.round(deltaSeconds * 1000);
 
-  const capacity        = getOreHoldCapacity(state);
-  const currentHoldUsed = getOreHoldUsed(state);
-  let availableHoldSpace = Math.max(0, capacity - currentHoldUsed);
-
-  const oreHoldDeltas:   Record<string, number> = {};
-  const newBeltPool:     Record<string, number> = {};
+  const newBeltPool: Record<string, number> = {};
   const newBeltRespawnAt: Record<string, number> = {};
-  const autoDeactivated: string[] = [];
 
-  // ── 1. Check respawn timers ──────────────────────────────────────────────
+  // Restore any belts whose respawn timer has elapsed
   for (const [beltId, respawnAt] of Object.entries(beltRespawnAt)) {
     if (respawnAt > 0 && nowMs >= respawnAt) {
-      // Belt has respawned — restore pool; leave respawnAt as 0
-      newBeltPool[beltId]     = getEffectiveBeltPool(state, beltId);
+      newBeltPool[beltId]      = getEffectiveBeltPool(state, beltId);
       newBeltRespawnAt[beltId] = 0;
     }
   }
 
-  // ── 2. Mine active belts ────────────────────────────────────────────────
-  for (const [beltId, isActive] of Object.entries(targets)) {
-    if (!isActive) continue;
-    if (!isBeltAccessible(state, beltId)) continue;
-
-    const def = ORE_BELTS[beltId];
-    if (!def) continue;
-
-    // Is this belt in a respawning state?
-    const effectiveRespawnAt = newBeltRespawnAt[beltId] ?? beltRespawnAt[beltId] ?? 0;
-    if (effectiveRespawnAt > 0) continue; // still depleted
-
-    const effectivePool = getEffectiveBeltPool(state, beltId);
-    // Undefined pool entry = belt is at full capacity (safe default for old saves)
-    const poolRemaining = newBeltPool[beltId] ?? beltPool[beltId] ?? effectivePool;
-
-    const isDeep = def.securityTier === 'lowsec' || def.securityTier === 'nullsec';
-    const deepFactor    = isDeep ? deepOreBonus : 1;
-    const richnessFactor = getBeltRichness(state, beltId);
-
-    // Total raw yield for this tick across all outputs
-    let totalYieldThisTick = 0;
-    for (const output of def.outputs) {
-      totalYieldThisTick +=
-        output.baseRate * upgradeMultiplier * skillMultiplier * fleetMultiplier * deepFactor * richnessFactor * deltaSeconds;
-    }
-
-    // Clamp to: available hold space AND remaining pool
-    const actualYield = Math.min(totalYieldThisTick, availableHoldSpace, poolRemaining);
-    if (actualYield <= 0) continue;
-
-    // Distribute proportionally across outputs
-    const scale = actualYield / totalYieldThisTick;
-    for (const output of def.outputs) {
-      const amount =
-        output.baseRate * upgradeMultiplier * skillMultiplier * fleetMultiplier * deepFactor * richnessFactor * deltaSeconds * scale;
-      if (amount > 0) {
-        oreHoldDeltas[output.resourceId] = (oreHoldDeltas[output.resourceId] ?? 0) + amount;
-      }
-    }
-
-    availableHoldSpace -= actualYield;
-
-    const newPool = poolRemaining - actualYield;
-    newBeltPool[beltId] = newPool;
-
-    if (newPool <= 0) {
-      // Belt exhausted
-      newBeltPool[beltId]      = 0;
-      const respawnSpeedMod    = state.modifiers['belt-respawn-speed'] ?? 0;
-      const respawnMs          = Math.floor(def.respawnSeconds / (1 + respawnSpeedMod)) * 1000;
-      newBeltRespawnAt[beltId] = nowMs + respawnMs;
-      autoDeactivated.push(beltId);
-    }
-  }
-
-  return { oreHoldDeltas, newBeltPool, newBeltRespawnAt, autoDeactivated };
+  return { oreHoldDeltas: {}, newBeltPool, newBeltRespawnAt, autoDeactivated: [] };
 }
 

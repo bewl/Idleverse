@@ -534,7 +534,8 @@ function UnlocksTab() {
 // ─── Scenarios Tab ────────────────────────────────────────────────────────────
 
 function ScenariosTab() {
-  const [applied, setApplied] = useState<string | null>(null);
+  const [applied,   setApplied]   = useState<string | null>(null);
+  const [wipePending, setWipePending] = useState(false);
 
   const apply = useCallback((scenario: ScenarioDef) => {
     // Always read fresh state at the moment the button is clicked
@@ -586,6 +587,62 @@ function ScenariosTab() {
           </div>
         );
       })}
+
+      {/* ── Danger zone ─────────────────────────────────────────────────── */}
+      <div style={{
+        marginTop: 10, padding: '8px 10px', borderRadius: 5,
+        border: '1px solid rgba(239,68,68,0.2)',
+        background: 'rgba(69,10,10,0.15)',
+      }}>
+        <span style={{ fontSize: 9, fontWeight: 700, color: '#f87171', letterSpacing: '0.1em', fontFamily: 'monospace' }}>
+          ⚠ DANGER ZONE
+        </span>
+        <p style={{ fontSize: 9, color: '#78716c', margin: '4px 0 8px', lineHeight: 1.4 }}>
+          Wipes the save file and resets game state to a fresh new game. Cannot be undone.
+        </p>
+        {wipePending ? (
+          <div style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
+            <span style={{ fontSize: 9, color: '#fca5a5', fontFamily: 'monospace', flex: 1 }}>Sure? This can't be undone.</span>
+            <button
+              onClick={() => {
+                useGameStore.getState().clearSave();
+                setWipePending(false);
+              }}
+              style={{
+                padding: '3px 10px', fontSize: 9, fontFamily: 'monospace', fontWeight: 700,
+                border: '1px solid rgba(239,68,68,0.6)', borderRadius: 3,
+                background: 'rgba(127,29,29,0.5)', color: '#fca5a5',
+                cursor: 'pointer',
+              }}
+            >
+              Yes, wipe it
+            </button>
+            <button
+              onClick={() => setWipePending(false)}
+              style={{
+                padding: '3px 8px', fontSize: 9, fontFamily: 'monospace',
+                border: '1px solid rgba(71,85,105,0.4)', borderRadius: 3,
+                background: 'rgba(15,23,42,0.6)', color: '#64748b',
+                cursor: 'pointer',
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => setWipePending(true)}
+            style={{
+              padding: '3px 12px', fontSize: 9, fontFamily: 'monospace', fontWeight: 700,
+              border: '1px solid rgba(239,68,68,0.35)', borderRadius: 3,
+              background: 'rgba(69,10,10,0.3)', color: '#f87171',
+              cursor: 'pointer',
+            }}
+          >
+            🗑 Wipe Save
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -1249,14 +1306,6 @@ export function DevPanel({ open, onToggle }: DevPanelProps) {
     window.addEventListener('mouseup', onUp);
   }, [pos]);
 
-  const clearSave = useGameStore(s => s.clearSave);
-
-  const handleReset = useCallback(() => {
-    if (window.confirm('[DEV] Hard-reset game to initial state? This cannot be undone.')) {
-      clearSave();
-    }
-  }, [clearSave]);
-
   return createPortal(
     <>
 
@@ -1346,17 +1395,6 @@ export function DevPanel({ open, onToggle }: DevPanelProps) {
             <span style={{ fontSize: 8, color: '#292524', fontFamily: 'monospace' }}>
               DEV BUILD — not included in production
             </span>
-            <button
-              onClick={handleReset}
-              style={{
-                fontSize: 8, fontFamily: 'monospace', fontWeight: 700, padding: '2px 8px',
-                border: '1px solid rgba(239,68,68,0.3)', borderRadius: 3,
-                background: 'rgba(127,29,29,0.2)', color: '#f87171',
-                cursor: 'pointer', letterSpacing: '0.08em',
-              }}
-            >
-              RESET GAME
-            </button>
           </div>
         </div>
       )}

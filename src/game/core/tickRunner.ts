@@ -1,5 +1,6 @@
 ﻿import type { GameState } from '@/types/game.types';
-import { tickMining, getOreHoldCapacity, getHaulIntervalSeconds } from '@/game/systems/mining/mining.logic';
+import { tickMining } from '@/game/systems/mining/mining.logic';
+import { ORE_BELTS } from '@/game/systems/mining/mining.config';
 import { tickSkills } from '@/game/systems/skills/skills.logic';
 import { tickManufacturing, tickResearch } from '@/game/systems/manufacturing/manufacturing.logic';
 import { tickReprocessing } from '@/game/systems/reprocessing/reprocessing.logic';
@@ -13,11 +14,58 @@ import { tickCombat } from '@/game/systems/combat/combat.logic';
 import { tickExploration } from '@/game/systems/fleet/exploration.logic';
 import { computeFleetCargoCapacity } from '@/game/systems/fleet/fleet.logic';
 import { issueFleetGroupOrder } from '@/game/systems/fleet/fleet.orders';
+import { getCombinedCommanderBonus } from '@/game/systems/fleet/commander.logic';
+import { dispatchHaulerWing, getFleetStoredCargo, getHaulingWings, getWingCargoCapacity, getWingCargoUsed, processWingArrivalAtHQ, processWingReturn } from '@/game/systems/fleet/wings.logic';
 
 export interface TickResult {
   newState: GameState;
   completedManufacturing: Record<string, number>;
   skillsAdvanced: Array<{ skillId: string; fromLevel: number; toLevel: number }>;
+}
+
+function getEffectiveWingCargoCapacity(state: GameState, fleet: GameState['systems']['fleet']['fleets'][string], wing: GameState['systems']['fleet']['fleets'][string]['wings'][number]): number {
+  const cargoBonus = getCombinedCommanderBonus(state.systems.fleet.pilots, fleet, wing, 'commander-cargo-capacity');
+  return getWingCargoCapacity(wing, state.systems.fleet.ships, cargoBonus);
+}
+
+function distributeCargoAcrossHaulingWings(
+  state: GameState,
+  fleet: GameState['systems']['fleet']['fleets'][string],
+  cargoSource: Record<string, number>,
+): {
+  nextWings: GameState['systems']['fleet']['fleets'][string]['wings'];
+  remainingCargo: Record<string, number>;
+} {
+  const remainingCargo = { ...cargoSource };
+  const nextWings = [...(fleet.wings ?? [])];
+
+  for (const haulingWing of getHaulingWings(fleet).filter(wing => !wing.isDispatched)) {
+    const wingIndex = nextWings.findIndex(wing => wing.id === haulingWing.id);
+    if (wingIndex < 0) continue;
+
+    const wing = nextWings[wingIndex];
+    const wingCapacity = getEffectiveWingCargoCapacity(state, fleet, wing);
+    let spaceLeft = Math.max(0, wingCapacity - getWingCargoUsed(wing));
+    if (spaceLeft <= 0) continue;
+
+    const nextCargoHold = { ...(wing.cargoHold ?? {}) };
+    for (const [resourceId, amount] of Object.entries(remainingCargo)) {
+      if (amount <= 0 || spaceLeft <= 0) continue;
+      const moved = Math.min(amount, spaceLeft);
+      nextCargoHold[resourceId] = (nextCargoHold[resourceId] ?? 0) + moved;
+      remainingCargo[resourceId] -= moved;
+      spaceLeft -= moved;
+    }
+
+    nextWings[wingIndex] = { ...wing, cargoHold: nextCargoHold };
+  }
+
+  const compactRemainingCargo: Record<string, number> = {};
+  for (const [resourceId, amount] of Object.entries(remainingCargo)) {
+    if (amount > 0) compactRemainingCargo[resourceId] = amount;
+  }
+
+  return { nextWings, remainingCargo: compactRemainingCargo };
 }
 
 export function runTick(state: GameState, deltaSeconds: number): TickResult {
@@ -46,76 +94,19 @@ export function runTick(state: GameState, deltaSeconds: number): TickResult {
     s = { ...s, unlocks: { ...s.unlocks, ...skillsResult.unlockDeltas } };
   }
 
-  // ── 2. Mining: produce ores into ore hold ────────────────────────────────────
-  const miningResult = tickMining(s, deltaSeconds);
-
+  // ── 2. Mining: tick belt pool respawn timers ─────────────────────────────────
+  // Ore production is now handled by fleet.tick.ts (step 8) → fleet cargoHolds.
+  // This step only restores depleted belt pools when their respawn timer expires.
   {
-    // Apply ore hold deltas (capped by capacity)
-    const capacity = getOreHoldCapacity(s);
-    const currentUsed = Object.values(s.systems.mining.oreHold ?? {}).reduce((a, v) => a + v, 0);
-    let spaceLeft = Math.max(0, capacity - currentUsed);
-
-    const newOreHold = { ...s.systems.mining.oreHold ?? {} };
-    for (const [resourceId, delta] of Object.entries(miningResult.oreHoldDeltas)) {
-      const clamped = Math.min(delta, spaceLeft);
-      if (clamped <= 0) continue;
-      newOreHold[resourceId] = (newOreHold[resourceId] ?? 0) + clamped;
-      spaceLeft -= clamped;
-    }
-
-    // Merge belt pool & respawn meta
-    const newBeltPool     = { ...s.systems.mining.beltPool ?? {},     ...miningResult.newBeltPool };
-    const newBeltRespawnAt = { ...s.systems.mining.beltRespawnAt ?? {}, ...miningResult.newBeltRespawnAt };
-
-    // Deactivate depleted belts
-    const newTargets = { ...s.systems.mining.targets };
-    for (const beltId of miningResult.autoDeactivated) {
-      newTargets[beltId] = false;
-    }
-
-    // Lifetime tracking (ore that reached the hold counts)
-    const newLifetime = { ...s.systems.mining.lifetimeProduced ?? {} };
-    for (const [resourceId, delta] of Object.entries(miningResult.oreHoldDeltas)) {
-      newLifetime[resourceId] = (newLifetime[resourceId] ?? 0) + delta;
-    }
-
-    s = {
-      ...s,
-      systems: {
-        ...s.systems,
-        mining: {
-          ...s.systems.mining,
-          targets: newTargets,
-          oreHold: newOreHold,
-          beltPool: newBeltPool,
-          beltRespawnAt: newBeltRespawnAt,
-          lifetimeProduced: newLifetime,
-        },
-      },
-    };
-
-    // ── 2a. Auto-haul trigger ─────────────────────────────────────────────
-    const haulIntervalMs = getHaulIntervalSeconds(s) * 1000;
-    const nowMs = s.lastUpdatedAt + Math.round(deltaSeconds * 1000);
-    const lastHaulAt = s.systems.mining.lastHaulAt ?? s.lastUpdatedAt;
-    if (nowMs - lastHaulAt >= haulIntervalMs) {
-      // Flush hold into resources
-      const newResources = { ...s.resources };
-      const flushedHold: Record<string, number> = {};
-      for (const [resourceId, amount] of Object.entries(s.systems.mining.oreHold ?? {})) {
-        newResources[resourceId] = (newResources[resourceId] ?? 0) + amount;
-        flushedHold[resourceId]  = 0;
-      }
+    const miningResult = tickMining(s, deltaSeconds);
+    if (Object.keys(miningResult.newBeltPool).length > 0 || Object.keys(miningResult.newBeltRespawnAt).length > 0) {
+      const newBeltPool      = { ...s.systems.mining.beltPool ?? {},     ...miningResult.newBeltPool };
+      const newBeltRespawnAt = { ...s.systems.mining.beltRespawnAt ?? {}, ...miningResult.newBeltRespawnAt };
       s = {
         ...s,
-        resources: newResources,
         systems: {
           ...s.systems,
-          mining: {
-            ...s.systems.mining,
-            oreHold: flushedHold,
-            lastHaulAt: nowMs,
-          },
+          mining: { ...s.systems.mining, beltPool: newBeltPool, beltRespawnAt: newBeltRespawnAt },
         },
       };
     }
@@ -317,25 +308,77 @@ export function runTick(state: GameState, deltaSeconds: number): TickResult {
       },
     };
 
-    // ── FC-1b: Apply fleet mining oreDeltas to fleet cargoHolds ──────────
+    // ── FC-1b / FC-3: Apply fleet mining oreDeltas to storage ───────────
     if (Object.keys(fleetResult.oreDeltas).length > 0) {
       const newFleets = { ...s.systems.fleet.fleets };
       for (const [fleetId, fleetOreDelta] of Object.entries(fleetResult.oreDeltas)) {
         const fleet = newFleets[fleetId];
         if (!fleet) continue;
-        const capacity = computeFleetCargoCapacity(fleet, s.systems.fleet.ships);
-        const currentUsed = Object.values(fleet.cargoHold).reduce((a, v) => a + v, 0);
-        let spaceLeft = Math.max(0, capacity - currentUsed);
-        const newCargoHold = { ...fleet.cargoHold };
-        for (const [resourceId, amount] of Object.entries(fleetOreDelta)) {
-          const clamped = Math.min(amount, spaceLeft);
-          if (clamped <= 0) continue;
-          newCargoHold[resourceId] = (newCargoHold[resourceId] ?? 0) + clamped;
-          spaceLeft -= clamped;
+        const haulingWings = getHaulingWings(fleet);
+        if (haulingWings.length > 0) {
+          const combinedCargo = { ...fleet.cargoHold };
+          for (const [resourceId, amount] of Object.entries(fleetOreDelta)) {
+            combinedCargo[resourceId] = (combinedCargo[resourceId] ?? 0) + amount;
+          }
+          const { nextWings, remainingCargo } = distributeCargoAcrossHaulingWings(s, fleet, combinedCargo);
+          newFleets[fleetId] = { ...fleet, wings: nextWings, cargoHold: remainingCargo };
+        } else {
+          const capacity = computeFleetCargoCapacity(fleet, s.systems.fleet.ships);
+          const currentUsed = Object.values(fleet.cargoHold).reduce((a, v) => a + v, 0);
+          let spaceLeft = Math.max(0, capacity - currentUsed);
+          const newCargoHold = { ...fleet.cargoHold };
+          for (const [resourceId, amount] of Object.entries(fleetOreDelta)) {
+            const clamped = Math.min(amount, spaceLeft);
+            if (clamped <= 0) continue;
+            newCargoHold[resourceId] = (newCargoHold[resourceId] ?? 0) + clamped;
+            spaceLeft -= clamped;
+          }
+          newFleets[fleetId] = { ...fleet, cargoHold: newCargoHold };
         }
-        newFleets[fleetId] = { ...fleet, cargoHold: newCargoHold };
       }
       s = { ...s, systems: { ...s.systems, fleet: { ...s.systems.fleet, fleets: newFleets } } };
+    }
+
+    // ── FC-1: Apply fleet belt pool depletion ───────────────────────────
+    if (Object.keys(fleetResult.beltPoolDeltas).length > 0) {
+      const poolSizeMod      = s.modifiers['belt-pool-size'] ?? 0;
+      const respawnSpeedMod  = s.modifiers['belt-respawn-speed'] ?? 0;
+      const currentBeltPool  = { ...s.systems.mining.beltPool ?? {} };
+      const currentRespawnAt = { ...s.systems.mining.beltRespawnAt ?? {} };
+      const shipsToUnassign  = { ...s.systems.fleet.ships };
+      let anyShipUnassigned  = false;
+
+      for (const [beltId, consumed] of Object.entries(fleetResult.beltPoolDeltas)) {
+        if ((currentRespawnAt[beltId] ?? 0) > 0) continue; // belt already respawning
+        const def = ORE_BELTS[beltId as keyof typeof ORE_BELTS];
+        if (!def) continue;
+        const poolMax  = Math.floor(def.poolSize * (1 + poolSizeMod));
+        const current  = currentBeltPool[beltId] ?? poolMax;
+        const newPool  = Math.max(0, current - consumed);
+        currentBeltPool[beltId] = newPool;
+        if (newPool <= 0) {
+          currentBeltPool[beltId]  = 0;
+          currentRespawnAt[beltId] = nowMs + Math.floor(def.respawnSeconds / (1 + respawnSpeedMod)) * 1000;
+          // Unassign all ships that were mining this belt
+          for (const [shipId, ship] of Object.entries(shipsToUnassign)) {
+            if (ship.assignedBeltId === beltId) {
+              shipsToUnassign[shipId] = { ...ship, assignedBeltId: undefined };
+              anyShipUnassigned = true;
+            }
+          }
+        }
+      }
+
+      s = {
+        ...s,
+        systems: {
+          ...s.systems,
+          mining: { ...s.systems.mining, beltPool: currentBeltPool, beltRespawnAt: currentRespawnAt },
+          fleet:  anyShipUnassigned
+            ? { ...s.systems.fleet, ships: shipsToUnassign }
+            : s.systems.fleet,
+        },
+      };
     }
 
     // ── FC-1e: Auto-haul — issue route to HQ when fleet cargo ≥ 80% ─────
@@ -344,13 +387,88 @@ export function runTick(state: GameState, deltaSeconds: number): TickResult {
       if (homeSystemId) {
         for (const [fleetId, fleet] of Object.entries(s.systems.fleet.fleets)) {
           if (fleet.fleetOrder) continue;
-          if (fleet.currentSystemId === homeSystemId) continue;
+          const haulingWings = getHaulingWings(fleet);
+          if (haulingWings.length > 0) {
+            for (const haulingWing of haulingWings) {
+              if (haulingWing.isDispatched) continue;
+              const wingCapacity = getEffectiveWingCargoCapacity(s, fleet, haulingWing);
+              if (wingCapacity <= 0) continue;
+              const used = getWingCargoUsed(haulingWing);
+              if (used < wingCapacity * 0.9) continue;
+
+              if (fleet.currentSystemId === homeSystemId) {
+                const newResources = { ...s.resources };
+                for (const [resourceId, amount] of Object.entries(haulingWing.cargoHold ?? {})) {
+                  if (amount > 0) newResources[resourceId] = (newResources[resourceId] ?? 0) + amount;
+                }
+                const clearedWings = fleet.wings.map(wing =>
+                  wing.id === haulingWing.id ? { ...wing, cargoHold: {} } : wing,
+                );
+                s = {
+                  ...s,
+                  resources: newResources,
+                  systems: {
+                    ...s.systems,
+                    fleet: {
+                      ...s.systems.fleet,
+                      fleets: {
+                        ...s.systems.fleet.fleets,
+                        [fleetId]: { ...fleet, wings: clearedWings },
+                      },
+                    },
+                  },
+                };
+              } else {
+                const hauledWingState = dispatchHaulerWing(s, fleetId, haulingWing.id, homeSystemId);
+                if (hauledWingState) s = hauledWingState;
+              }
+            }
+            continue;
+          }
+
           const capacity = computeFleetCargoCapacity(fleet, s.systems.fleet.ships);
           if (capacity <= 0) continue;
-          const used = Object.values(fleet.cargoHold).reduce((a, v) => a + v, 0);
+          const used = getFleetStoredCargo(fleet);
           if (used < capacity * 0.8) continue;
-          const hauled = issueFleetGroupOrder(s, fleetId, homeSystemId);
-          if (hauled) s = hauled;
+
+          if (fleet.currentSystemId === homeSystemId) {
+            // Fleet is already at HQ — dump immediately without a haul trip
+            const newResources = { ...s.resources };
+            for (const [resourceId, amount] of Object.entries(fleet.cargoHold)) {
+              if (amount > 0) newResources[resourceId] = (newResources[resourceId] ?? 0) + amount;
+            }
+            s = {
+              ...s,
+              resources: newResources,
+              systems: {
+                ...s.systems,
+                fleet: {
+                  ...s.systems.fleet,
+                  fleets: {
+                    ...s.systems.fleet.fleets,
+                    [fleetId]: { ...fleet, cargoHold: {} },
+                  },
+                },
+              },
+            };
+          } else {
+            // Fleet is away from HQ — stamp origin and dispatch a haul trip
+            s = {
+              ...s,
+              systems: {
+                ...s.systems,
+                fleet: {
+                  ...s.systems.fleet,
+                  fleets: {
+                    ...s.systems.fleet.fleets,
+                    [fleetId]: { ...fleet, miningOriginSystemId: fleet.currentSystemId },
+                  },
+                },
+              },
+            };
+            const hauled = issueFleetGroupOrder(s, fleetId, homeSystemId);
+            if (hauled) s = hauled;
+          }
         }
       }
     }
@@ -359,14 +477,24 @@ export function runTick(state: GameState, deltaSeconds: number): TickResult {
     const orderResult = advanceFleetOrders(s);
     s = orderResult.newState;
 
-    // ── FC-1e: Dump cargoHold when fleet is stationary at Corp HQ ────────
+    // ── FC-1e: Dump cargoHold when fleet arrives at Corp HQ after a haul trip ─
     {
       const homeSystemId = s.systems.factions.homeStationSystemId;
       if (homeSystemId) {
+        for (const fleetId of Object.keys(s.systems.fleet.fleets)) {
+          const fleet = s.systems.fleet.fleets[fleetId];
+          for (const haulingWing of getHaulingWings(fleet).filter(wing => wing.isDispatched)) {
+            const updated = processWingArrivalAtHQ(s, fleetId, haulingWing.id, homeSystemId);
+            if (updated) s = updated;
+          }
+        }
+
         let newResources = s.resources;
         let newFleets = s.systems.fleet.fleets;
         let dumpHappened = false;
         for (const [fleetId, fleet] of Object.entries(newFleets)) {
+          if (getHaulingWings(fleet).length > 0) continue;
+          if (!fleet.miningOriginSystemId) continue; // only dump fleets that completed a haul trip
           if (fleet.currentSystemId !== homeSystemId) continue;
           if (fleet.fleetOrder) continue; // still in transit
           const held = Object.entries(fleet.cargoHold).filter(([, v]) => v > 0);
@@ -388,6 +516,62 @@ export function runTick(state: GameState, deltaSeconds: number): TickResult {
             systems: { ...s.systems, fleet: { ...s.systems.fleet, fleets: newFleets } },
           };
         }
+      }
+    }
+
+    // ── FC-1e: Return fleet to mining origin after cargo dump ─────────────────
+    {
+      const homeSystemId = s.systems.factions.homeStationSystemId;
+      if (homeSystemId) {
+        for (const [fleetId, fleet] of Object.entries(s.systems.fleet.fleets)) {
+          if (getHaulingWings(fleet).length > 0) continue;
+          if (!fleet.miningOriginSystemId) continue;
+          if (fleet.currentSystemId !== homeSystemId) continue;
+          if (fleet.fleetOrder) continue;
+          const returned = issueFleetGroupOrder(s, fleetId, fleet.miningOriginSystemId);
+          if (returned) s = returned;
+        }
+      }
+    }
+
+    // ── FC-1e: Restore mining activity when fleet returns to mining origin ────
+    {
+      for (const fleetId of Object.keys(s.systems.fleet.fleets)) {
+        const fleet = s.systems.fleet.fleets[fleetId];
+        for (const haulingWing of getHaulingWings(fleet).filter(wing => wing.isDispatched)) {
+          const updated = processWingReturn(s, fleetId, haulingWing.id);
+          if (updated) s = updated;
+        }
+      }
+
+      for (const [fleetId, fleet] of Object.entries(s.systems.fleet.fleets)) {
+        if (getHaulingWings(fleet).length > 0) continue;
+        if (!fleet.miningOriginSystemId) continue;
+        if (fleet.currentSystemId !== fleet.miningOriginSystemId) continue;
+        if (fleet.fleetOrder) continue;
+        let newShips = s.systems.fleet.ships;
+        let anyRestored = false;
+        for (const sid of fleet.shipIds) {
+          const ship = newShips[sid];
+          if (ship && ship.assignedBeltId && ship.activity === 'idle') {
+            newShips = { ...newShips, [sid]: { ...ship, activity: 'mining' } };
+            anyRestored = true;
+          }
+        }
+        s = {
+          ...s,
+          systems: {
+            ...s.systems,
+            fleet: {
+              ...s.systems.fleet,
+              ships: anyRestored ? newShips : s.systems.fleet.ships,
+              fleets: {
+                ...s.systems.fleet.fleets,
+                [fleetId]: { ...fleet, miningOriginSystemId: undefined },
+              },
+            },
+          },
+        };
       }
     }
 

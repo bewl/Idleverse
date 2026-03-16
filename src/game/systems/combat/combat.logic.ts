@@ -10,6 +10,7 @@ import {
 import { mulberry32, childSeed, randInt, randFloat, randPick } from '@/game/utils/prng';
 import { generateGalaxy } from '@/game/galaxy/galaxy.gen';
 import { computeRoleAdjustedCombatStats } from '@/game/systems/fleet/fleet.logic';
+import { getOperationalFleetShipIds } from '@/game/systems/fleet/wings.logic';
 
 // ─── String → seed helper ───────────────────────────────────────────────────
 
@@ -88,7 +89,8 @@ export function computeFleetCombatRating(state: GameState, fleetId: string): num
   const fleet = state.systems.fleet.fleets[fleetId];
   if (!fleet) return 0;
 
-  const fleetShips = fleet.shipIds
+  const operationalShipIds = getOperationalFleetShipIds(fleet);
+  const fleetShips = operationalShipIds
     .map(id => state.systems.fleet.ships[id])
     .filter(Boolean)
     .filter(s => s.hullDamage < 80);
@@ -122,7 +124,7 @@ export function resolveCombat(
   const fleet = state.systems.fleet.fleets[fleetId];
   if (!fleet) return { victory: false, avgHullDamage: 30, bountyEarned: 0, lootGained: {} };
 
-  const fleetShips = fleet.shipIds
+  const fleetShips = getOperationalFleetShipIds(fleet)
     .map(id => state.systems.fleet.ships[id])
     .filter(Boolean)
     .filter(s => s.hullDamage < 80);
@@ -219,7 +221,7 @@ export function tickCombat(state: GameState, deltaSeconds: number): CombatTickRe
 
     // Apply hull damage per ship (role-specific multipliers)
     const updatedShips = { ...s.systems.fleet.ships };
-    const fleetShipIds = fleet.shipIds.filter(id => updatedShips[id] && updatedShips[id].hullDamage < 80);
+    const fleetShipIds = getOperationalFleetShipIds(fleet).filter(id => updatedShips[id] && updatedShips[id].hullDamage < 80);
     for (const shipId of fleetShipIds) {
       const ship = updatedShips[shipId];
       let roleDamageMult = 1.0;
@@ -331,7 +333,7 @@ export function issuePatrolOrderInState(state: GameState, fleetId: string): Game
   if (!fleet) return null;
 
   // Require at least one pilot in the fleet with spaceship-command >= 2
-  const fleetPilotIds = fleet.shipIds
+  const fleetPilotIds = getOperationalFleetShipIds(fleet)
     .map(id => state.systems.fleet.ships[id]?.assignedPilotId)
     .filter(Boolean) as string[];
 
@@ -375,7 +377,7 @@ export function issueCombatRaidOrderInState(
   const fleet = state.systems.fleet.fleets[fleetId];
   if (!fleet) return null;
 
-  const fleetPilotIds = fleet.shipIds
+  const fleetPilotIds = getOperationalFleetShipIds(fleet)
     .map(id => state.systems.fleet.ships[id]?.assignedPilotId)
     .filter(Boolean) as string[];
 

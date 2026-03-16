@@ -2,6 +2,7 @@ import type { GameState, ShipInstance, FleetActivity, PlayerFleet, ShipRole, Fle
 import { HULL_DEFINITIONS, MODULE_DEFINITIONS, DOCTRINE_DEFINITIONS } from './fleet.config';
 import { getPilotMiningBonus, getPilotCombatBonus, getPilotHaulingBonus, getPilotMoraleMultiplier, canPilotFlyShip } from './pilot.logic';
 import { BASE_SHIP_CARGO_M3 } from '@/game/balance/constants';
+import { ORE_BELTS } from '@/game/systems/mining/mining.config';
 
 // ─── Ship deployment ───────────────────────────────────────────────────────
 
@@ -179,6 +180,15 @@ export function setShipActivity(
 ): GameState | null {
   const ship = state.systems.fleet.ships[shipId];
   if (!ship) return null;
+
+  // Belt skill gate: block assignment to restricted belts if player lacks the required skill
+  if (activity === 'mining') {
+    const effectiveBeltId = assignedBeltId ?? ship.assignedBeltId;
+    if (effectiveBeltId) {
+      const req = ORE_BELTS[effectiveBeltId]?.requiredSkill;
+      if (req && (state.systems.skills.levels[req.skillId] ?? 0) < req.minLevel) return null;
+    }
+  }
 
   const newShip: ShipInstance = {
     ...ship,
@@ -416,6 +426,7 @@ export function createPlayerFleet(
   }
 
   const fleetId = `fleet-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 5)}`;
+  const defaultWingId = `wing-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
   const fleet: PlayerFleet = {
     id: fleetId,
     name: name.trim() || `Fleet ${Object.keys(fleets).length + 1}`,
@@ -427,6 +438,18 @@ export function createPlayerFleet(
     maxJumpRangeLY: computeFleetJumpRange(state, shipIds),
     doctrine: 'balanced',
     cargoHold: {},
+    commanderId: null,
+    wings: [{
+      id: defaultWingId,
+      name: 'Operations Wing 1',
+      type: 'mining',
+      shipIds: [...shipIds],
+      commanderId: null,
+      cargoHold: {},
+      escortWingId: null,
+      isDispatched: false,
+      haulingOriginSystemId: null,
+    }],
   };
 
   // Tag all ships with the fleet IDI wan
@@ -549,10 +572,21 @@ export function removeShipFromFleet(
     };
   }
 
+  const nextWings = (fleet.wings ?? []).map(wing => {
+    const nextShipIds = wing.shipIds.filter(id => id !== shipId);
+    const commanderShipId = wing.commanderId ? state.systems.fleet.pilots[wing.commanderId]?.assignedShipId : null;
+    return {
+      ...wing,
+      shipIds: nextShipIds,
+      commanderId: commanderShipId && nextShipIds.includes(commanderShipId) ? wing.commanderId : null,
+    };
+  });
+
   const newFleet: PlayerFleet = {
     ...fleet,
     shipIds: newShipIds,
     maxJumpRangeLY: computeFleetJumpRange(state, newShipIds),
+    wings: nextWings,
   };
 
   return {

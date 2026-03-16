@@ -298,6 +298,28 @@ export interface ShipInstance {
   hullDamage: number;
 }
 
+// ─── Fleet Wings ──────────────────────────────────────────────────────────
+
+export type WingType = 'mining' | 'hauling' | 'combat' | 'recon' | 'industrial';
+
+export interface FleetWing {
+  id: string;
+  name: string;
+  type: WingType;
+  /** IDs of ships assigned to this wing. A ship belongs to at most one wing. */
+  shipIds: string[];
+  /** Pilot ID of the wing commander, or null if none. */
+  commanderId: string | null;
+  /** Ore currently stored in this wing's hold. Used by hauling wings. */
+  cargoHold: Record<string, number>;
+  /** Combat wing that escorts this wing on haul trips. */
+  escortWingId: string | null;
+  /** True while this wing's ships are dispatched on a haul trip to Corp HQ. */
+  isDispatched: boolean;
+  /** System the wing departed from — used to issue the return trip. */
+  haulingOriginSystemId: string | null;
+}
+
 // ─── Player Fleet (named group of ships) ───────────────────────────────────
 
 /**
@@ -323,6 +345,12 @@ export interface PlayerFleet {
   isScanning: boolean;
   /** Ore currently held in this fleet's cargo holds, waiting to haul to Corp HQ. */
   cargoHold: Record<string, number>;
+  /** The system the fleet was mining when auto-haul fired. Used to return the fleet after unloading. */
+  miningOriginSystemId?: string;
+  /** Pilot ID of the designated fleet commander, or null if none. */
+  commanderId: string | null;
+  /** Sub-groups of ships organized by role. Empty array = no wings defined. */
+  wings: FleetWing[];
 }
 
 // ─── Pilot ─────────────────────────────────────────────────────────────────
@@ -352,6 +380,22 @@ export interface PilotStats {
   combatKills: number;
 }
 
+// ─── Commander Skills ──────────────────────────────────────────────────────
+
+export interface CommanderSkillQueueEntry {
+  skillId: string;
+  targetLevel: 1 | 2 | 3 | 4 | 5;
+}
+
+export interface CommanderSkillState {
+  /** Trained command skill levels (0 = untrained). */
+  levels: Record<string, number>;
+  queue: CommanderSkillQueueEntry[];
+  activeSkillId: string | null;
+  /** Seconds elapsed training the current active level. */
+  activeProgress: number;
+}
+
 export interface PilotInstance {
   id: string;
   name: string;
@@ -369,6 +413,8 @@ export interface PilotInstance {
   stats: PilotStats;
   /** ISK per real day. 0 for the player pilot. */
   payrollPerDay: number;
+  /** Command skill training state. Active only when this pilot is a designated fleet commander. */
+  commandSkills: CommanderSkillState;
 }
 
 export interface PilotRecruitmentOffer {

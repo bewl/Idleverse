@@ -15,6 +15,8 @@ import type { GameState, Anomaly, DiscoveryEntry, PlayerFleet } from '@/types/ga
 import { HULL_DEFINITIONS, MODULE_DEFINITIONS } from '@/game/systems/fleet/fleet.config';
 import { generateAnomalies, getGameDay } from '@/game/galaxy/anomaly.gen';
 import { generateGalaxy } from '@/game/galaxy/galaxy.gen';
+import { getCombinedCommanderBonus } from './commander.logic';
+import { getOperationalFleetShipIds, getWingByShipId } from './wings.logic';
 
 // ─── Result type ─────────────────────────────────────────────────────────
 
@@ -39,16 +41,20 @@ function getModuleScanBonus(ship: import('@/types/game.types').ShipInstance): nu
 }
 
 export function getFleetScanStrength(state: GameState, fleet: PlayerFleet): number {
-  const speedMult = 1 + (state.modifiers['scan-speed'] ?? 0);
+  const baseSpeedBonus = state.modifiers['scan-speed'] ?? 0;
+  const operationalShipIds = new Set(getOperationalFleetShipIds(fleet));
   let total = 0;
   for (const shipId of fleet.shipIds) {
+    if (!operationalShipIds.has(shipId)) continue;
     const ship = state.systems.fleet.ships[shipId];
     if (!ship) continue;
     const hull = HULL_DEFINITIONS[ship.shipDefinitionId];
     if (!hull) continue;
     const base   = hull.baseSensorStrength;
     const module = getModuleScanBonus(ship);
-    total += (base + module) * speedMult;
+    const wing = getWingByShipId(fleet, ship.id);
+    const commanderBonus = getCombinedCommanderBonus(state.systems.fleet.pilots, fleet, wing, 'scan-speed');
+    total += (base + module) * (1 + baseSpeedBonus + commanderBonus);
   }
   return total;
 }
@@ -66,7 +72,7 @@ export function tickExploration(
 
   // Find all scanning fleets
   const scanningFleets = Object.values(state.systems.fleet.fleets).filter(
-    f => f.isScanning && !f.fleetOrder && f.shipIds.length > 0,
+    f => f.isScanning && !f.fleetOrder && getOperationalFleetShipIds(f).length > 0,
   );
   if (scanningFleets.length === 0) return result;
 
