@@ -402,11 +402,13 @@ export function createPlayerFleet(
     shipIds: [...shipIds],
     currentSystemId: systemId,
     fleetOrder: null,
+    combatOrder: null,
+    isScanning: false,
     maxJumpRangeLY: computeFleetJumpRange(state, shipIds),
     doctrine: 'balanced',
   };
 
-  // Tag all ships with the fleet ID
+  // Tag all ships with the fleet IDI wan
   let newShips = { ...ships };
   for (const sid of shipIds) {
     newShips = { ...newShips, [sid]: { ...newShips[sid], fleetId } };

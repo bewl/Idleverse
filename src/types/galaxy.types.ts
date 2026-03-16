@@ -1,4 +1,5 @@
-import type { FactionId } from './faction.types';\nimport type { Anomaly } from './game.types';
+import type { FactionId } from './faction.types';
+import type { Anomaly } from './game.types';
 
 // ─── Galaxy / Travel types ─────────────────────────────────────────────────
 

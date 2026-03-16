@@ -609,6 +609,8 @@ function FleetTab() {
       deployedAt: ts,
       fleetOrder: null,
       fleetId: null,
+      role: 'unassigned',
+      hullDamage: 0,
     };
 
     useGameStore.setState(s => {
