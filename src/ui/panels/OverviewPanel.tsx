@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useGameStore } from '@/stores/gameStore';
+import { useUiStore, type PanelId } from '@/stores/uiStore';
 import { MANUFACTURING_RECIPES } from '@/game/systems/manufacturing/manufacturing.config';
 import { getManufacturingSpeedMultiplier } from '@/game/systems/manufacturing/manufacturing.logic';
 import { FlairProgressBar } from '@/ui/components/FlairProgressBar';
@@ -9,12 +10,16 @@ import { SKILL_DEFINITIONS } from '@/game/systems/skills/skills.config';
 import { activeTrainingEta, formatTrainingEta } from '@/game/systems/skills/skills.logic';
 import { skillTrainingSeconds } from '@/game/balance/constants';
 import { NavTag } from '@/ui/components/NavTag';
-import { getCorpHqBonus, getStationInSystem } from '@/game/systems/factions/faction.logic';
+import { getTrainingEtaToLevel } from '@/ui/components/SystemUnlockCard';
+import { getCorpHqBonus, getHomeOutpost, getStationInSystem } from '@/game/systems/factions/faction.logic';
 import { getSystemById } from '@/game/galaxy/galaxy.gen';
+import { getAliveNpcGroupsInSystem } from '@/game/systems/combat/combat.logic';
 import { computeFleetCargoCapacity } from '@/game/systems/fleet/fleet.logic';
-import { getFleetStoredCargo, getFleetStorageCapacity, getOperationalFleetShipIds } from '@/game/systems/fleet/wings.logic';
+import { getFleetStoredCargo, getFleetStorageCapacity, getHaulingWings, getOperationalFleetShipIds, getWingCurrentSystemId, hasActiveEscortWing } from '@/game/systems/fleet/wings.logic';
 
-import type { AnomalyType } from '@/types/game.types';
+import type { AnomalyType, GameState } from '@/types/game.types';
+
+const ROMAN = ['0', 'I', 'II', 'III', 'IV', 'V'] as const;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -34,6 +39,319 @@ function fmtSec(s: number): string {
   return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
 }
 
+function skillTargetLabel(skillId: string, targetLevel: 1 | 2 | 3 | 4 | 5): string {
+  const def = SKILL_DEFINITIONS[skillId];
+  return `${def?.name ?? skillId} ${ROMAN[targetLevel]}`;
+}
+
+interface ProgressPath {
+  id: string;
+  title: string;
+  icon: string;
+  panelId: PanelId;
+  accentColor: string;
+  statusLabel: string;
+  statusTone: 'active' | 'pending' | 'met';
+  summary: string;
+  payoff: string;
+  synergy: string;
+  nextTargetLabel: string;
+  nextTargetEtaSeconds: number;
+}
+
+function buildProgressPaths(state: GameState): ProgressPath[] {
+  const levels = state.systems.skills.levels;
+  const unlocks = state.unlocks;
+
+  const miningLevel = levels['mining'] ?? 0;
+  const astroLevel = levels['astrogeology'] ?? 0;
+  const advancedMiningLevel = levels['advanced-mining'] ?? 0;
+  const miningBargeLevel = levels['mining-barge'] ?? 0;
+
+  const tradeLevel = levels['trade'] ?? 0;
+  const brokerRelationsLevel = levels['broker-relations'] ?? 0;
+
+  const spacesCommandLevel = levels['spaceship-command'] ?? 0;
+  const militaryOperationsLevel = levels['military-operations'] ?? 0;
+  const gunneryLevel = levels['gunnery'] ?? 0;
+
+  const industryLevel = levels['industry'] ?? 0;
+  const reprocessingLevel = levels['reprocessing'] ?? 0;
+  const scienceLevel = levels['science'] ?? 0;
+
+  const astrometricsLevel = levels['astrometrics'] ?? 0;
+  const hackingLevel = levels['hacking'] ?? 0;
+  const archaeologyLevel = levels['archaeology'] ?? 0;
+
+  const miningNext = miningLevel < 3
+    ? { skillId: 'mining', targetLevel: 3 as const }
+    : astroLevel < 1
+      ? { skillId: 'astrogeology', targetLevel: 1 as const }
+      : advancedMiningLevel < 1
+        ? { skillId: 'advanced-mining', targetLevel: 1 as const }
+        : miningBargeLevel < 1
+          ? { skillId: 'mining-barge', targetLevel: 1 as const }
+          : { skillId: 'mining-barge', targetLevel: 3 as const };
+
+  const industryNext = !unlocks['system-manufacturing']
+    ? { skillId: 'industry', targetLevel: 1 as const }
+    : !unlocks['system-reprocessing']
+      ? { skillId: 'reprocessing', targetLevel: 1 as const }
+      : scienceLevel < 1
+        ? { skillId: 'science', targetLevel: 1 as const }
+        : { skillId: 'advanced-industry', targetLevel: 1 as const };
+
+  const tradeNext = !unlocks['system-market']
+    ? { skillId: 'trade', targetLevel: 1 as const }
+    : tradeLevel < 3
+      ? { skillId: 'trade', targetLevel: 3 as const }
+      : brokerRelationsLevel < 2
+        ? { skillId: 'broker-relations', targetLevel: 2 as const }
+        : { skillId: 'accounting', targetLevel: 1 as const };
+
+  const combatNext = spacesCommandLevel < 2
+    ? { skillId: 'spaceship-command', targetLevel: 2 as const }
+    : militaryOperationsLevel < 1
+      ? { skillId: 'military-operations', targetLevel: 1 as const }
+      : gunneryLevel < 1
+        ? { skillId: 'gunnery', targetLevel: 1 as const }
+        : { skillId: 'destroyer', targetLevel: 1 as const };
+
+  const explorationNext = scienceLevel < 1
+    ? { skillId: 'science', targetLevel: 1 as const }
+    : astrometricsLevel < 1
+      ? { skillId: 'astrometrics', targetLevel: 1 as const }
+      : hackingLevel < 1
+        ? { skillId: 'hacking', targetLevel: 1 as const }
+        : archaeologyLevel < 1
+          ? { skillId: 'archaeology', targetLevel: 1 as const }
+          : { skillId: 'ladar-sensing', targetLevel: 1 as const };
+
+  return [
+    {
+      id: 'mining',
+      title: 'Mining',
+      icon: '⛏',
+      panelId: 'mining',
+      accentColor: '#22d3ee',
+      statusLabel: miningLevel >= 3 ? 'Richer belts ready' : 'Live now',
+      statusTone: 'active',
+      summary: 'Reliable early income with a clear specialist ladder into richer belts, mining hulls, and larger haul throughput.',
+      payoff: miningLevel >= 3 ? 'Astrogeology opens better belts and stronger extraction scaling.' : 'The starter fleet already mines, so this path pays off immediately.',
+      synergy: 'Pairs with Reprocessing for value extraction and with Market for clean liquidity.',
+      nextTargetLabel: skillTargetLabel(miningNext.skillId, miningNext.targetLevel),
+      nextTargetEtaSeconds: getTrainingEtaToLevel(state, miningNext.skillId, miningNext.targetLevel),
+    },
+    {
+      id: 'industry',
+      title: 'Industry',
+      icon: '🏭',
+      panelId: unlocks['system-manufacturing'] ? 'manufacturing' : 'skills',
+      accentColor: '#fbbf24',
+      statusLabel: unlocks['system-manufacturing'] && unlocks['system-reprocessing'] ? 'Industrial core live' : unlocks['system-manufacturing'] ? 'Growing' : 'One unlock away',
+      statusTone: unlocks['system-manufacturing'] ? 'active' : 'pending',
+      summary: 'Convert mined resources into components, hulls, and later blueprint research instead of only selling raw ore.',
+      payoff: unlocks['system-manufacturing'] ? 'Industry now compounds mining into fleet growth and future T2 work.' : 'Industry I is the fastest path into an industrial branch from a fresh save.',
+      synergy: 'Best hybrid chain: mine -> reprocess -> manufacture -> deploy or sell.',
+      nextTargetLabel: skillTargetLabel(industryNext.skillId, industryNext.targetLevel),
+      nextTargetEtaSeconds: getTrainingEtaToLevel(state, industryNext.skillId, industryNext.targetLevel),
+    },
+    {
+      id: 'trade',
+      title: 'Trade',
+      icon: '📈',
+      panelId: unlocks['system-market'] ? 'market' : 'skills',
+      accentColor: '#fb7185',
+      statusLabel: tradeLevel >= 3 ? 'Routes ready' : unlocks['system-market'] ? 'Market live' : 'One unlock away',
+      statusTone: unlocks['system-market'] ? 'active' : 'pending',
+      summary: 'Turn stockpiles into credits, then grow into automated logistics and route-driven profit instead of pure extraction.',
+      payoff: tradeLevel >= 3 ? 'Trade III is the handoff from direct selling into automated route play.' : 'Trade I gives immediate access to liquidity and pricing bonuses.',
+      synergy: 'Pairs with hauling wings and later safe-vs-fast route posture decisions.',
+      nextTargetLabel: skillTargetLabel(tradeNext.skillId, tradeNext.targetLevel),
+      nextTargetEtaSeconds: getTrainingEtaToLevel(state, tradeNext.skillId, tradeNext.targetLevel),
+    },
+    {
+      id: 'combat',
+      title: 'Combat',
+      icon: '⚔',
+      panelId: 'fleet',
+      accentColor: '#f87171',
+      statusLabel: spacesCommandLevel >= 2 ? 'Patrol ready' : 'Staging',
+      statusTone: spacesCommandLevel >= 2 ? 'active' : 'pending',
+      summary: 'Use fleets, doctrines, and wing structure to clear threats, protect routes, and push into a more operations-heavy playstyle.',
+      payoff: spacesCommandLevel >= 2 ? 'Patrol orders are online; the next step is raid capability and stronger hulls.' : 'Spaceship Command II is the first real shift from passive fleet ownership into active operations.',
+      synergy: 'Supports escorted hauling, safer logistics, and later mining-defense loops.',
+      nextTargetLabel: skillTargetLabel(combatNext.skillId, combatNext.targetLevel),
+      nextTargetEtaSeconds: getTrainingEtaToLevel(state, combatNext.skillId, combatNext.targetLevel),
+    },
+    {
+      id: 'exploration',
+      title: 'Exploration',
+      icon: '⊕',
+      panelId: astrometricsLevel >= 1 ? 'system' : 'skills',
+      accentColor: '#34d399',
+      statusLabel: astrometricsLevel >= 1 ? 'Scanning live' : scienceLevel >= 1 ? 'One unlock away' : 'Research first',
+      statusTone: astrometricsLevel >= 1 ? 'active' : 'pending',
+      summary: 'Reveal anomalies, branch into data or relic site access, and widen the set of valuable things your fleets can chase.',
+      payoff: astrometricsLevel >= 1 ? 'Astrometrics opens the scan loop; Hacking and Archaeology turn that into specialisation.' : 'Science I into Astrometrics I is a fast route into a very different kind of progression.',
+      synergy: 'Combines well with combat fleets, scout hulls, and future travel-focused builds.',
+      nextTargetLabel: skillTargetLabel(explorationNext.skillId, explorationNext.targetLevel),
+      nextTargetEtaSeconds: getTrainingEtaToLevel(state, explorationNext.skillId, explorationNext.targetLevel),
+    },
+  ];
+}
+
+function toneClass(tone: ProgressPath['statusTone']): string {
+  if (tone === 'met') return 'text-emerald-300 border-emerald-500/30 bg-emerald-900/15';
+  if (tone === 'active') return 'text-cyan-300 border-cyan-500/30 bg-cyan-950/20';
+  return 'text-amber-300 border-amber-500/30 bg-amber-950/20';
+}
+
+function ProgressionShellCard() {
+  const state = useGameStore(s => s.state);
+  const navigate = useUiStore(s => s.navigate);
+  const paths = buildProgressPaths(state);
+  const rates = useResourceRates();
+  const miningRate = Object.entries(rates)
+    .filter(([id, rate]) => id !== 'credits' && rate > 0 && RESOURCE_REGISTRY[id]?.category === 'ore')
+    .reduce((sum, [, rate]) => sum + rate, 0);
+
+  const opportunities = paths.map(path => ({
+    id: path.id,
+    panelId: path.panelId,
+    icon: path.icon,
+    title: path.title,
+    action: path.nextTargetLabel,
+    eta: path.nextTargetEtaSeconds,
+    detail: path.payoff,
+    accentColor: path.accentColor,
+    tone: path.statusTone,
+  }));
+
+  return (
+    <div
+      className="rounded-xl p-4 flex flex-col gap-4"
+      style={{
+        background: 'linear-gradient(135deg, rgba(3,8,20,0.96) 0%, rgba(34,211,238,0.03) 100%)',
+        border: '1px solid rgba(34,211,238,0.14)',
+      }}
+    >
+      <div className="flex flex-col gap-1">
+        <div className="text-[10px] text-cyan-400 uppercase tracking-widest font-bold">Parallel Progression</div>
+        <h3 className="text-slate-100 text-sm font-semibold">Focus one lane deeply or chain several together.</h3>
+        <p className="text-xs text-slate-400 max-w-3xl">
+          Mining is already live. The next layer is choosing where that output goes: into minerals, manufacturing, direct trade, combat growth, or exploration unlocks.
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-[1.15fr_0.85fr] gap-3">
+        <div className="rounded-xl border border-slate-700/25 bg-slate-950/45 p-3 flex flex-col gap-2">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-[9px] uppercase tracking-widest text-slate-500">Current Opportunities</div>
+              <div className="text-xs text-slate-300 mt-0.5">These are all valid next moves. None of them close off the others.</div>
+            </div>
+            {miningRate > 0 && (
+              <span className="text-[10px] font-mono text-cyan-300">ore flow {miningRate.toFixed(2)}/s</span>
+            )}
+          </div>
+
+          {opportunities.map(item => (
+            <button
+              key={item.id}
+              className="w-full rounded-lg border border-slate-700/20 bg-white/[0.02] px-3 py-2 text-left hover:bg-white/[0.04] transition-colors"
+              onClick={() => navigate(item.panelId)}
+            >
+              <div className="flex items-start gap-3">
+                <span className="text-base leading-none mt-0.5">{item.icon}</span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[11px] font-semibold text-slate-100">{item.title}</span>
+                    <span className={`text-[8px] px-1.5 py-0.5 rounded border ${toneClass(item.tone)}`}>
+                      {item.tone === 'active' ? 'live' : 'next unlock'}
+                    </span>
+                    <span className="text-[9px] font-mono" style={{ color: item.accentColor }}>
+                      {formatTrainingEta(item.eta)}
+                    </span>
+                  </div>
+                  <div className="text-[10px] text-slate-300 mt-1">{item.action}</div>
+                  <div className="text-[10px] text-slate-500 mt-0.5">{item.detail}</div>
+                </div>
+              </div>
+            </button>
+          ))}
+        </div>
+
+        <div className="rounded-xl border border-slate-700/25 bg-slate-950/45 p-3 flex flex-col gap-3">
+          <div>
+            <div className="text-[9px] uppercase tracking-widest text-slate-500">Operating Chains</div>
+            <div className="text-xs text-slate-300 mt-0.5">Use these to play as a specialist or a hybrid without guessing how systems connect.</div>
+          </div>
+
+          <div className="rounded-lg border border-cyan-700/20 bg-cyan-950/10 px-3 py-2">
+            <div className="text-[10px] font-semibold text-cyan-300">Specialist Loop</div>
+            <div className="text-xs text-slate-300 mt-1">Mine harder, unlock richer belts, add hauling capacity, then scale fleets around extraction efficiency.</div>
+          </div>
+
+          <div className="rounded-lg border border-amber-700/20 bg-amber-950/10 px-3 py-2">
+            <div className="text-[10px] font-semibold text-amber-300">Hybrid Industry Loop</div>
+            <div className="text-xs text-slate-300 mt-1">Mine, then reprocess, then manufacture, then sell or deploy. This is the fastest way to feel several systems feeding each other.</div>
+          </div>
+
+          <div className="rounded-lg border border-rose-700/20 bg-rose-950/10 px-3 py-2">
+            <div className="text-[10px] font-semibold text-rose-300">Logistics & Ops Loop</div>
+            <div className="text-xs text-slate-300 mt-1">Trade and combat both scale with fleets, route posture, and later escorted hauling, so you can pivot from economy into operations without restarting.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ProgressPathGrid() {
+  const state = useGameStore(s => s.state);
+  const navigate = useUiStore(s => s.navigate);
+  const paths = buildProgressPaths(state);
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Focus Tracks</div>
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+        {paths.map(path => (
+          <button
+            key={path.id}
+            className="rounded-xl border px-4 py-3 text-left transition-colors hover:bg-white/[0.03]"
+            style={{ background: 'rgba(3,8,20,0.65)', borderColor: `${path.accentColor}22` }}
+            onClick={() => navigate(path.panelId)}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-[9px] uppercase tracking-widest font-bold" style={{ color: path.accentColor }}>
+                  {path.icon} {path.title}
+                </div>
+                <div className="text-[11px] mt-1 text-slate-100 font-semibold">{path.statusLabel}</div>
+              </div>
+              <span className={`text-[8px] px-1.5 py-0.5 rounded border shrink-0 ${toneClass(path.statusTone)}`}>
+                {formatTrainingEta(path.nextTargetEtaSeconds)}
+              </span>
+            </div>
+
+            <p className="mt-2 text-[10px] leading-relaxed text-slate-400">{path.summary}</p>
+
+            <div className="mt-3 rounded-lg border border-slate-700/25 bg-slate-950/45 px-2.5 py-2">
+              <div className="text-[8px] uppercase tracking-widest text-slate-500">Next Leverage</div>
+              <div className="mt-1 text-[10px] text-white">{path.nextTargetLabel}</div>
+            </div>
+
+            <div className="mt-2 text-[10px] text-slate-500">{path.payoff}</div>
+            <div className="mt-2 text-[9px] text-slate-600">{path.synergy}</div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ─── Corp card ────────────────────────────────────────────────────────────────
 
 function CorpCard() {
@@ -48,8 +366,8 @@ function CorpCard() {
     return () => clearInterval(t);
   }, []);
 
-  const age      = Date.now() - state.corp.foundedAt;
-  const credits  = state.resources['credits'] ?? 0;
+  const age = Date.now() - state.corp.foundedAt;
+  const credits = state.resources['credits'] ?? 0;
   const totalSkillLevels = Object.values(state.systems.skills.levels).reduce((a, b) => a + b, 0);
   const fleetCount = Object.keys(state.systems.fleet.fleets).length;
 
@@ -69,7 +387,6 @@ function CorpCard() {
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-3 min-w-0">
-          {/* Corp logo placeholder */}
           <div
             className="w-10 h-10 rounded-full shrink-0 flex items-center justify-center text-lg font-bold"
             style={{ background: 'rgba(34,211,238,0.12)', border: '1px solid rgba(34,211,238,0.3)', color: '#22d3ee' }}
@@ -84,13 +401,19 @@ function CorpCard() {
                 value={draftName}
                 onChange={e => setDraftName(e.target.value)}
                 onBlur={commitRename}
-                onKeyDown={e => { if (e.key === 'Enter') commitRename(); if (e.key === 'Escape') setEditing(false); }}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') commitRename();
+                  if (e.key === 'Escape') setEditing(false);
+                }}
                 maxLength={40}
               />
             ) : (
               <button
                 className="text-white font-bold text-base leading-tight hover:text-cyan-300 transition-colors text-left"
-                onClick={() => { setDraftName(state.corp.name); setEditing(true); }}
+                onClick={() => {
+                  setDraftName(state.corp.name);
+                  setEditing(true);
+                }}
                 title="Click to rename"
               >
                 {state.corp.name}
@@ -122,16 +445,15 @@ function CorpHQCard() {
         className="rounded-xl p-4 text-center"
         style={{ background: 'rgba(3,8,20,0.6)', border: '1px dashed rgba(255,255,255,0.08)' }}
       >
-        <p className="text-slate-600 text-xs">No Corp HQ. Open System panel, dock at a station, and register it as headquarters.</p>
+        <p className="text-slate-600 text-xs">No Corp HQ. Open System panel, dock at a station, or deploy a POS core to establish headquarters.</p>
       </div>
     );
   }
 
-  const systemObj   = hqSystemId ? getSystemById(state.galaxy.seed, hqSystemId) : null;
-  const systemIndex  = hqSystemId ? parseInt(hqSystemId.replace('sys-', ''), 10) : 0;
-  const station      = hqSystemId && systemObj
-    ? getStationInSystem(systemObj, state.galaxy.seed, systemIndex)
-    : null;
+  const systemObj = getSystemById(state.galaxy.seed, hqSystemId);
+  const homeOutpost = getHomeOutpost(state);
+  const systemIndex = hqSystemId === 'home' ? 0 : parseInt(hqSystemId.replace('sys-', ''), 10);
+  const station = homeOutpost ? null : getStationInSystem(systemObj, state.galaxy.seed, systemIndex);
   const hqBonus = getCorpHqBonus(station);
 
   return (
@@ -146,11 +468,18 @@ function CorpHQCard() {
         <div className="text-[9px] text-cyan-400 uppercase tracking-widest mb-0.5 font-bold">🏢 Corp HQ</div>
       </div>
       <div className="flex items-center gap-2">
-        <NavTag entityType="system" entityId={hqSystemId} label={systemObj?.name ?? hqSystemId} />
+        <NavTag entityType="system" entityId={hqSystemId} label={systemObj.name} />
+        {homeOutpost && <span className="text-xs text-slate-400">• {homeOutpost.name}</span>}
         {station && <span className="text-xs text-slate-400">• {station.name}</span>}
       </div>
       <div className="text-slate-500 text-xs">
-        {station ? (
+        {homeOutpost ? (
+          <div className="flex flex-col gap-0.5">
+            <div className="text-[10px]">• Player-owned outpost</div>
+            <div className="text-[10px]">• Level {homeOutpost.level} command core</div>
+            <div className="text-[10px] text-cyan-300">• Full HQ access without faction station requirements</div>
+          </div>
+        ) : station ? (
           <div className="flex flex-col gap-0.5">
             {station.services.map((svc: string) => (
               <div key={svc} className="text-[10px]">• {svc}</div>
@@ -170,7 +499,7 @@ function AlertsCard() {
   const fleets = Object.values(state.systems.fleet.fleets);
   const ships = state.systems.fleet.ships;
 
-  const alerts: Array<{ type: 'cargo' | 'hull' | 'idle'; fleetId: string; fleetName: string; detail: string }> = [];
+  const alerts: Array<{ type: 'cargo' | 'hull' | 'idle' | 'escort'; fleetId: string; fleetName: string; detail: string }> = [];
 
   for (const fleet of fleets) {
     // Cargo ≥80% with no haul order
@@ -190,6 +519,15 @@ function AlertsCard() {
       alerts.push({ type: 'hull', fleetId: fleet.id, fleetName: fleet.name, detail: `${Math.round(avgHull)}% damaged` });
     }
 
+    for (const wing of getHaulingWings(fleet).filter(candidate => candidate.isDispatched && hasActiveEscortWing(fleet, candidate))) {
+      const convoySystemId = getWingCurrentSystemId(fleet, wing, ships);
+      if (!convoySystemId) continue;
+      const threats = getAliveNpcGroupsInSystem(state, convoySystemId);
+      if (threats.length === 0) continue;
+      const systemName = getSystemById(state.galaxy.seed, convoySystemId).name;
+      alerts.push({ type: 'escort', fleetId: fleet.id, fleetName: fleet.name, detail: `${wing.name} engaging ${threats.length} threat${threats.length !== 1 ? 's' : ''} in ${systemName}` });
+    }
+
     // Idle with ships
     const operationalShipIds = getOperationalFleetShipIds(fleet);
     if (operationalShipIds.length > 0 && fleet.fleetOrder === null && !fleet.combatOrder) {
@@ -202,8 +540,8 @@ function AlertsCard() {
 
   if (alerts.length === 0) return null;
 
-  const iconMap = { cargo: '📦', hull: '🛡️', idle: '💤' };
-  const colorMap = { cargo: 'text-amber-400', hull: 'text-rose-400', idle: 'text-slate-500' };
+  const iconMap = { cargo: '📦', hull: '🛡️', idle: '💤', escort: '⚔️' };
+  const colorMap = { cargo: 'text-amber-400', hull: 'text-rose-400', idle: 'text-slate-500', escort: 'text-rose-300' };
 
   return (
     <div
@@ -505,6 +843,7 @@ function FleetStatusCard() {
 
   function activityLabel(fleet: typeof fleets[0]) {
     if (fleet.fleetOrder !== null)                         return { text: 'In Transit', color: '#22d3ee', dot: 'bg-cyan-400 animate-pulse' };
+    if (getHaulingWings(fleet).some(wing => wing.isDispatched)) return { text: 'Wing Haul', color: '#f59e0b', dot: 'bg-amber-400 animate-pulse' };
     if (fleet.combatOrder?.type === 'patrol')              return { text: 'Patrol',    color: '#f43f5e', dot: 'bg-rose-400 animate-pulse' };
     if (fleet.combatOrder?.type === 'raid')                return { text: 'Raid',      color: '#f43f5e', dot: 'bg-rose-400 animate-pulse' };
     return                                                        { text: 'Idle',      color: '#475569', dot: 'bg-slate-600' };
@@ -524,6 +863,8 @@ function FleetStatusCard() {
           try { return getSystemById(galaxy.seed, fleet.currentSystemId).name; } catch { return fleet.currentSystemId; }
         })() : fleet.currentSystemId;
         const status = activityLabel(fleet);
+        const dispatchedHaulingWings = getHaulingWings(fleet).filter(wing => wing.isDispatched);
+        const escortedHaulingWings = dispatchedHaulingWings.filter(wing => hasActiveEscortWing(fleet, wing));
         const operationalShipIds = getOperationalFleetShipIds(fleet);
         const hullPct = fleet.shipIds.length > 0
           ? fleet.shipIds.reduce((sum, sid) => {
@@ -545,6 +886,11 @@ function FleetStatusCard() {
             {cargoFillPct > 0 && (
               <span className={`text-[8px] font-mono shrink-0 ${cargoFillPct >= 80 ? 'text-amber-400' : 'text-slate-600'}`}>
                 cargo {cargoFillPct}%
+              </span>
+            )}
+            {dispatchedHaulingWings.length > 0 && (
+              <span className={`text-[8px] font-mono shrink-0 ${escortedHaulingWings.length > 0 ? 'text-amber-300/80' : 'text-cyan-300/75'}`}>
+                haul {dispatchedHaulingWings.length}{escortedHaulingWings.length > 0 ? ` · escort ${escortedHaulingWings.length}` : ' · safe route'}
               </span>
             )}
             <span className="text-[8px] font-mono text-slate-600 shrink-0">
@@ -615,6 +961,8 @@ export function OverviewPanel() {
 
       <CorpCard />
       <CorpHQCard />
+      <ProgressionShellCard />
+      <ProgressPathGrid />
       <AlertsCard />
       <ActiveSkillCard />
       <ResourceIncomeCard />

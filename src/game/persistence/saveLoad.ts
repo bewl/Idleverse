@@ -44,6 +44,9 @@ export function loadGame(): SaveFile | null {
           if (!wing.cargoHold) {
             wing.cargoHold = {};
           }
+          if (!('lastEscortCombatAt' in wing)) {
+            wing.lastEscortCombatAt = 0;
+          }
         }
       }
     }
@@ -60,6 +63,15 @@ export function loadGame(): SaveFile | null {
       }
       if (typeof factionsState.homeStationSystemId === 'undefined') {
         factionsState.homeStationSystemId = null;
+      }
+      if (!factionsState.outposts || typeof factionsState.outposts !== 'object') {
+        factionsState.outposts = {};
+      }
+      for (const [systemId, outpost] of Object.entries(factionsState.outposts) as Array<[string, any]>) {
+        if (!outpost) continue;
+        if (!('id' in outpost) || typeof outpost.id !== 'string' || outpost.id.length === 0) {
+          outpost.id = `outpost-${systemId}`;
+        }
       }
     }
     return save;

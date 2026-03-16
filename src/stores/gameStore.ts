@@ -50,13 +50,14 @@ import {
   cancelFleetGroupOrder,
 } from '@/game/systems/fleet/fleet.orders';
 import { adjustRep, dockAtStation, undockFromStation, getStationInSystem } from '@/game/systems/factions/faction.logic';
+import { getOutpostDisplayName, getOutpostId } from '@/game/systems/factions/faction.logic';
 import {
   enqueuePilotSkill,
   dequeuePilotSkill,
 } from '@/game/systems/fleet/pilot.logic';
 import { generatePilot, generateRecruitmentOffers } from '@/game/systems/fleet/fleet.gen';
 import { COMMANDER_SKILL_DEFINITIONS } from '@/game/systems/fleet/commander.config';
-import { dispatchHaulerWing, getOperationalFleetShipIds, hasDispatchedHaulingWing } from '@/game/systems/fleet/wings.logic';
+import { assignWingToMiningBelt, dispatchHaulerWing, getOperationalFleetShipIds, hasDispatchedHaulingWing } from '@/game/systems/fleet/wings.logic';
 
 // ─── Store interface ───────────────────────────────────────────────────────
 
@@ -142,6 +143,7 @@ interface GameStore {
   designateWingCommander: (fleetId: string, wingId: string, pilotId: string | null) => boolean;
   assignShipToWing: (fleetId: string, shipId: string, wingId: string | null) => boolean;
   setWingEscort: (fleetId: string, wingId: string, escortWingId: string | null) => boolean;
+  assignWingToMiningBelt: (fleetId: string, wingId: string, beltId: string) => boolean;
 
   // Trade routes
   createTradeRoute: (params: {
@@ -162,6 +164,7 @@ interface GameStore {
   registerWithStation: (stationId: string) => boolean;
   /** Register a station as Corp HQ. Stores both the station ID and its system ID for fast lookup. */
   setHomeStation: (stationId: string, systemId: string) => void;
+  deployPOS: (systemId: string) => boolean;
 
   // Galaxy / Travel
   /** Begin a warp jump to another system. Returns false if already in warp or same system. */
@@ -1287,7 +1290,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const { state } = get();
     const factions = state.systems.factions;
     const existing = factions.registeredStations ?? [];
-    if (!existing.includes(stationId)) return;
+    const outpost = factions.outposts[systemId];
+    const isKnownOutpost = outpost?.id === stationId;
+    if (!existing.includes(stationId) && !isKnownOutpost) return;
     set({
       state: {
         ...state,
@@ -1302,6 +1307,51 @@ export const useGameStore = create<GameStore>((set, get) => ({
         },
       },
     });
+  },
+
+  deployPOS: (systemId) => {
+    const { state } = get();
+    const factions = state.systems.factions;
+    const existingOutpost = factions.outposts[systemId];
+    if (existingOutpost) return false;
+
+    const posCores = state.resources['pos-core'] ?? 0;
+    if (posCores < 1) return false;
+
+    const fleetsInSystem = Object.values(state.systems.fleet.fleets).filter(fleet => fleet.currentSystemId === systemId && fleet.shipIds.length > 0);
+    if (fleetsInSystem.length === 0) return false;
+
+    const system = getSystemById(state.galaxy.seed, systemId);
+    const outpostId = getOutpostId(systemId);
+    const outpost = {
+      id: outpostId,
+      systemId,
+      name: getOutpostDisplayName(system.name),
+      builtAt: Date.now(),
+      level: 1,
+      storageBonus: 0.5,
+    };
+
+    set({
+      state: {
+        ...state,
+        resources: { ...state.resources, 'pos-core': posCores - 1 },
+        systems: {
+          ...state.systems,
+          structures: {
+            ...state.systems.structures,
+            levels: { ...state.systems.structures.levels, [outpostId]: 1 },
+          },
+          factions: {
+            ...factions,
+            outposts: { ...factions.outposts, [systemId]: outpost },
+            homeStationId: outpostId,
+            homeStationSystemId: systemId,
+          },
+        },
+      },
+    });
+    return true;
   },
 
   // ── Galaxy / Travel ─────────────────────────────────────────────────────
@@ -1487,6 +1537,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       escortWingId: null,
       isDispatched: false,
       haulingOriginSystemId: null,
+      lastEscortCombatAt: 0,
     };
 
     set({
@@ -1656,6 +1707,13 @@ export const useGameStore = create<GameStore>((set, get) => ({
         },
       },
     });
+    return true;
+  },
+
+  assignWingToMiningBelt: (fleetId, wingId, beltId) => {
+    const newState = assignWingToMiningBelt(get().state, fleetId, wingId, beltId);
+    if (!newState) return false;
+    set({ state: newState });
     return true;
   },
 
@@ -1881,7 +1939,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       if (!Array.isArray(f.wings)) f = { ...f, wings: [] };
       f = {
         ...f,
-        wings: (f.wings ?? []).map(wing => ({ ...wing, commanderId: wing.commanderId ?? null, cargoHold: wing.cargoHold ?? {} })),
+        wings: (f.wings ?? []).map(wing => ({ ...wing, commanderId: wing.commanderId ?? null, cargoHold: wing.cargoHold ?? {}, lastEscortCombatAt: wing.lastEscortCombatAt ?? 0 })),
       };
       patchedFleets4[id] = f;
     }

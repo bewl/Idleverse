@@ -26,7 +26,7 @@ Idleverse resources follow a five-tier production chain.
 | Tier 2 | Minerals | Ferrite, Silite, Morphite | Reprocessing ore |
 | Tier 3 | Components / Datacores | Hull Plate, Datacores | Manufacturing or NPC loot |
 | Tier 4 | Ships | Frigate, Hauler, Destroyer | Manufacturing components |
-| Tier 5 | T2 Components / T2 Ships | Advanced Hull Plate, Assault Frigate | T2 manufacturing |
+| Tier 5 | T2 Components / T2 Ships / Strategic Infrastructure | Advanced Hull Plate, Assault Frigate, POS Core | T2 manufacturing |
 | T0 | Currency | ISK (credits) | NPC market sales |
 
 ---
@@ -147,6 +147,7 @@ Advanced manufactured components crafted from morphite, zydrine, and T1 componen
 | `advanced-hull-plate` | Advanced Hull Plate | T2 ship construction; requires morphite + hull-plate |
 | `advanced-thruster-node` | Advanced Thruster Node | T2 ship construction; requires zydrine + thruster-node |
 | `advanced-condenser-coil` | Advanced Condenser Coil | T2 ship construction; requires morphite + zydrine + condenser-coil |
+| `pos-core` | POS Core | Manufactured strategic structure core; consumed to deploy a player outpost and establish an independent Corp HQ |
 
 ---
 
@@ -176,6 +177,10 @@ Asteroid Belts
                            └─ Manufacturing (T2 recipes, requires T2 BPC)
                                 ├─ T2 Components (Tier 5)
                                 └─ T2 Ships (Tier 5)
+                      └─ Strategic infrastructure recipe
+                           └─ POS Core (Tier 5)
+                                └─ System deployment
+                                     └─ Player Outpost / Corp HQ
                       └─ Manufacturing (T1 ship recipes)
                            └─ T1 Ships (Tier 4)
 NPC Combat Loot

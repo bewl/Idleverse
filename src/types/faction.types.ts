@@ -66,6 +66,7 @@ export interface StationDefinition {
 // ─── Player outposts ───────────────────────────────────────────────────────
 
 export interface OutpostState {
+  id: string;
   systemId: string;
   name: string;
   builtAt: number;       // ms timestamp
@@ -117,9 +118,9 @@ export interface FactionsState {
   dockedStationId: string | null;
   /** Player-built outposts, keyed by systemId. */
   outposts: Record<string, OutpostState>;
-  /** Station ID designated as the corp HQ (null = no HQ set). */
+  /** Active Corp HQ asset ID (registered station or player outpost). */
   homeStationId: string | null;
-  /** System ID of the corp HQ station (null = no HQ set). Stored alongside homeStationId for fast lookup. */
+  /** System ID of the active Corp HQ asset (null = no HQ set). Stored alongside homeStationId for fast lookup. */
   homeStationSystemId: string | null;
   /** Station IDs the corp has registered with (includes homeStationId if set). */
   registeredStations: string[];

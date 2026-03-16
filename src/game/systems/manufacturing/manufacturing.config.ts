@@ -193,6 +193,25 @@ export const MANUFACTURING_RECIPES: Record<string, ManufacturingRecipeDefinition
     isTech2: true,
   },
 
+  'craft-pos-core': {
+    id: 'craft-pos-core', name: 'POS Core',
+    description: 'Deployable command spine for a player-owned outpost. Consumed when anchoring a new Corp HQ structure.',
+    inputs: {
+      'advanced-hull-plate': 12,
+      'advanced-thruster-node': 6,
+      'advanced-condenser-coil': 8,
+      'sensor-cluster': 10,
+      'shield-emitter': 10,
+      'morphite': 40,
+      'zydrine': 30,
+      'voidsteel': 25,
+    },
+    outputs: { 'pos-core': 1 },
+    timeCost: 2400,
+    category: 'component',
+    requiredSkill: { skillId: 'advanced-industry', minLevel: 2 },
+  },
+
   // ─── T2 Ship recipes ───────────────────────────────────────────────────────
 
   'recipe-ship-assault-frigate': {
@@ -246,7 +265,7 @@ export const RECIPE_ORDER = [
   'recipe-ship-shuttle', 'recipe-ship-frigate', 'recipe-ship-mining-frigate',
   'recipe-ship-hauler', 'recipe-ship-destroyer', 'recipe-ship-exhumer',
   // T2 Components
-  'craft-advanced-hull-plate', 'craft-advanced-thruster-node', 'craft-advanced-condenser-coil',
+  'craft-advanced-hull-plate', 'craft-advanced-thruster-node', 'craft-advanced-condenser-coil', 'craft-pos-core',
   // T2 Ships
   'recipe-ship-assault-frigate', 'recipe-ship-covert-ops', 'recipe-ship-command-destroyer',
 ];

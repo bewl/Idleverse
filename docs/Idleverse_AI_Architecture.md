@@ -121,6 +121,7 @@ src/
     faction.types.ts — factions, FleetOrder
     combat.types.ts  — CombatOrder, NpcGroupDef, CombatLogEntry
   ui/
+    components/     — shared UI primitives (GameTooltip, GameDropdown, NavTag, SystemUnlockCard)
     dev/            — DevPanel (cheat/debug panel)
     effects/        — StarField, StarfieldBackground
     layouts/        — GameLayout (nav + panel switcher)
@@ -224,6 +225,11 @@ Visual-only components with no game logic (e.g., `StarField.tsx`).
 
 Top-level layout wrapper (`GameLayout.tsx`). Holds nav sidebar, resource bar, panel switcher.
 Uses `useUiStore` for `activePanel` rather than local state.
+
+The persistent top bar should be treated as a flexible live data bar, not a raw inventory strip. `ResourceBar.tsx`
+is expected to summarize high-value operational and economic state in a slim single-row chip layout with
+immediately visible status and rate text, then use tooltip drill-downs for deeper inspection without duplicating
+full Overview cards.
 
 #### `ui/panels`
 

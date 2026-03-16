@@ -18,7 +18,7 @@ import {
   SECTOR_GRID_SIZE, sectorId, systemSector, buildSectors,
   GALAXY_WIDTH_LY,
 } from '@/game/galaxy/galaxy.gen';
-import { warpEtaSeconds, formatEta, getWarpProgress } from '@/game/galaxy/travel.logic';
+import { warpEtaSeconds, formatEta, getWarpProgress, calcWarpDuration } from '@/game/galaxy/travel.logic';
 import { findRoute, getReachableSystems, unitsToLy } from '@/game/galaxy/route.logic';
 import { HULL_DEFINITIONS } from '@/game/systems/fleet/fleet.config';
 import { FACTION_DEFINITIONS } from '@/game/systems/factions/faction.config';
@@ -50,6 +50,7 @@ interface MapFilters {
   onlyVisited: boolean;
   onlyWithBelts: boolean;
   hasNullOres: boolean;
+  showLabels: boolean;
 }
 
 interface ActiveRoute {
@@ -68,6 +69,11 @@ interface HoverPreview {
   systemId: string;
   x: number;
   y: number;
+}
+
+interface RouteDispatchFeedback {
+  tone: 'success' | 'error';
+  text: string;
 }
 
 type OverlayMode = 'default' | 'resource' | 'fleet' | 'faction';
@@ -544,6 +550,7 @@ const GalaxyGridView = forwardRef<GalaxyGridHandle, {
     }
 
     const labelZoomFade = clamp01((720 - c.dist) / 420);
+    const declutterStrength = clamp01((c.dist - 320) / 220);
     const drawnLabelBounds: Array<{ left: number; top: number; right: number; bottom: number }> = [];
 
     for (const { sys, sx, sy, scale } of entries) {
@@ -669,57 +676,68 @@ const GalaxyGridView = forwardRef<GalaxyGridHandle, {
         ctx.fillText(`${fleetN}▲`, bx + 2, by + bh / 2);
       }
 
-      // System label — priority-scored, zoom-aware, and softly culled when low-priority labels overlap.
-      {
+      // System label — default-on for every visible system, with stronger treatment for active context.
+      if (filters.showLabels) {
         const isCriticalLabel = isSelected || isCurrent || isHovered || isOnRoute;
-        const contextualScaleGate = 2.55 + (1 - labelZoomFade) * 2.1;
-        if (isCriticalLabel || (isVisited && scale >= contextualScaleGate)) {
-          const labelPriority = isSelected ? 1
-            : isCurrent ? 0.96
-            : isHovered ? 0.93
-            : isOnRoute ? 0.84
-            : 0.46;
-          const depthFade = clamp01((scale - 1.25) / 3.3);
-          const labelAlpha = masterAlpha * (isCriticalLabel
-            ? Math.max(0.74, depthFade * 0.75 + labelZoomFade * 0.45) * labelPriority
-            : depthFade * labelZoomFade * labelPriority);
-          const showSecondary = labelAlpha > 0.34 && (isSelected || isCurrent || isHovered || (scale > 6.4 && labelZoomFade > 0.58));
+        const labelPriority = isSelected ? 1
+          : isCurrent ? 0.96
+          : isHovered ? 0.93
+          : isOnRoute ? 0.84
+          : isVisited ? 0.6
+          : 0.52;
+        const depthFade = clamp01((scale - 1.05) / 2.6);
+        const labelVisibility = isCriticalLabel
+          ? 1
+          : (inZSlice || isCurrent ? 0.92 : 0.62);
+        const declutterAlphaPenalty = isCriticalLabel ? 1 : 1 - declutterStrength * 0.22;
+        const labelAlpha = labelVisibility * declutterAlphaPenalty * (isCriticalLabel
+          ? Math.max(0.76, depthFade * 0.8 + labelZoomFade * 0.45) * labelPriority
+          : Math.max(0.56, depthFade * 0.62 + labelZoomFade * 0.22) * labelPriority);
+        const showSecondary = isCriticalLabel || (isVisited && scale > 6.4 && labelZoomFade > 0.58);
 
-          if (labelAlpha > 0.1) {
-            const fs = Math.round(Math.max(8, Math.min(11, 7.4 + scale * 0.08)));
-            const primaryY = sy - baseR - 5;
-            ctx.font = `${isCurrent || isSelected ? 'bold ' : ''}${fs}px monospace`;
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'bottom';
+        if (labelAlpha > 0.08) {
+          const fs = Math.round(Math.max(8, Math.min(11, 7.2 + scale * 0.07)));
+          const primaryY = sy - baseR - 5;
+          ctx.font = `${isCurrent || isSelected ? 'bold ' : ''}${fs}px monospace`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'bottom';
+          const primaryWidth = ctx.measureText(sys.name).width;
+          const secondaryHeight = showSecondary ? 10 : 0;
+          const declutterPadX = 7 + declutterStrength * 14;
+          const declutterPadY = 4 + declutterStrength * 8;
+          const labelBounds = {
+            left: sx - primaryWidth / 2 - declutterPadX,
+            right: sx + primaryWidth / 2 + declutterPadX,
+            top: primaryY - fs - secondaryHeight - declutterPadY,
+            bottom: primaryY + 3 + declutterPadY,
+          };
 
-            const primaryWidth = ctx.measureText(sys.name).width;
-            const secondaryHeight = showSecondary ? 10 : 0;
-            const labelBounds = {
-              left: sx - primaryWidth / 2 - 7,
-              right: sx + primaryWidth / 2 + 7,
-              top: primaryY - fs - secondaryHeight - 4,
-              bottom: primaryY + 3,
-            };
+          if (!isCriticalLabel && declutterStrength > 0.08 && drawnLabelBounds.some(bounds => boundsOverlap(labelBounds, bounds))) {
+            ctx.restore();
+            continue;
+          }
 
-            if (!isCriticalLabel && drawnLabelBounds.some(bounds => boundsOverlap(labelBounds, bounds))) {
-              ctx.restore();
-              continue;
-            }
-
+          if (isCriticalLabel || declutterStrength > 0.08) {
             drawnLabelBounds.push(labelBounds);
-            ctx.globalAlpha = labelAlpha;
-            ctx.fillStyle = isCurrent || isSelected ? '#fbbf24' : isOnRoute ? '#22d3ee' : '#cbd5e1';
-            ctx.fillText(sys.name, sx, primaryY);
+          }
+          ctx.globalAlpha = labelAlpha;
+          ctx.fillStyle = isCurrent || isSelected
+            ? '#fbbf24'
+            : isOnRoute
+              ? '#22d3ee'
+              : isVisited
+                ? '#cbd5e1'
+                : '#94a3b8';
+          ctx.fillText(sys.name, sx, primaryY);
 
-            if (showSecondary) {
-              const sl = sys.security === 'highsec' ? 'HIGH' : sys.security === 'lowsec' ? 'LOW' : 'NULL';
-              ctx.font = '7px monospace';
-              ctx.globalAlpha = Math.min(labelAlpha * 0.76, 0.58);
-              ctx.fillStyle = sys.security === 'highsec' ? '#4ade80'
-                : sys.security === 'lowsec' ? '#fb923c'
-                : '#f87171';
-              ctx.fillText(`${sl}  ${sys.starType}`, sx, primaryY - fs - 1);
-            }
+          if (showSecondary) {
+            const sl = sys.security === 'highsec' ? 'HIGH' : sys.security === 'lowsec' ? 'LOW' : 'NULL';
+            ctx.font = '7px monospace';
+            ctx.globalAlpha = Math.min(labelAlpha * 0.76, 0.58);
+            ctx.fillStyle = sys.security === 'highsec' ? '#4ade80'
+              : sys.security === 'lowsec' ? '#fb923c'
+              : '#f87171';
+            ctx.fillText(`${sl}  ${sys.starType}`, sx, primaryY - fs - 1);
           }
         }
       }
@@ -1173,6 +1191,7 @@ function FilterPanel({ filters, onChange }: { filters: MapFilters; onChange: (f:
     { key: 'highsec',       label: 'High-Sec',      color: '#4ade80' },
     { key: 'lowsec',        label: 'Low-Sec',        color: '#fb923c' },
     { key: 'nullsec',       label: 'Null-Sec',       color: '#f87171' },
+    { key: 'showLabels',    label: 'Show Labels',    color: '#cbd5e1' },
     { key: 'onlyVisited',   label: 'Only Visited',   color: '#22d3ee' },
     { key: 'onlyWithBelts', label: 'Has Ore Belts',  color: '#4ade80' },
     { key: 'hasNullOres',   label: 'Rare Null Ores', color: '#22d3ee' },
@@ -1180,6 +1199,7 @@ function FilterPanel({ filters, onChange }: { filters: MapFilters; onChange: (f:
 
   const sections: Array<{ title: string; keys: Array<keyof MapFilters> }> = [
     { title: 'Security Zone', keys: ['highsec', 'lowsec', 'nullsec'] },
+    { title: 'Display',       keys: ['showLabels'] },
     { title: 'Discovery',     keys: ['onlyVisited'] },
     { title: 'Resources',     keys: ['onlyWithBelts', 'hasNullOres'] },
   ];
@@ -1359,7 +1379,7 @@ function RoutePlanner({
   allSystems, visitedSystems, currentSystemId,
   routeFrom, routeTo, jumpRangeLY, routeFilter, activeRoute, routeComputed,
   onSetFrom, onSetTo, onSetJumpRange, onSetFilter, onComputeRoute, onClearRoute,
-  fleetJumpRangeLY, playerFleets, fleetShips, routeFleetId, onSetFleet, onDispatch,
+  fleetJumpRangeLY, playerFleets, fleetShips, routeFleetId, onSetFleet, onDispatch, dispatchFeedback,
 }: {
   allSystems: StarSystem[]; visitedSystems: Record<string, boolean>;
   currentSystemId: string; routeFrom: string | null; routeTo: string | null;
@@ -1373,8 +1393,10 @@ function RoutePlanner({
   fleetShips: ShipInstance[];
   routeFleetId: string | null;
   onSetFleet: (id: string | null) => void;
-  onDispatch: (fleetId: string) => void;
+  onDispatch: (fleetId: string) => boolean;
+  dispatchFeedback: RouteDispatchFeedback | null;
 }) {
+  const gameState = useGameStore(s => s.state);
   const knownSystems = useMemo(
     () => allSystems.filter(s => visitedSystems[s.id]).sort((a, b) => a.name.localeCompare(b.name)),
     [allSystems, visitedSystems],
@@ -1483,6 +1505,25 @@ function RoutePlanner({
     lowsec:  activeRoute.legSecurity.filter(s => s === 'lowsec').length,
     nullsec: activeRoute.legSecurity.filter(s => s === 'nullsec').length,
   } : null;
+  const estimatedTravelSeconds = useMemo(() => {
+    if (!activeRoute) return 0;
+    let total = 0;
+    for (let index = 0; index < activeRoute.path.length - 1; index += 1) {
+      const from = allSystems.find(system => system.id === activeRoute.path[index]);
+      const to = allSystems.find(system => system.id === activeRoute.path[index + 1]);
+      if (!from || !to) continue;
+      total += calcWarpDuration(gameState, from, to);
+    }
+    return total;
+  }, [activeRoute, allSystems, gameState]);
+  const averageJumpSeconds = activeRoute && activeRoute.hops > 0 ? estimatedTravelSeconds / activeRoute.hops : 0;
+  const routeExposure = secCount
+    ? secCount.nullsec > 0
+      ? 'High exposure'
+      : secCount.lowsec > 0
+        ? 'Moderate exposure'
+        : 'Low exposure'
+    : 'Unknown';
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -1609,6 +1650,9 @@ function RoutePlanner({
         <div style={{ fontSize: 7, color: '#1e293b', marginTop: 3 }}>
           {FILTER_OPTIONS.find(o => o.value === routeFilter)?.title}
         </div>
+        <div style={{ fontSize: 7, color: '#334155', marginTop: 3, lineHeight: 1.5 }}>
+          Travel time is estimated hop-by-hop. Faster postures cut jumps, safer postures reduce exposure.
+        </div>
       </div>
 
       <div style={{ display: 'flex', gap: 4 }}>
@@ -1652,6 +1696,24 @@ function RoutePlanner({
               ▶ Dispatch {selectedFleet.name} →
             </button>
           )}
+          {dispatchFeedback && (
+            <div style={{
+              marginBottom: 8,
+              padding: '7px 8px',
+              fontSize: 8,
+              lineHeight: 1.5,
+              borderRadius: 6,
+              border: dispatchFeedback.tone === 'success'
+                ? '1px solid rgba(74,222,128,0.22)'
+                : '1px solid rgba(248,113,113,0.22)',
+              background: dispatchFeedback.tone === 'success'
+                ? 'rgba(20,83,45,0.18)'
+                : 'rgba(127,29,29,0.18)',
+              color: dispatchFeedback.tone === 'success' ? '#86efac' : '#fca5a5',
+            }}>
+              {dispatchFeedback.text}
+            </div>
+          )}
 
           {/* Summary stats */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginBottom: 8 }}>
@@ -1659,6 +1721,9 @@ function RoutePlanner({
               { l: 'Jumps',       v: activeRoute.hops },
               { l: 'Distance',    v: `${activeRoute.totalLy.toFixed(1)} LY` },
               { l: 'Sectors',     v: activeRoute.sectorPath.length },
+              { l: 'Travel Time', v: formatEta(estimatedTravelSeconds) },
+              { l: 'Avg / jump',  v: activeRoute.hops > 0 ? formatEta(averageJumpSeconds) : '0s' },
+              { l: 'Exposure',    v: routeExposure },
             ].map(r => (
               <div key={r.l} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9 }}>
                 <span style={{ color: '#475569' }}>{r.l}</span>
@@ -2030,6 +2095,7 @@ function StarMapPanelInner() {
   const [rightTab,    setRightTab]    = useState<'intel' | 'route'>('intel');
   const [filters, setFilters] = useState<MapFilters>({
     highsec: true, lowsec: true, nullsec: true,
+    showLabels: true,
     onlyVisited: false, onlyWithBelts: false, hasNullOres: false,
   });
 
@@ -2040,6 +2106,7 @@ function StarMapPanelInner() {
   const [activeRoute,    setActiveRoute]    = useState<ActiveRoute | null>(null);
   const [routeComputed,  setRouteComputed]  = useState(false);
   const [routeFleetId,   setRouteFleetId]   = useState<string | null>(null);
+  const [dispatchFeedback, setDispatchFeedback] = useState<RouteDispatchFeedback | null>(null);
   const [overlay,        setOverlay]        = useState<OverlayMode>('default');
   const [hoverPreview,   setHoverPreview]   = useState<HoverPreview | null>(null);
   const gridRef = useRef<GalaxyGridHandle>(null);
@@ -2083,6 +2150,7 @@ function StarMapPanelInner() {
   }, [selectedId, galaxy.currentSystemId, initiateWarp]);
 
   const handleComputeRoute = useCallback(() => {
+    setDispatchFeedback(null);
     if (!routeFrom || !routeTo) return;
     const result = findRoute(allSystems, routeFrom, routeTo, jumpRangeLY, routeFilter);
     if (result) {
@@ -2107,6 +2175,7 @@ function StarMapPanelInner() {
   const handleClearRoute = useCallback(() => {
     setActiveRoute(null);
     setRouteComputed(false);
+    setDispatchFeedback(null);
   }, []);
 
   // When a fleet is selected as origin, sync its current system + jump range
@@ -2125,12 +2194,21 @@ function StarMapPanelInner() {
     setJumpRangeLY(Math.round(DEFAULT_JUMP_RANGE_LY + maxBonus * 100));
     setActiveRoute(null);
     setRouteComputed(false);
+    setDispatchFeedback(null);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [routeFleetId]);
 
   const handleDispatchFleet = useCallback((fleetId: string) => {
-    if (!routeTo) return;
-    doIssueFleetGroupOrder(fleetId, routeTo, routeFilter);
+    if (!routeTo) {
+      setDispatchFeedback({ tone: 'error', text: 'Pick a destination before dispatching a fleet.' });
+      return false;
+    }
+
+    const dispatched = doIssueFleetGroupOrder(fleetId, routeTo, routeFilter);
+    setDispatchFeedback(dispatched
+      ? { tone: 'success', text: 'Order issued. The fleet will depart on the next travel tick.' }
+      : { tone: 'error', text: 'Dispatch failed. Recompute the route with the fleet\'s actual range or confirm the fleet is ready to move.' });
+    return dispatched;
   }, [routeTo, routeFilter, doIssueFleetGroupOrder]);
 
   const selectedSys    = selectedId ? allSystems.find(s => s.id === selectedId) : null;
@@ -2373,18 +2451,19 @@ function StarMapPanelInner() {
                   routeFilter={routeFilter}
                   activeRoute={activeRoute}
                   routeComputed={routeComputed}
-                  onSetFrom={setRouteFrom}
-                  onSetTo={setRouteTo}
-                  onSetJumpRange={setJumpRangeLY}
-                  onSetFilter={setRouteFilter}
+                  onSetFrom={(id) => { setDispatchFeedback(null); setRouteFrom(id); }}
+                  onSetTo={(id) => { setDispatchFeedback(null); setRouteTo(id); }}
+                  onSetJumpRange={(ly) => { setDispatchFeedback(null); setJumpRangeLY(ly); }}
+                  onSetFilter={(filter) => { setDispatchFeedback(null); setRouteFilter(filter); }}
                   onComputeRoute={handleComputeRoute}
                   onClearRoute={handleClearRoute}
                   fleetJumpRangeLY={fleetJumpRangeLY}
                   playerFleets={playerFleets}
                   fleetShips={fleetShips}
                   routeFleetId={routeFleetId}
-                  onSetFleet={setRouteFleetId}
+                  onSetFleet={(id) => { setDispatchFeedback(null); setRouteFleetId(id); }}
                   onDispatch={handleDispatchFleet}
+                  dispatchFeedback={dispatchFeedback}
                 />
               )}
             </div>

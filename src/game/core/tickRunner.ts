@@ -10,7 +10,7 @@ import { processUnlocks } from '@/game/progression/unlocks';
 import { tickTravel } from '@/game/galaxy/travel.logic';
 import { tickFleet } from '@/game/systems/fleet/fleet.tick';
 import { advanceFleetOrders } from '@/game/systems/fleet/fleet.orders';
-import { tickCombat } from '@/game/systems/combat/combat.logic';
+import { tickCombat, tickEscortedHaulingWingCombat } from '@/game/systems/combat/combat.logic';
 import { tickExploration } from '@/game/systems/fleet/exploration.logic';
 import { computeFleetCargoCapacity } from '@/game/systems/fleet/fleet.logic';
 import { issueFleetGroupOrder } from '@/game/systems/fleet/fleet.orders';
@@ -476,6 +476,10 @@ export function runTick(state: GameState, deltaSeconds: number): TickResult {
     // ── 8a. Advance autonomous fleet orders (one hop per tick) ──────────
     const orderResult = advanceFleetOrders(s);
     s = orderResult.newState;
+
+    // ── FC-3: Detached escorted hauling wings auto-respond to hostile systems ─
+    const escortedWingCombatResult = tickEscortedHaulingWingCombat(s);
+    s = escortedWingCombatResult.newState;
 
     // ── FC-1e: Dump cargoHold when fleet arrives at Corp HQ after a haul trip ─
     {

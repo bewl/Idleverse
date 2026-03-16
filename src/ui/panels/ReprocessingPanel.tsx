@@ -7,6 +7,7 @@ import { FlairProgressBar } from '@/ui/components/FlairProgressBar';
 import { StatTooltip } from '@/ui/tooltip/StatTooltip';
 import { NavTag } from '@/ui/components/NavTag';
 import { GameDropdown, type DropdownOption } from '@/ui/components/GameDropdown';
+import { SystemUnlockCard } from '@/ui/components/SystemUnlockCard';
 import { getSystemById } from '@/game/galaxy/galaxy.gen';
 import { getBatchYieldPreview, getReprocessingEfficiency } from '@/game/systems/reprocessing/reprocessing.logic';
 import { BATCH_SIZE_BASE, BATCH_TIME_SECONDS, ORE_YIELD_TABLE } from '@/game/systems/reprocessing/reprocessing.config';
@@ -271,12 +272,21 @@ export function ReprocessingPanel() {
 
   if (!unlocked) {
     return (
-      <div className="flex flex-col items-center justify-center py-16 text-center">
-        <div className="text-2xl mb-3">⚗️</div>
-        <div className="text-slate-400 text-sm font-bold mb-1">Reprocessing Locked</div>
-        <div className="text-slate-600 text-xs max-w-xs">
-          Train the <span className="text-violet-400">Reprocessing</span> skill to unlock ore-to-mineral conversion.
-        </div>
+      <div className="py-10">
+        <SystemUnlockCard
+          icon="⚗️"
+          title="Reprocessing Facility"
+          skillId="reprocessing"
+          summary="Convert ore into minerals for higher-value sales or for manufacturing inputs. Reprocessing is the bridge between a raw mining loop and a more deliberate industrial economy."
+          benefits={[
+            'Refine hauled ore into minerals instead of dumping everything straight to market.',
+            'Improve mineral yield over time, making the same mining volume worth more.',
+            'Feed manufacturing chains directly when you want a hybrid mine-to-build playstyle.',
+          ]}
+          accentColor="#a78bfa"
+          previewPanel="skills"
+          previewLabel="Review Reprocessing Skills"
+        />
       </div>
     );
   }
@@ -287,6 +297,7 @@ export function ReprocessingPanel() {
     .filter((id): id is string => !!id && !!ORE_YIELD_TABLE[id]);
   const homeSystemId = state.systems.factions.homeStationSystemId;
   const homeSystem = homeSystemId ? getSystemById(state.galaxy.seed, homeSystemId) : null;
+  const homeOutpost = homeSystemId ? state.systems.factions.outposts[homeSystemId] ?? null : null;
 
   return (
     <div className="space-y-6 max-w-2xl">
@@ -323,8 +334,8 @@ export function ReprocessingPanel() {
 
       <div className={`rounded-xl border px-3 py-2 text-xs ${homeSystem ? 'border-cyan-700/20 bg-cyan-950/10 text-slate-400' : 'border-amber-700/30 bg-amber-950/15 text-amber-300'}`}>
         {homeSystem
-          ? <>Corp HQ anchored at <span className="text-cyan-300 font-semibold">{homeSystem.name}</span>. Reprocessing jobs route through this station network.</>
-          : <>No Corp HQ registered. Dock at a station in the System panel and register it to enable reprocessing jobs and auto-refinery controls.</>}
+          ? <>Corp HQ anchored at <span className="text-cyan-300 font-semibold">{homeSystem.name}</span>. {homeOutpost ? 'Reprocessing jobs route through your outpost refinery network.' : 'Reprocessing jobs route through this station network.'}</>
+          : <>No Corp HQ registered. Dock at a station or deploy a POS core in the System panel to enable reprocessing jobs and auto-refinery controls.</>}
       </div>
 
       {/* ── Auto-Refinery ── */}

@@ -18,7 +18,7 @@ import { GameDropdown, type DropdownOption } from '@/ui/components/GameDropdown'
 import { useUiStore } from '@/stores/uiStore';
 import { COMMANDER_SKILL_DEFINITIONS, COMMANDER_BONUS_LABELS } from '@/game/systems/fleet/commander.config';
 import { commanderSkillEtaSeconds, getCombinedCommanderBonus } from '@/game/systems/fleet/commander.logic';
-import { getFleetStoredCargo, getFleetStorageCapacity, getOperationalFleetShipIds, getWingCargoCapacity, getWingCargoTotals, getWingCargoUsed, hasDispatchedHaulingWing } from '@/game/systems/fleet/wings.logic';
+import { getEscortWing, getFleetStoredCargo, getFleetStorageCapacity, getHaulingWingEffectiveSecurityFilter, getOperationalFleetShipIds, getWingCargoCapacity, getWingCargoTotals, getWingCargoUsed, getWingCurrentSystemId, hasActiveEscortWing, hasDispatchedHaulingWing } from '@/game/systems/fleet/wings.logic';
 
 const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V'];
 
@@ -50,6 +50,19 @@ const WING_LABELS: Record<WingType, string> = {
 };
 const WING_TINT: Record<WingType, string> = {
   mining: '#22d3ee', hauling: '#f59e0b', combat: '#f87171', recon: '#34d399', industrial: '#c084fc',
+};
+const ROUTE_FILTER_LABELS: Record<RouteSecurityFilter, string> = {
+  shortest: 'Direct route',
+  safest: 'Safest route',
+  'avoid-null': 'No-null route',
+  'avoid-low': 'High-sec route',
+};
+
+const ROUTE_FILTER_EXPLANATIONS: Record<RouteSecurityFilter, string> = {
+  shortest: 'Fastest operational posture. Fewer hops, but no security bias.',
+  safest: 'Slowest but most conservative posture. Strongly prefers highsec links.',
+  'avoid-null': 'Middle-ground posture. Keeps nullsec out of the route where possible.',
+  'avoid-low': 'Strictest posture. Favors highsec-only chains when they exist.',
 };
 
 // ─── Role minibar ──────────────────────────────────────────────────────────
@@ -125,11 +138,14 @@ function WingRow({
     .map(ship => ship.assignedPilotId ? allPilots[ship.assignedPilotId] : null)
     .filter(Boolean) as PilotInstance[];
   const wingCommander = wing.commanderId ? allPilots[wing.commanderId] ?? null : null;
+  const escortWing = wing.type === 'hauling' ? getEscortWing(fleet, wing) : null;
+  const escortActive = wing.type === 'hauling' ? hasActiveEscortWing(fleet, wing) : false;
   const escortOptions = wings.filter(candidate => candidate.type === 'combat' && candidate.id !== wing.id);
   const cargoCommanderBonus = getCombinedCommanderBonus(allPilots, fleet, wing, 'commander-cargo-capacity');
   const haulingCapacity = wing.type === 'hauling' ? getWingCargoCapacity(wing, allShips, cargoCommanderBonus) : 0;
   const haulingUsed = wing.type === 'hauling' ? getWingCargoUsed(wing) : 0;
   const haulingPct = haulingCapacity > 0 ? haulingUsed / haulingCapacity : 0;
+  const routePolicy = wing.type === 'hauling' ? getHaulingWingEffectiveSecurityFilter(fleet, wing, allShips) : null;
   const wingLabel = WING_LABELS[wing.type];
   const wingTint = WING_TINT[wing.type];
   const isActive = wing.isDispatched;
@@ -207,6 +223,11 @@ function WingRow({
         {wing.type === 'hauling' && haulingCapacity > 0 && (
           <span className="text-[9px] font-mono text-slate-500 shrink-0">
             {Math.round(haulingUsed).toLocaleString()} / {Math.round(haulingCapacity).toLocaleString()} m³
+          </span>
+        )}
+        {wing.type === 'hauling' && routePolicy && (
+          <span className={`text-[8px] shrink-0 ${escortActive ? 'text-rose-300/70' : 'text-cyan-300/70'}`}>
+            {escortActive ? 'escort cover' : ROUTE_FILTER_LABELS[routePolicy].toLowerCase()}
           </span>
         )}
         {wingCommander && (
@@ -324,9 +345,30 @@ function WingRow({
               />
             </div>
             {wing.escortWingId && (
-              <span className="text-[8px] text-slate-500">combat wing travels with this wing on haul trips</span>
+              <span className="text-[8px] text-slate-500">
+                {escortActive
+                  ? `${escortWing?.name ?? 'Escort wing'} travels with this wing and enables the preferred direct route.`
+                  : 'Escort wing is assigned, but it needs ships before it can cover haul trips.'}
+              </span>
+            )}
+            {!wing.escortWingId && wing.type === 'hauling' && (
+              <span className="text-[8px] text-slate-500">Unescorted haul trips automatically prefer the safest available route.</span>
             )}
           </div>
+
+          {wing.type === 'hauling' && routePolicy && (
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-[8px] uppercase tracking-widest text-slate-500">Route</span>
+              <span className={`text-[9px] px-1.5 py-0.5 rounded border ${escortActive ? 'border-rose-400/25 bg-rose-950/25 text-rose-300/80' : 'border-cyan-400/25 bg-cyan-950/25 text-cyan-300/80'}`}>
+                {ROUTE_FILTER_LABELS[routePolicy]}
+              </span>
+              <span className="text-[8px] text-slate-500">
+                {escortActive
+                  ? 'Escorted wings fall back to safer routing only if a direct route is unavailable.'
+                  : 'Unescorted wings avoid dangerous space when a safer path exists.'}
+              </span>
+            </div>
+          )}
 
           {wing.type === 'hauling' && haulingUsed > 0 && !wing.isDispatched && homeSystemId !== null && fleet.currentSystemId !== homeSystemId && (
             <button
@@ -436,6 +478,18 @@ function FleetCard({
   const fleetShips = fleet.shipIds.map(id => allShips[id]).filter(Boolean) as ShipInstance[];
   const wings = fleet.wings ?? [];
   const haulingWings = wings.filter(wing => wing.type === 'hauling');
+  const dispatchedHaulingWings = haulingWings.filter(wing => wing.isDispatched);
+  const escortedDispatchedWingCount = dispatchedHaulingWings.filter(wing => hasActiveEscortWing(fleet, wing)).length;
+  const escortResponses = dispatchedHaulingWings
+    .map(wing => {
+      if (!hasActiveEscortWing(fleet, wing)) return null;
+      const systemId = getWingCurrentSystemId(fleet, wing, allShips);
+      if (!systemId) return null;
+      const threats = getAliveNpcGroupsInSystem(state, systemId);
+      if (threats.length === 0) return null;
+      return { wingId: wing.id, systemId, threatCount: threats.length };
+    })
+    .filter(Boolean) as Array<{ wingId: string; systemId: string; threatCount: number }>;
   const hasWingDispatch = hasDispatchedHaulingWing(fleet);
   const operationalShipIds = getOperationalFleetShipIds(fleet);
   const operationalFleetShips = operationalShipIds.map(id => allShips[id]).filter(Boolean) as ShipInstance[];
@@ -669,9 +723,14 @@ function FleetCard({
               {!isMoving && !fleet.combatOrder && !fleet.isScanning && (
                 <span className="text-[9px] text-slate-500">Idle</span>
               )}
-              {!isMoving && haulingWings.some(wing => wing.isDispatched) && (
+              {!isMoving && dispatchedHaulingWings.length > 0 && (
                 <span className="text-[9px] px-2 py-0.5 rounded bg-amber-900/40 text-amber-300 border border-amber-400/25">
-                  ↵ {haulingWings.filter(wing => wing.isDispatched).length} hauling wing{haulingWings.filter(wing => wing.isDispatched).length !== 1 ? 's' : ''} in transit
+                  ↵ {dispatchedHaulingWings.length} hauling wing{dispatchedHaulingWings.length !== 1 ? 's' : ''} in transit{escortedDispatchedWingCount > 0 ? ` · ${escortedDispatchedWingCount} escorted` : ' · safe-route protocol'}
+                </span>
+              )}
+              {escortResponses.length > 0 && (
+                <span className="text-[9px] px-2 py-0.5 rounded bg-rose-900/35 text-rose-300 border border-rose-400/20">
+                  ⚔ Escort response @ {galaxy.find(s => s.id === escortResponses[0].systemId)?.name ?? escortResponses[0].systemId} · {escortResponses[0].threatCount} threat{escortResponses[0].threatCount !== 1 ? 's' : ''}
                 </span>
               )}
             </div>
@@ -1189,6 +1248,9 @@ function FleetCard({
                 >
                   ▶ Move Fleet
                 </button>
+                <div className="text-[8px] text-slate-500 leading-relaxed max-w-[22rem]">
+                  <span className="text-slate-400">{ROUTE_FILTER_LABELS[secFilter]}:</span> {ROUTE_FILTER_EXPLANATIONS[secFilter]}
+                </div>
                 {hasWingDispatch && (
                   <span className="text-[8px] text-amber-400/70">Whole-fleet movement is locked while a hauling wing is in transit.</span>
                 )}
@@ -1646,6 +1708,22 @@ function ShipCard({ ship, state, expanded, onToggle }: {
   const joinableFleets = allFleets.filter(
     f => f.currentSystemId === ship.systemId && f.fleetOrder === null && f.id !== ship.fleetId,
   );
+  const fittedEffectTotals = (['high', 'mid', 'low'] as const).reduce<Record<string, number>>((totals, slot) => {
+    for (const modId of ship.fittedModules[slot]) {
+      const module = MODULE_DEFINITIONS[modId];
+      if (!module) continue;
+      for (const [effectKey, effectValue] of Object.entries(module.effects)) {
+        totals[effectKey] = (totals[effectKey] ?? 0) + effectValue;
+      }
+    }
+    return totals;
+  }, {});
+  const fittingFocusBadges = [
+    fittedEffectTotals['mining-yield'] ? { label: `Mining +${Math.round(fittedEffectTotals['mining-yield'] * 100)}%`, color: '#22d3ee' } : null,
+    fittedEffectTotals['combat-rating'] ? { label: `Combat +${Math.round(fittedEffectTotals['combat-rating'] * 100)}%`, color: '#f87171' } : null,
+    fittedEffectTotals['cargo-capacity'] ? { label: `Cargo +${Math.round(fittedEffectTotals['cargo-capacity'] * 100)}%`, color: '#f59e0b' } : null,
+    fittedEffectTotals['scan-strength'] ? { label: `Scan +${Math.round(fittedEffectTotals['scan-strength'] * 100)}%`, color: '#34d399' } : null,
+  ].filter(Boolean) as Array<{ label: string; color: string }>;
 
   const isActive = ship.activity !== 'idle';
   const dotColor = isActive ? 'bg-cyan-400 animate-pulse' : assignedPilot ? 'bg-emerald-400' : 'bg-slate-600';
@@ -1703,17 +1781,41 @@ function ShipCard({ ship, state, expanded, onToggle }: {
         <div className="px-3 pb-3 border-t border-slate-700/30 pt-2 flex flex-col gap-2" onClick={e => e.stopPropagation()}>
           {/* Hull stats */}
           {hull && (
-            <div className="grid grid-cols-3 gap-1">
-              {[
-                { label: 'Mine', value: hull.baseMiningBonus, color: 'text-cyan-400' },
-                { label: 'Combat', value: hull.baseCombatRating, color: 'text-red-400' },
-                { label: 'Cargo ×', value: hull.baseCargoMultiplier, color: 'text-amber-400' },
-              ].map(({ label, value, color }) => (
-                <div key={label} className="flex flex-col items-center bg-slate-800/40 rounded py-1">
-                  <span className="text-[8px] text-slate-500 uppercase tracking-widest">{label}</span>
-                  <span className={`text-[11px] font-semibold ${color}`}>{value.toFixed(1)}×</span>
+            <div className="flex flex-col gap-2">
+              <div className="rounded border border-slate-700/25 bg-slate-950/35 px-3 py-2">
+                <div className="text-[8px] uppercase tracking-widest text-slate-500">Hull Identity</div>
+                <div className="text-[10px] text-slate-300 mt-1 leading-relaxed">{hull.description}</div>
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  <span className="text-[8px] px-1.5 py-0.5 rounded border border-slate-700/35 text-slate-400">
+                    Warp +{Math.round(hull.warpSpeedBonus * 100)}%
+                  </span>
+                  <span className="text-[8px] px-1.5 py-0.5 rounded border border-slate-700/35 text-slate-400">
+                    Slots H{hull.moduleSlots.high} / M{hull.moduleSlots.mid} / L{hull.moduleSlots.low}
+                  </span>
+                  {fittingFocusBadges.length > 0 ? fittingFocusBadges.map(badge => (
+                    <span key={badge.label} className="text-[8px] px-1.5 py-0.5 rounded border" style={{ color: badge.color, borderColor: `${badge.color}44`, background: `${badge.color}12` }}>
+                      {badge.label}
+                    </span>
+                  )) : (
+                    <span className="text-[8px] px-1.5 py-0.5 rounded border border-slate-700/35 text-slate-500">
+                      No fitting bonuses installed
+                    </span>
+                  )}
                 </div>
-              ))}
+              </div>
+              <div className="grid grid-cols-4 gap-1">
+                {[
+                  { label: 'Mine', value: hull.baseMiningBonus, color: 'text-cyan-400' },
+                  { label: 'Combat', value: hull.baseCombatRating, color: 'text-red-400' },
+                  { label: 'Cargo ×', value: hull.baseCargoMultiplier, color: 'text-amber-400' },
+                  { label: 'Warp', value: 1 + hull.warpSpeedBonus, color: 'text-emerald-400' },
+                ].map(({ label, value, color }) => (
+                  <div key={label} className="flex flex-col items-center bg-slate-800/40 rounded py-1">
+                    <span className="text-[8px] text-slate-500 uppercase tracking-widest">{label}</span>
+                    <span className={`text-[11px] font-semibold ${color}`}>{value.toFixed(1)}×</span>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 

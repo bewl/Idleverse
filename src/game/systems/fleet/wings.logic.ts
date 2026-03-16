@@ -5,6 +5,7 @@ import { BASE_SHIP_CARGO_M3 } from '@/game/balance/constants';
 import { findRoute } from '@/game/galaxy/route.logic';
 import { generateGalaxy } from '@/game/galaxy/galaxy.gen';
 import { getCombinedCommanderBonus } from './commander.logic';
+import { setShipActivity } from './fleet.logic';
 
 // ─── Cargo capacity ────────────────────────────────────────────────────────
 
@@ -72,12 +73,50 @@ export function getHaulingWings(fleet: PlayerFleet): FleetWing[] {
   return fleet.wings?.filter(wing => wing.type === 'hauling') ?? [];
 }
 
+export function getEscortWing(fleet: PlayerFleet, haulingWing: FleetWing): FleetWing | null {
+  if (haulingWing.type !== 'hauling' || !haulingWing.escortWingId) return null;
+  return fleet.wings?.find(wing => wing.id === haulingWing.escortWingId && wing.type === 'combat') ?? null;
+}
+
+export function hasActiveEscortWing(fleet: PlayerFleet, haulingWing: FleetWing): boolean {
+  const escortWing = getEscortWing(fleet, haulingWing);
+  return !!escortWing && escortWing.shipIds.length > 0;
+}
+
+export function getHaulingWingPreferredSecurityFilter(
+  fleet: PlayerFleet,
+  haulingWing: FleetWing,
+): RouteSecurityFilter {
+  return hasActiveEscortWing(fleet, haulingWing) ? 'shortest' : 'safest';
+}
+
 export function hasDispatchedHaulingWing(fleet: PlayerFleet): boolean {
   return getHaulingWings(fleet).some(wing => wing.isDispatched);
 }
 
 export function getWingByShipId(fleet: PlayerFleet, shipId: string): FleetWing | null {
   return fleet.wings?.find(wing => wing.shipIds.includes(shipId)) ?? null;
+}
+
+export function getWingCurrentSystemId(
+  fleet: PlayerFleet,
+  wing: FleetWing,
+  ships: Record<string, ShipInstance>,
+): string | null {
+  const relevantShipIds = wing.isDispatched && wing.type === 'hauling'
+    ? getWingDispatchShipIds(fleet, wing)
+    : wing.shipIds;
+  let currentSystemId: string | null = null;
+  for (const shipId of relevantShipIds) {
+    const ship = ships[shipId];
+    if (!ship) continue;
+    if (currentSystemId === null) {
+      currentSystemId = ship.systemId;
+      continue;
+    }
+    if (ship.systemId !== currentSystemId) return null;
+  }
+  return currentSystemId;
 }
 
 export function getOperationalFleetShipIds(fleet: PlayerFleet): string[] {
@@ -93,17 +132,67 @@ export function getOperationalFleetShips(
     .filter(Boolean) as ShipInstance[];
 }
 
+export function assignWingToMiningBelt(
+  state: GameState,
+  fleetId: string,
+  wingId: string,
+  beltId: string,
+): GameState | null {
+  const fleet = state.systems.fleet.fleets[fleetId];
+  if (!fleet || fleet.fleetOrder) return null;
+
+  const wing = fleet.wings?.find(candidate => candidate.id === wingId && candidate.type === 'mining') ?? null;
+  if (!wing || wing.isDispatched || wing.shipIds.length === 0) return null;
+
+  let nextState = state;
+  for (const shipId of wing.shipIds) {
+    const ship = nextState.systems.fleet.ships[shipId];
+    if (!ship || ship.fleetOrder || ship.systemId !== fleet.currentSystemId) return null;
+    const updatedState = setShipActivity(nextState, shipId, 'mining', beltId);
+    if (!updatedState) return null;
+    nextState = updatedState;
+  }
+
+  return nextState;
+}
+
 /**
  * Get all ship IDs to dispatch for a haul trip:
  * the hauling wing's ships plus any assigned escort (combat) wing's ships.
  */
 export function getWingDispatchShipIds(fleet: PlayerFleet, haulingWing: FleetWing): string[] {
   const ids = new Set(haulingWing.shipIds);
-  if (haulingWing.escortWingId) {
-    const escort = fleet.wings.find(w => w.id === haulingWing.escortWingId);
-    if (escort) escort.shipIds.forEach(id => ids.add(id));
+  const escortWing = getEscortWing(fleet, haulingWing);
+  if (escortWing) {
+    escortWing.shipIds.forEach(id => ids.add(id));
   }
   return [...ids];
+}
+
+export function getHaulingWingEffectiveSecurityFilter(
+  fleet: PlayerFleet,
+  haulingWing: FleetWing,
+  ships: Record<string, ShipInstance>,
+): RouteSecurityFilter {
+  for (const shipId of getWingDispatchShipIds(fleet, haulingWing)) {
+    const filter = ships[shipId]?.fleetOrder?.securityFilter;
+    if (filter) return filter;
+  }
+  return getHaulingWingPreferredSecurityFilter(fleet, haulingWing);
+}
+
+function findHaulingWingRoute(
+  galaxy: ReturnType<typeof generateGalaxy>,
+  fromSystemId: string,
+  toSystemId: string,
+  jumpRange: number,
+  preferredFilters: RouteSecurityFilter[],
+) {
+  for (const filter of preferredFilters) {
+    const route = findRoute(galaxy, fromSystemId, toSystemId, jumpRange, filter);
+    if (route && route.hops > 0) return { route, filter };
+  }
+  return null;
 }
 
 // ─── Dispatch ──────────────────────────────────────────────────────────────
@@ -136,14 +225,18 @@ export function dispatchHaulerWing(
 
   const galaxy = generateGalaxy(state.galaxy.seed);
   const jumpRange = fleet.maxJumpRangeLY > 0 ? fleet.maxJumpRangeLY : 10;
-  const route = findRoute(galaxy, fromSystem, homeSystemId, jumpRange, 'shortest');
-  if (!route || route.hops === 0) return null;
+  const preferredSecurityFilters: RouteSecurityFilter[] = hasActiveEscortWing(fleet, haulingWing)
+    ? ['shortest', 'avoid-null', 'safest']
+    : ['safest', 'avoid-null', 'shortest'];
+  const routeResult = findHaulingWingRoute(galaxy, fromSystem, homeSystemId, jumpRange, preferredSecurityFilters);
+  if (!routeResult) return null;
+  const { route, filter } = routeResult;
 
   const order: FleetOrder = {
     destinationSystemId: homeSystemId,
     route: route.path,
     currentLeg: 0,
-    securityFilter: 'shortest' as RouteSecurityFilter,
+    securityFilter: filter,
     pauseOnArrival: false,
     legDepartedAt: Date.now(),
   };
@@ -231,17 +324,21 @@ export function processWingArrivalAtHQ(
   const updatedFleet = s.systems.fleet.fleets[fleetId];
   const galaxy = generateGalaxy(s.galaxy.seed);
   const jumpRange = updatedFleet.maxJumpRangeLY > 0 ? updatedFleet.maxJumpRangeLY : 10;
+  const preferredSecurityFilters: RouteSecurityFilter[] = hasActiveEscortWing(updatedFleet, haulingWing)
+    ? ['shortest', 'avoid-null', 'safest']
+    : ['safest', 'avoid-null', 'shortest'];
   let newShips = { ...s.systems.fleet.ships };
   for (const sid of dispatchedIds) {
     const ship = newShips[sid];
     if (!ship || ship.systemId === returnOrigin) continue;
-    const route = findRoute(galaxy, homeSystemId, returnOrigin, jumpRange, 'shortest');
-    if (route && route.hops > 0) {
+    const routeResult = findHaulingWingRoute(galaxy, homeSystemId, returnOrigin, jumpRange, preferredSecurityFilters);
+    if (routeResult) {
+      const { route, filter } = routeResult;
       const order: FleetOrder = {
         destinationSystemId: returnOrigin,
         route: route.path,
         currentLeg: 0,
-        securityFilter: 'shortest' as RouteSecurityFilter,
+        securityFilter: filter,
         pauseOnArrival: false,
         legDepartedAt: Date.now(),
       };

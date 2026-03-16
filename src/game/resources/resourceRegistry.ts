@@ -82,6 +82,8 @@ const RESOURCES: ResourceDefinition[] = [
     description: 'Overclocked propulsion assembly with Zydrine-cooled plasma chambers.' },
   { id: 'advanced-condenser-coil',name: 'Advanced Condenser Coil',category: 'component', tier: 3, precision: 0,
     description: 'High-capacity power storage coil using Morphite superconductors.' },
+  { id: 'pos-core', name: 'POS Core', category: 'component', tier: 5, precision: 0,
+    description: 'Anchored station command core used to deploy a player-owned outpost and establish an independent Corp HQ.' },
 
   // ── Ships (Tier 4 — T1 manufactured items) ────────────────────────────────
   { id: 'ship-shuttle',        name: 'Shuttle',        category: 'ship', tier: 4, precision: 0,

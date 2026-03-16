@@ -16,10 +16,12 @@ import { formatEta, getWarpProgress, warpEtaSeconds } from '@/game/galaxy/travel
 import { getBeltsForSystem, getBeltRichnessForSystem } from '@/game/systems/mining/mining.logic';
 import { ORE_BELTS } from '@/game/systems/mining/mining.config';
 import { RESOURCE_REGISTRY } from '@/game/resources/resourceRegistry';
-import { getStationInSystem } from '@/game/systems/factions/faction.logic';
+import { getOutpostInSystem, getStationInSystem } from '@/game/systems/factions/faction.logic';
+import { getOperationalFleetShipIds } from '@/game/systems/fleet/wings.logic';
 import { NavTag } from '@/ui/components/NavTag';
 import { HULL_DEFINITIONS } from '@/game/systems/fleet/fleet.config';
 import { GameTooltip } from '@/ui/components/GameTooltip';
+import { GameDropdown, type DropdownOption } from '@/ui/components/GameDropdown';
 import { SKILL_DEFINITIONS } from '@/game/systems/skills/skills.config';
 import type { CelestialBody } from '@/types/galaxy.types';
 import type { Anomaly, AnomalyType, PlayerFleet } from '@/types/game.types';
@@ -638,8 +640,49 @@ function temperatureInfo(orbitFrac: number): { label: string; color: string } {
   return                        { label: 'Frozen',    color: '#67e8f9' };
 }
 
+interface BeltAssignmentFeedback {
+  tone: 'success' | 'error';
+  text: string;
+}
+
 function BodyDetail({ body, inWarp, maxOrbit, systemId }: { body: CelestialBody; inWarp: boolean; maxOrbit: number; systemId: string }) {
   const state      = useGameStore(s => s.state);
+  const assignWingMining = useGameStore(s => s.assignWingToMiningBelt);
+  const [selectedWingByBelt, setSelectedWingByBelt] = useState<Record<string, string>>({});
+  const [feedbackByBelt, setFeedbackByBelt] = useState<Record<string, BeltAssignmentFeedback | null>>({});
+
+  useEffect(() => {
+    setSelectedWingByBelt({});
+    setFeedbackByBelt({});
+  }, [body.id, systemId]);
+
+  const readyMiningWings = useMemo(() => (
+    Object.values(state.systems.fleet.fleets)
+      .filter(fleet => fleet.currentSystemId === systemId && !fleet.fleetOrder)
+      .flatMap(fleet =>
+        (fleet.wings ?? [])
+          .filter(wing => wing.type === 'mining' && !wing.isDispatched && wing.shipIds.length > 0)
+          .map(wing => ({ fleet, wing })),
+      )
+  ), [state.systems.fleet.fleets, systemId]);
+
+  const wingOptions = useMemo<DropdownOption[]>(() => (
+    readyMiningWings.map(({ fleet, wing }) => ({
+      value: wing.id,
+      label: wing.name,
+      description: `${fleet.name} · ${wing.shipIds.length} ships`,
+      meta: getOperationalFleetShipIds(fleet)
+        .filter(shipId => wing.shipIds.includes(shipId)).length > 0
+        ? `${getOperationalFleetShipIds(fleet).filter(shipId => wing.shipIds.includes(shipId)).length} operational`
+        : 'Needs pilots',
+      group: fleet.name,
+      tone: 'cyan',
+      badges: [{ label: 'Mining', color: '#22d3ee' }],
+      keywords: [fleet.name, wing.name],
+    }))
+  ), [readyMiningWings]);
+
+  const wingById = useMemo(() => new Map(readyMiningWings.map(entry => [entry.wing.id, entry])), [readyMiningWings]);
 
   const assignedMiningShipsByBelt = Object.values(state.systems.fleet.fleets)
     .filter(fleet => fleet.currentSystemId === systemId)
@@ -703,6 +746,29 @@ function BodyDetail({ body, inWarp, maxOrbit, systemId }: { body: CelestialBody;
             const isLocked = req ? (state.systems.skills.levels[req.skillId] ?? 0) < req.minLevel : false;
             const reqSkillName = req ? (SKILL_DEFINITIONS[req.skillId]?.name ?? req.skillId) : '';
             const resNames  = def.outputs.map(o => RESOURCE_REGISTRY[o.resourceId]?.name ?? o.resourceId).join(', ');
+            const selectedWingId = selectedWingByBelt[beltId] ?? '';
+            const selectedWingEntry = selectedWingId ? wingById.get(selectedWingId) ?? null : null;
+            const fallbackWingEntry = readyMiningWings.length === 1 ? readyMiningWings[0] : null;
+            const feedback = feedbackByBelt[beltId] ?? null;
+
+            const handleAssignWing = () => {
+              const targetWing = selectedWingEntry ?? fallbackWingEntry;
+              if (!targetWing) {
+                setFeedbackByBelt(current => ({
+                  ...current,
+                  [beltId]: { tone: 'error', text: 'Choose a mining wing in this system before assigning the belt.' },
+                }));
+                return;
+              }
+
+              const success = assignWingMining(targetWing.fleet.id, targetWing.wing.id, beltId);
+              setFeedbackByBelt(current => ({
+                ...current,
+                [beltId]: success
+                  ? { tone: 'success', text: `${targetWing.wing.name} is now mining ${def.name}.` }
+                  : { tone: 'error', text: 'Assignment failed. Confirm the wing is idle, in-system, and has ships ready to mine.' },
+              }));
+            };
 
             return (
               <div
@@ -784,6 +850,63 @@ function BodyDetail({ body, inWarp, maxOrbit, systemId }: { body: CelestialBody;
                     </span>
                   )}
                 </div>
+                {!isLocked && !isDepleted && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginTop: 2 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                      <div style={{ flex: '1 1 180px', minWidth: 160 }}>
+                        <GameDropdown
+                          value={selectedWingId}
+                          onChange={nextValue => {
+                            setSelectedWingByBelt(current => ({ ...current, [beltId]: nextValue }));
+                            setFeedbackByBelt(current => ({ ...current, [beltId]: null }));
+                          }}
+                          options={wingOptions}
+                          placeholder={readyMiningWings.length === 0 ? 'No mining wings ready' : 'Select mining wing...'}
+                          emptyOptionLabel="Auto-pick the only wing"
+                          emptyOptionDescription={readyMiningWings.length === 1 ? `${readyMiningWings[0].wing.name} will be used.` : 'Pick a specific mining wing.'}
+                          searchPlaceholder="Find mining wing..."
+                          size="compact"
+                          triggerTone="cyan"
+                          disabled={inWarp || readyMiningWings.length === 0}
+                          buttonStyle={{ minHeight: 28 }}
+                        />
+                      </div>
+                      <button
+                        onClick={handleAssignWing}
+                        disabled={inWarp || readyMiningWings.length === 0}
+                        style={{
+                          padding: '6px 10px',
+                          fontSize: 9,
+                          fontWeight: 700,
+                          borderRadius: 4,
+                          border: inWarp || readyMiningWings.length === 0 ? '1px solid rgba(71,85,105,0.3)' : '1px solid rgba(34,211,238,0.35)',
+                          background: inWarp || readyMiningWings.length === 0 ? 'rgba(6,9,20,0.3)' : 'rgba(8,51,68,0.32)',
+                          color: inWarp || readyMiningWings.length === 0 ? '#475569' : '#67e8f9',
+                          cursor: inWarp || readyMiningWings.length === 0 ? 'not-allowed' : 'pointer',
+                        }}
+                        title={readyMiningWings.length === 0 ? 'Create or configure a mining wing in Fleet first.' : `Assign a mining wing to ${def.name}`}
+                      >
+                        Assign Wing
+                      </button>
+                    </div>
+                    <div style={{ fontSize: 8, color: '#475569', lineHeight: 1.5 }}>
+                      Mining assignment happens from the system view. Pick a mining wing here to move all of its ships onto this belt.
+                    </div>
+                    {feedback && (
+                      <div style={{
+                        fontSize: 8,
+                        lineHeight: 1.5,
+                        padding: '5px 7px',
+                        borderRadius: 4,
+                        border: feedback.tone === 'success' ? '1px solid rgba(74,222,128,0.2)' : '1px solid rgba(248,113,113,0.2)',
+                        background: feedback.tone === 'success' ? 'rgba(20,83,45,0.18)' : 'rgba(127,29,29,0.18)',
+                        color: feedback.tone === 'success' ? '#86efac' : '#fca5a5',
+                      }}>
+                        {feedback.text}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             );
           })}
@@ -1058,6 +1181,7 @@ function SystemPanelInner() {
   const undockAction    = useGameStore(s => s.undockFromStation);
   const registerAction  = useGameStore(s => s.registerWithStation);
   const setHomeStation  = useGameStore(s => s.setHomeStation);
+  const deployPos       = useGameStore(s => s.deployPOS);
   // galaxy is guaranteed non-null here (checked by wrapper)
   const galaxy    = state.galaxy!;
 
@@ -1164,10 +1288,16 @@ function SystemPanelInner() {
     () => getStationInSystem(system, galaxy.seed, systemIndex),
     [system, galaxy.seed, systemIndex],
   );
+  const outpostDef = useMemo(
+    () => getOutpostInSystem(state, system.id),
+    [state, system.id],
+  );
   const dockedStationId    = state.systems.factions.dockedStationId;
   const homeStationSystemId = state.systems.factions.homeStationSystemId;
+  const homeStationId      = state.systems.factions.homeStationId;
   const registeredStations  = state.systems.factions.registeredStations ?? [];
   const isHqSystem          = homeStationSystemId === system.id;
+  const isOutpostHq         = !!outpostDef && homeStationId === outpostDef.id;
   const isDocked            = !!dockedStationId && stationDef?.id === dockedStationId;
   const canDockHere         = !!stationDef && !isDocked && !inWarp;
   const rep                 = stationDef ? (state.systems.factions.rep[stationDef.factionId] ?? 0) : 0;
@@ -1181,6 +1311,7 @@ function SystemPanelInner() {
     && rep >= stationDef.registrationRepRequired
     && credits >= stationDef.registrationCost;
   const canSetHqHere        = !!stationDef && isRegisteredHere && !isHqSystem;
+  const posCoreCount        = state.resources['pos-core'] ?? 0;
   const registerTitle = !stationDef
     ? ''
     : !isDocked
@@ -1195,6 +1326,16 @@ function SystemPanelInner() {
   const localFleets = Object.values(state.systems.fleet.fleets).filter(
     f => f.currentSystemId === system.id && f.shipIds.length > 0,
   );
+  const canDeployPosHere = !inWarp && !outpostDef && posCoreCount > 0 && localFleets.length > 0;
+  const deployPosTitle = inWarp
+    ? 'You cannot anchor an outpost while in warp.'
+    : outpostDef
+      ? 'This system already has a player outpost.'
+      : posCoreCount <= 0
+        ? 'Manufacture a POS Core first.'
+        : localFleets.length === 0
+          ? 'Move a fleet into this system before anchoring an outpost.'
+          : 'Deploy a POS Core here and promote it to Corp HQ.';
 
   return (
     <div style={{
@@ -1261,7 +1402,15 @@ function SystemPanelInner() {
             </span>
           )}
           {/* Corp HQ badge / registration actions */}
-          {stationDef && (
+          {isOutpostHq ? (
+            <span style={{
+              fontSize: 9, fontWeight: 700, padding: '3px 10px', borderRadius: 4,
+              border: '1px solid rgba(251,191,36,0.5)', color: '#fbbf24',
+              background: 'rgba(120,70,0,0.2)',
+            }}>
+              ⬢ Corp HQ Outpost
+            </span>
+          ) : stationDef && (
             isHqSystem ? (
               <span style={{
                 fontSize: 9, fontWeight: 700, padding: '3px 10px', borderRadius: 4,
@@ -1307,6 +1456,35 @@ function SystemPanelInner() {
               </button>
             )
           )}
+          {outpostDef && !isOutpostHq && (
+            <button
+              onClick={() => setHomeStation(outpostDef.id, system.id)}
+              style={{
+                fontSize: 9, fontWeight: 700, padding: '3px 10px', borderRadius: 4, cursor: 'pointer',
+                border: '1px solid rgba(34,211,238,0.25)', color: '#67e8f9',
+                background: 'rgba(8,51,68,0.16)',
+              }}
+              title={`Set ${outpostDef.name} as Corp HQ`}
+            >
+              ⬢ Set Outpost HQ
+            </button>
+          )}
+          {!outpostDef && (
+            <button
+              onClick={() => deployPos(system.id)}
+              disabled={!canDeployPosHere}
+              style={{
+                fontSize: 9, fontWeight: 700, padding: '3px 10px', borderRadius: 4,
+                cursor: canDeployPosHere ? 'pointer' : 'not-allowed',
+                border: `1px solid ${canDeployPosHere ? 'rgba(34,211,238,0.25)' : 'rgba(55,65,81,0.4)'}`,
+                color: canDeployPosHere ? '#67e8f9' : '#475569',
+                background: canDeployPosHere ? 'rgba(8,51,68,0.16)' : 'transparent',
+              }}
+              title={deployPosTitle}
+            >
+              ⬢ Deploy POS Core
+            </button>
+          )}
           {/* Dock / Undock */}
           {stationDef && (
             isDocked ? (
@@ -1348,10 +1526,25 @@ function SystemPanelInner() {
           background: 'rgba(120,70,0,0.12)', borderBottom: '1px solid rgba(251,191,36,0.18)',
         }}>
           <span style={{ fontSize: 10, color: '#fbbf24' }}>
-            No Corp HQ registered. Dock at a station and register it to restore manufacturing and reprocessing access.
+            No Corp HQ registered. Dock at a station or deploy a POS core here to restore manufacturing and reprocessing access.
           </span>
           <span style={{ fontSize: 9, color: '#a16207', fontFamily: 'monospace' }}>
             Credits: {credits.toLocaleString()}
+          </span>
+        </div>
+      )}
+
+      {outpostDef && (
+        <div style={{
+          padding: '6px 16px', flexShrink: 0,
+          background: 'rgba(8,51,68,0.12)', borderBottom: '1px solid rgba(34,211,238,0.14)',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+        }}>
+          <span style={{ fontSize: 10, color: '#67e8f9' }}>
+            ⬢ {outpostDef.name} · Level {outpostDef.level} · +{Math.round(outpostDef.storageBonus * 100)}% local storage
+          </span>
+          <span style={{ fontSize: 9, color: '#475569', fontFamily: 'monospace' }}>
+            {isOutpostHq ? 'ACTIVE HQ' : 'PLAYER OUTPOST'}
           </span>
         </div>
       )}

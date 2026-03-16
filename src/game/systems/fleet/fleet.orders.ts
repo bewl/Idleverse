@@ -129,9 +129,8 @@ export function issueFleetGroupOrder(
   const fromId = fleet.currentSystemId;
   if (fromId === destinationId) return null;
 
-  const jumpRange = fleet.maxJumpRangeLY > 0
-    ? fleet.maxJumpRangeLY
-    : computeFleetJumpRange(state, fleet.shipIds);
+  const computedJumpRange = computeFleetJumpRange(state, fleet.shipIds);
+  const jumpRange = Math.max(fleet.maxJumpRangeLY, computedJumpRange);
 
   const galaxy = generateGalaxy(state.galaxy.seed);
   const route  = findRoute(galaxy, fromId, destinationId, jumpRange, securityFilter);
@@ -160,7 +159,14 @@ export function issueFleetGroupOrder(
       fleet: {
         ...state.systems.fleet,
         ships: newShips,
-        fleets: { ...state.systems.fleet.fleets, [fleetId]: { ...fleet, fleetOrder: order } },
+        fleets: {
+          ...state.systems.fleet.fleets,
+          [fleetId]: {
+            ...fleet,
+            maxJumpRangeLY: jumpRange,
+            fleetOrder: order,
+          },
+        },
       },
     },
   };

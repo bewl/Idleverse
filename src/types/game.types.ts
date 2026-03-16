@@ -318,6 +318,8 @@ export interface FleetWing {
   isDispatched: boolean;
   /** System the wing departed from — used to issue the return trip. */
   haulingOriginSystemId: string | null;
+  /** Timestamp (ms) of the last detached escort combat engagement for this wing convoy. */
+  lastEscortCombatAt: number;
 }
 
 // ─── Player Fleet (named group of ships) ───────────────────────────────────

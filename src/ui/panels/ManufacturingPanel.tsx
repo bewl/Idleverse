@@ -13,6 +13,7 @@ import {
 import { StatTooltip } from '@/ui/tooltip/StatTooltip';
 import { NavTag } from '@/ui/components/NavTag';
 import { GameDropdown, type DropdownOption } from '@/ui/components/GameDropdown';
+import { SystemUnlockCard } from '@/ui/components/SystemUnlockCard';
 import type { Blueprint, ResearchJob, CopyJob } from '@/types/game.types';
 
 const QTY_PRESETS = [1, 5, 10, 25] as const;
@@ -20,11 +21,12 @@ const QTY_PRESETS = [1, 5, 10, 25] as const;
 function ManufacturingHqBanner() {
   const state = useGameStore(s => s.state);
   const homeSystemId = state.systems.factions.homeStationSystemId;
+  const homeOutpost = homeSystemId ? state.systems.factions.outposts[homeSystemId] ?? null : null;
 
   if (!homeSystemId) {
     return (
       <div className="rounded-xl border border-amber-700/30 bg-amber-950/15 px-3 py-2 text-xs text-amber-300">
-        No Corp HQ registered. Dock at a station in the System panel and register it to queue manufacturing, research, or copy jobs.
+        No Corp HQ registered. Dock at a station or deploy a POS core in the System panel to queue manufacturing, research, or copy jobs.
       </div>
     );
   }
@@ -32,7 +34,7 @@ function ManufacturingHqBanner() {
   const homeSystem = getSystemById(state.galaxy.seed, homeSystemId);
   return (
     <div className="rounded-xl border border-cyan-700/20 bg-cyan-950/10 px-3 py-2 text-xs text-slate-400">
-      Corp HQ anchored at <span className="text-cyan-300 font-semibold">{homeSystem.name}</span>. Manufacturing and research jobs route through this station network.
+      Corp HQ anchored at <span className="text-cyan-300 font-semibold">{homeSystem.name}</span>. {homeOutpost ? 'Manufacturing and research jobs route through your outpost infrastructure.' : 'Manufacturing and research jobs route through this station network.'}
     </div>
   );
 }
@@ -782,7 +784,6 @@ function JobsTab() {
 function BlueprintsTab() {
   const state       = useGameStore(s => s.state);
   const [bpFilter, setBpFilter] = useState<'all' | 'bpo' | 'bpc' | 't2'>('all');
-
   const mfg           = state.systems.manufacturing;
   const researchSpeed = getResearchSpeedMultiplier(state);
   const scienceLevel  = state.systems.skills.levels['science'] ?? 0;
@@ -890,12 +891,21 @@ export function ManufacturingPanel() {
 
   if (!hasManufacturing) {
     return (
-      <div className="flex flex-col items-center justify-center py-20 gap-4">
-        <div className="text-5xl">??</div>
-        <div className="text-slate-500 text-sm text-center">
-          Manufacturing complex locked.<br />
-          Train the <span className="text-amber-400">Industry I</span> skill to unlock.
-        </div>
+      <div className="py-10">
+        <SystemUnlockCard
+          icon="🏭"
+          title="Manufacturing Complex"
+          skillId="industry"
+          summary="Turn minerals into components, ships, and later blueprint-driven T2 production. Industry is the first step into a focused industrial path, but it also pairs cleanly with mining and trade."
+          benefits={[
+            'Queue component and ship jobs instead of selling every raw input immediately.',
+            'Convert mining output into fleet growth, market goods, and later research targets.',
+            'Open the blueprint branch so Science can later unlock research, copying, and T2 progression.',
+          ]}
+          accentColor="#fbbf24"
+          previewPanel="skills"
+          previewLabel="Review Industry Skills"
+        />
       </div>
     );
   }

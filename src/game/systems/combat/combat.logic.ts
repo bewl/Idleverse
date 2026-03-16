@@ -11,7 +11,7 @@ import { mulberry32, childSeed, randInt, randFloat, randPick } from '@/game/util
 import { generateGalaxy } from '@/game/galaxy/galaxy.gen';
 import { getCorpHqBonusFromState } from '@/game/systems/factions/faction.logic';
 import { computeRoleAdjustedCombatStats } from '@/game/systems/fleet/fleet.logic';
-import { getOperationalFleetShipIds } from '@/game/systems/fleet/wings.logic';
+import { getHaulingWings, getOperationalFleetShipIds, getWingCurrentSystemId, getWingDispatchShipIds, hasActiveEscortWing } from '@/game/systems/fleet/wings.logic';
 
 // ─── String → seed helper ───────────────────────────────────────────────────
 
@@ -130,12 +130,24 @@ export function resolveCombat(
     .filter(Boolean)
     .filter(s => s.hullDamage < 80);
 
+  return resolveCombatForShips(state, fleet, fleetShips, npcGroup, nowMs);
+}
+
+function resolveCombatForShips(
+  state: GameState,
+  fleet: GameState['systems']['fleet']['fleets'][string],
+  fleetShips: GameState['systems']['fleet']['ships'][string][],
+  npcGroup: NpcGroupDef,
+  nowMs: number,
+): CombatResult {
+  if (fleetShips.length === 0) return { victory: false, avgHullDamage: 30, bountyEarned: 0, lootGained: {} };
+
   const combatStats = computeRoleAdjustedCombatStats(fleet, fleetShips);
   const fleetRating = combatStats.effectiveDPS;
   const hqLootMultiplier = getCorpHqBonusFromState(state)?.combatLootQualityMultiplier ?? 1;
 
   // Seeded variance: different each engagement but deterministic for replay
-  const seed = childSeed(strHash(fleetId), Math.floor(nowMs / (COMBAT_TICK_INTERVAL_SECONDS * 1000)));
+  const seed = childSeed(strHash(fleet.id), Math.floor(nowMs / (COMBAT_TICK_INTERVAL_SECONDS * 1000)));
   const rng = mulberry32(seed);
 
   const varianceRange = combatStats.varianceMultiplier;
@@ -174,6 +186,126 @@ export function resolveCombat(
     bountyEarned: npcGroup.bounty,
     lootGained,
   };
+}
+
+export function tickEscortedHaulingWingCombat(state: GameState): CombatTickResult {
+  const nowMs = Date.now();
+  let s = state;
+
+  const galaxy = generateGalaxy(s.galaxy.seed);
+  const systemMap = new Map(galaxy.map(sys => [sys.id, sys]));
+
+  for (const fleetId of Object.keys(s.systems.fleet.fleets)) {
+    const fleet = s.systems.fleet.fleets[fleetId];
+    if (!fleet) continue;
+
+    for (const haulingWing of getHaulingWings(fleet)) {
+      if (!haulingWing.isDispatched || !hasActiveEscortWing(fleet, haulingWing)) continue;
+
+      const secondsSinceLastCombat = (nowMs - (haulingWing.lastEscortCombatAt ?? 0)) / 1000;
+      if (secondsSinceLastCombat < COMBAT_TICK_INTERVAL_SECONDS) continue;
+
+      const convoySystemId = getWingCurrentSystemId(fleet, haulingWing, s.systems.fleet.ships);
+      if (!convoySystemId) continue;
+
+      const system = systemMap.get(convoySystemId);
+      if (!system || system.security === 'highsec') continue;
+
+      const aliveGroups = getAliveNpcGroupsInSystem(s, convoySystemId);
+      if (aliveGroups.length === 0) continue;
+
+      const target = aliveGroups.reduce((weakest, group) => group.strength < weakest.strength ? group : weakest, aliveGroups[0]);
+      const dispatchedShipIds = getWingDispatchShipIds(fleet, haulingWing);
+      const convoyShips = dispatchedShipIds
+        .map(shipId => s.systems.fleet.ships[shipId])
+        .filter(Boolean)
+        .filter(ship => ship.hullDamage < 80);
+
+      if (convoyShips.length === 0) continue;
+
+      const result = resolveCombatForShips(s, fleet, convoyShips, target, nowMs);
+
+      const updatedShips = { ...s.systems.fleet.ships };
+      for (const ship of convoyShips) {
+        let roleDamageMult = 1.0;
+        switch (ship.role) {
+          case 'tank':    roleDamageMult = 1.3 / 1.5; break;
+          case 'dps':     roleDamageMult = 0.8; break;
+          case 'scout':   roleDamageMult = 0.6; break;
+          case 'support': roleDamageMult = 0.7; break;
+          default:        roleDamageMult = 1.0;
+        }
+        const shipDamage = result.avgHullDamage * roleDamageMult;
+        updatedShips[ship.id] = {
+          ...updatedShips[ship.id],
+          hullDamage: Math.min(100, (updatedShips[ship.id]?.hullDamage ?? 0) + shipDamage),
+        };
+      }
+
+      let resources = { ...s.resources };
+      if (result.victory) {
+        for (const [resourceId, qty] of Object.entries(result.lootGained)) {
+          resources[resourceId] = (resources[resourceId] ?? 0) + qty;
+        }
+        if (result.bountyEarned > 0) {
+          resources.credits = (resources.credits ?? 0) + result.bountyEarned;
+        }
+      }
+
+      let newNpcGroupStates = { ...s.galaxy.npcGroupStates };
+      if (result.victory) {
+        const respawnHours = randFloat(mulberry32(strHash(target.id + nowMs)), NPC_RESPAWN_HOURS[0], NPC_RESPAWN_HOURS[1]);
+        newNpcGroupStates = {
+          ...newNpcGroupStates,
+          [target.id]: { respawnAt: nowMs + respawnHours * 3600 * 1000 },
+        };
+      }
+
+      const updatedFleet = s.systems.fleet.fleets[fleetId];
+      const updatedWings = updatedFleet.wings.map(wing =>
+        wing.id === haulingWing.id ? { ...wing, lastEscortCombatAt: nowMs } : wing,
+      );
+
+      const logEntry: CombatLogEntry = {
+        id: `convoy-combat-${fleetId}-${haulingWing.id}-${nowMs}`,
+        timestamp: nowMs,
+        fleetId,
+        fleetName: `${updatedFleet.name} · ${haulingWing.name}`,
+        systemId: convoySystemId,
+        systemName: system.name,
+        npcName: `${target.name} (Escort Response)`,
+        victory: result.victory,
+        bountyEarned: result.bountyEarned,
+        lootGained: result.lootGained,
+        avgHullDamage: result.avgHullDamage,
+      };
+
+      const newLog = [logEntry, ...(s.systems.fleet.combatLog ?? [])].slice(0, COMBAT_LOG_MAX_ENTRIES);
+
+      s = {
+        ...s,
+        resources,
+        galaxy: {
+          ...s.galaxy,
+          npcGroupStates: newNpcGroupStates,
+        },
+        systems: {
+          ...s.systems,
+          fleet: {
+            ...s.systems.fleet,
+            ships: updatedShips,
+            fleets: {
+              ...s.systems.fleet.fleets,
+              [fleetId]: { ...updatedFleet, wings: updatedWings },
+            },
+            combatLog: newLog,
+          },
+        },
+      };
+    }
+  }
+
+  return { newState: s };
 }
 
 // ─── Combat tick ───────────────────────────────────────────────────────────

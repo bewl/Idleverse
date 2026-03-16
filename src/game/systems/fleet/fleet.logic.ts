@@ -449,6 +449,7 @@ export function createPlayerFleet(
       escortWingId: null,
       isDispatched: false,
       haulingOriginSystemId: null,
+      lastEscortCombatAt: 0,
     }],
   };
 

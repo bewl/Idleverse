@@ -1,3 +1,7 @@
+| **Fleet wings (hauling + escort)** | **⚡ FC-3 ACTIVE** | **Core wing model, escort-aware haul routing, and detached escort skirmish response shipped; richer combat-response follow-ons remain** |
+| **Now** | **FC-3 follow-ons** | Core wings, escort-aware haul routing, and detached escort skirmishes are live, but richer convoy-defense behaviors still need to land on top of the shipped wing model. |
+- Hauling wings now choose routes based on escort cover: escorted trips prefer direct routing, while unescorted trips automatically prefer the safest available path and only fall back to riskier routes when necessary.
+- Escorted hauling wings now auto-resolve detached skirmishes against hostile NPC groups encountered during convoy travel, rewarding loot/bounties and applying hull damage to the dispatched wing ships without pulling the rest of the fleet off station.
 # Idleverse – Feature Design Plan
 
 ## Purpose
@@ -32,18 +36,18 @@ impact. Each phase is independently shippable and leaves the game in a playable,
 | Skills (34 skills, prerequisites, training queue) | ✅ Complete | Full prerequisite chains |
 | Market (NPC sell, auto-sell, lifetime tracking) | ✅ Complete | Prices static — dynamic pricing in Phase 1 |
 | Galaxy (400 systems, procedural, jump lanes) | ✅ Complete | BFS + Dijkstra routing |
-| Fleet movement (player fleets, orders, warp) | ✅ Complete | Per-hop tick advancement |
+| Fleet movement (player fleets, orders, warp) | ✅ Complete | Per-hop tick advancement; route dispatch now validates against live fleet range and reports acceptance/failure inline |
 | Fleet ship roles & doctrines | ✅ Complete | ShipRole, FleetDoctrine, FleetPanel Fleets tab, StarMapPanel Intel\|Route |
 | Fleet combat | ✅ Complete | NPC groups, patrol/raid orders, hull damage, bounty/loot, combat log |
 | Blueprint research & T2 manufacturing | ✅ Complete | Phase 3 shipped — research queue, BPC copies, T2 recipes |
 | Exploration & anomalies | ✅ Complete | Phase 4 shipped — anomaly scanning, discovery feed, Astrometrics/Archaeology/Hacking skills |
-| UI Overhaul — navigation, tooltips, data density | ✅ Complete | GameTooltip + NavTag + useUiStore + DevPanel overhaul + 8-panel renovation (Stream D) |
+| UI Overhaul — navigation, tooltips, data density | ✅ Complete | GameTooltip + NavTag + useUiStore + DevPanel overhaul + 8-panel renovation (Stream D); March 2026 follow-up adds Overview progression shell + richer lock previews |
 | Fleet-centric remodel — cargo hold + auto-haul (FC-1b/c/d/e) | ✅ Complete | oreDeltas wired to fleet cargoHold; auto-haul to Corp HQ; HQ dump on arrival |
 | Corp identity migration (FC-1G partial) | ✅ Complete | state.pilot → state.corp; OverviewPanel → corp command center (CorpCard + CorpHQCard) |
 | Fleet-centric foundation (FC-1: cargo holds, auto-haul, corp identity, richness wiring) | ✅ Complete | All FC-1 steps shipped |
 | **Fleet commander skills** | **✅ FC-2 COMPLETE** | **Designate pilot as commander; command skill trees; fleet-wide bonuses** |
-| **Fleet wings (hauling + escort)** | **⚡ FC-3 ACTIVE** | **Core wing model shipped; escort automation, combat response, and follow-on wing behaviors remain** |
-| **Corp HQ — station registration & POS** | **⚡ FC-4 ACTIVE** | **Station registration, HQ reassignment, industrial HQ gating, and faction HQ passive bonuses shipped; POS/outpost path still pending** |
+| **Fleet wings (hauling + escort)** | **⚡ FC-3 ACTIVE** | **Core wing model and escort-aware haul routing shipped; detached combat-response follow-ons remain** |
+| **Corp HQ — station registration & POS** | **⚡ FC-4 ACTIVE** | **Station registration, HQ reassignment, industrial HQ gating, faction HQ passive bonuses, and POS core deployment shipped; outpost upgrades and station-specific follow-ons still pending** |
 | **On-site fleet reprocessing** | **🟠 FC-5 QUEUED** | **Post-FC-4 industrial operations layer; ore refinery module and industrial hulls** |
 | **Dynamic mining threats & fleet defense** | **🟠 FC-6 QUEUED** | **Post-FC-3/FC-4 threat layer; mining pressure, combat response, and fleet reputation** |
 | Factions & missions | ⬜ Phase 5 | Reputation tracking exists; station consequences, services, and mission content are still unimplemented |
@@ -57,8 +61,8 @@ impact. Each phase is independently shippable and leaves the game in a playable,
 
 | Stage | Focus | Why it is next |
 |---|---|---|
-| **Now** | **FC-3 follow-ons** | Core wings are live, but escort automation and combat-response behaviors still need to land on top of the shipped wing model. |
-| **Now** | **FC-4 completion** | Station registration and HQ gating are live; the remaining FC-4 work is the POS/outpost path and station-specific bonuses. |
+| **Now** | **FC-3 follow-ons** | Core wings and escort-aware haul routing are live, but detached combat-response behaviors still need to land on top of the shipped wing model. |
+| **Now** | **FC-4 completion** | Station registration, HQ gating, and first-pass POS deployment are live; the remaining FC-4 work is outpost upgrades and station-specific follow-ons. |
 | **After FC-4** | **FC-5 On-site Reprocessing** | Deep-space refining makes the most sense once HQ registration and corp infrastructure rules are established. |
 | **After FC-3 + FC-4** | **FC-6 Mining Threats** | Threat escalation is strongest once fleets can defend themselves with wings and once faction-controlled territory has real consequences. |
 | **Broader expansion** | **Phase 5 Factions, Stations & Mission Boards** | Builds on the FC-4 reputation-gating slice and expands it into station services, mission boards, and faction-hostility consequences. |
@@ -544,6 +548,18 @@ All 8 targeted panels renovated with NavTag entity links, data density additions
 | MarketPanel | Trend arrows (▲▼─) on price vs base in `MarketRow`; NavTag on resource names; NavTag on skill lock messages |
 | FleetPanel | NavTag on system location in fleet header; NavTag on navigation destination; NavTag on patrol/raid skill requirement messages; NavTag on active skill in pilot card |
 
+### March 2026 Follow-up — New Player Progression Shell
+
+> **Status:** 🔄 In Progress — March 2026
+> **Files changed:** `src/ui/panels/OverviewPanel.tsx`, `src/ui/panels/SkillsPanel.tsx`, `src/ui/panels/FleetPanel.tsx`, `src/ui/panels/ManufacturingPanel.tsx`, `src/ui/panels/ReprocessingPanel.tsx`, `src/ui/panels/MarketPanel.tsx`, `src/ui/components/SystemUnlockCard.tsx`
+
+- `OverviewPanel` now includes a progression shell that surfaces current opportunities, five parallel focus tracks, next unlock targets, and explicit specialist/hybrid system chains
+- `SkillsPanel` now frames the skill tree with specialization guide cards and outcome-first detail text so queue decisions expose payoffs and unlock consequences instead of only modifier rows
+- `FleetPanel` movement controls now explain route posture directly where fleet orders are issued, making travel choice a visible speed-versus-safety decision
+- `StarMapPanel` route summaries now show estimated total travel time, average hop time, and route exposure, while `FleetPanel` ship cards now surface hull identity and aggregate fitting bonuses to make travel and fitting tradeoffs legible before deeper balance work lands
+- Locked `ManufacturingPanel`, `ReprocessingPanel`, and `MarketPanel` states now explain requirement, ETA, payoff, and next action instead of showing only a denial message
+- The current goal is onboarding clarity without a forced questline; outcome-first SkillsPanel framing and travel/fitting visibility remain the next follow-up slices
+
 | Panel | Key Data Additions | Notable NavTags |
 |---|---|---|
 | OverviewPanel | FleetStatusRow card, ResourceIncomeCard, belt depletion ETA, MFG ISK/hr | pilot→Fleet, skill→Skills, system→System |
@@ -553,7 +569,7 @@ All 8 targeted panels renovated with NavTag entity links, data density additions
 | ReprocessingPanel | Efficiency grade badge (S/A/B/C), output yield table, throughput/hr | skills→Skills |
 | MarketPanel | Trade volume, trend arrows ↑↓, inflow/outflow row, margin % | — |
 | SkillsPanel | Queue total ETA, affects-system NavTags, next-level preview, category pill row | systems→panels |
-| StarMapPanel | Fleet position dots, anomaly density heat, fleet dot click, priority-faded star labels with overlap suppression, projected React hover intel card, widened right rail with clearer route/intel hierarchy | system→System, fleet dot→Fleet+focus |
+| StarMapPanel | Fleet position dots, anomaly density heat, fleet dot click, default-on system-name labels with a show/hide filter plus zoom-adaptive decluttering, projected React hover intel card, widened right rail with clearer route/intel hierarchy | system→System, fleet dot→Fleet+focus |
 | SystemPanel | Belt ore composition bars, fleet assignment section, anomaly counts by type, Dock/Undock (B7) | fleet→Fleet |
 
 ## Key Technical Decisions
@@ -647,7 +663,7 @@ All 8 targeted panels renovated with NavTag entity links, data density additions
 
 # ⚡ FC-3 — Fleet Wings
 
-> **Status:** Partially shipped — core wing systems shipped March 2026; escort/combat follow-ons remain.
+> **Status:** Partially shipped — core wing systems and escort-aware hauling shipped March 2026; detached combat follow-ons remain.
 > **Priority:** High — this is active follow-on work on top of an already-live wing model.
 
 > **Depends on:** FC-1 (fleet cargo model), FC-2 (commander skills feed wing-level bonuses).
@@ -739,11 +755,14 @@ New file: `src/game/systems/fleet/wings.logic.ts`
 - New fleets and the starter fleet now begin with an initial populated wing so the opening experience is immediately usable.
 - Hauling wings now own cargo directly via `wing.cargoHold`, and fleets with multiple hauling wings distribute ore across available wing holds.
 - Auto-haul now dispatches ready hauling wings independently, sending only the selected hauling wing and its escort to HQ.
+- Hauling wings now choose routes based on escort cover: escorted trips prefer direct routing, while unescorted trips automatically prefer the safest available path and only fall back to riskier routes when necessary.
 - Fleet and wing commander bonuses now propagate at ship scope for mining and exploration, and at wing scope for hauling capacity.
 - Wing mutation rules are hardened: wings cannot be mutated while dispatched or while the whole fleet is in transit, whole-fleet movement and fleet membership changes are blocked while a hauling wing is dispatched, and deleting a wing transfers stored cargo back into the fleet hold.
 - A pilot can be both fleet commander and wing commander at the same time; the same pilot's command bonus is only counted once per ship/wing calculation.
 - Fleets with no hauling wing keep the prior FC-1 whole-fleet auto-haul behavior.
 - Fleet, mining, and overview summaries now distinguish total fleet members from operational wing-assigned ships so inactive unwinged ships remain visible without being misreported as active contributors.
+- Fleet and overview UI now surface whether a dispatched hauling operation is running under escort cover or under safe-route protocol so wing logistics state is visible without drilling into order internals.
+- Fleet and Overview now surface live escort-response state when a detached convoy is actively fighting through hostile space.
 
 ---
 
@@ -804,6 +823,8 @@ Manufacturing and reprocessing gain a soft warning (then hard gate in this phase
 - Manufacturing, blueprint research/copy, and reprocessing actions now require an active Corp HQ in the store layer.
 - Active Corp HQ stations now grant faction-specific passive bonuses: Concordat manufacturing speed, Veldris mining yield in Veldris space, Covenant market sell price, and Syndicate combat loot quality.
 - System, Manufacturing, and Reprocessing panels now surface HQ state directly so the gating is visible to the player.
+- `pos-core` can now be manufactured as a strategic infrastructure component and consumed through `deployPOS(systemId)` to anchor a player outpost.
+- Player outposts now occupy the Corp HQ slot, satisfy manufacturing/reprocessing HQ gating, surface in the System and Overview panels, and seed the future FC-4 upgrade path via persistent outpost state plus `structures.levels` tracking.
 
 ## Files Changed
 
@@ -823,6 +844,11 @@ Manufacturing and reprocessing gain a soft warning (then hard gate in this phase
 | `src/ui/panels/ManufacturingPanel.tsx` | HQ status indicator |
 | `src/ui/panels/ReprocessingPanel.tsx` | HQ status indicator |
 | `src/ui/panels/OverviewPanel.tsx` | HQ card now surfaces the active faction passive bonus |
+| `src/game/resources/resourceRegistry.ts` | Add `pos-core` strategic infrastructure resource |
+| `src/game/systems/manufacturing/manufacturing.config.ts` | Add `craft-pos-core` recipe |
+| `src/game/systems/factions/faction.logic.ts` | Add outpost helpers and HQ lookup support for player outposts |
+| `src/game/persistence/saveLoad.ts` | Migrate outposts to carry stable IDs |
+| `src/ui/panels/SystemPanel.tsx` | Add POS deployment button, outpost strip, and outpost HQ promotion |
 
 ---
 

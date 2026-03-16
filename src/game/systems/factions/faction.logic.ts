@@ -1,5 +1,5 @@
 import type { GameState } from '@/types/game.types';
-import type { FactionId, FactionsState, StationDefinition } from '@/types/faction.types';
+import type { FactionId, FactionsState, OutpostState, StationDefinition } from '@/types/faction.types';
 import type { StarSystem } from '@/types/galaxy.types';
 import { getSystemById } from '@/game/galaxy/galaxy.gen';
 import { FACTION_DEFINITIONS } from './faction.config';
@@ -13,6 +13,20 @@ export interface CorpHqBonus {
   marketSellPriceBonus?: number;
   combatLootQualityMultiplier?: number;
   miningYieldInFactionTerritory?: { factionId: FactionId; bonus: number };
+}
+
+export const OUTPOST_ID_PREFIX = 'outpost-';
+
+export function getOutpostId(systemId: string): string {
+  return `${OUTPOST_ID_PREFIX}${systemId}`;
+}
+
+export function isOutpostId(id: string | null | undefined): boolean {
+  return !!id && id.startsWith(OUTPOST_ID_PREFIX);
+}
+
+export function getOutpostDisplayName(systemName: string): string {
+  return `${systemName} Outpost`;
 }
 
 // ─── Reputation helpers ────────────────────────────────────────────────────
@@ -125,12 +139,26 @@ export function getHomeStationDefinition(state: GameState): StationDefinition | 
   const homeSystemId = state.systems.factions.homeStationSystemId;
   const homeStationId = state.systems.factions.homeStationId;
   if (!homeSystemId || !homeStationId) return null;
+  if (isOutpostId(homeStationId)) return null;
 
   const system = getSystemById(state.galaxy.seed, homeSystemId);
   const systemIndex = homeSystemId === 'home' ? 0 : parseInt(homeSystemId.replace('sys-', ''), 10);
   const station = getStationInSystem(system, state.galaxy.seed, isNaN(systemIndex) ? 0 : systemIndex);
   if (!station || station.id !== homeStationId) return null;
   return station;
+}
+
+export function getOutpostInSystem(state: GameState, systemId: string): OutpostState | null {
+  return state.systems.factions.outposts[systemId] ?? null;
+}
+
+export function getHomeOutpost(state: GameState): OutpostState | null {
+  const homeSystemId = state.systems.factions.homeStationSystemId;
+  const homeStationId = state.systems.factions.homeStationId;
+  if (!homeSystemId || !homeStationId || !isOutpostId(homeStationId)) return null;
+  const outpost = getOutpostInSystem(state, homeSystemId);
+  if (!outpost || outpost.id !== homeStationId) return null;
+  return outpost;
 }
 
 export function getCorpHqBonus(station: StationDefinition | null): CorpHqBonus | null {

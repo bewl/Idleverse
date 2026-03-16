@@ -7,6 +7,7 @@ import { StatTooltip } from '@/ui/tooltip/StatTooltip';
 import { generateGalaxy } from '@/game/galaxy/galaxy.gen';
 import { NavTag } from '@/ui/components/NavTag';
 import { GameDropdown, type DropdownOption } from '@/ui/components/GameDropdown';
+import { SystemUnlockCard } from '@/ui/components/SystemUnlockCard';
 
 // ─── Resource categories to display in market ─────────────────────────────
 
@@ -468,12 +469,21 @@ export function MarketPanel() {
 
   if (!unlocked) {
     return (
-      <div className="flex flex-col items-center justify-center py-16 text-center">
-        <div className="text-2xl mb-3">📊</div>
-        <div className="text-slate-400 text-sm font-bold mb-1">Market Locked</div>
-        <div className="text-slate-600 text-xs max-w-xs">
-          Train the <NavTag entityType="skill" entityId="trade" label="Trade" /> skill to access the NPC market.
-        </div>
+      <div className="py-10">
+        <SystemUnlockCard
+          icon="📈"
+          title="Regional Market"
+          skillId="trade"
+          summary="Sell ore, components, and hulls for credits, then grow into route-based hauling and price-driven trade. Trade is the cleanest early branch for players who want liquidity and logistics instead of pure production."
+          benefits={[
+            'Turn mining and manufacturing output into credits instead of sitting on stockpiles.',
+            'Improve sale value immediately, then unlock automated trade routes at Trade III.',
+            'Pair with hauling wings and route choices when you want a logistics-heavy playstyle.',
+          ]}
+          accentColor="#fb7185"
+          previewPanel="skills"
+          previewLabel="Review Trade Skills"
+        />
       </div>
     );
   }

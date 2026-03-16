@@ -36,6 +36,7 @@ MiningState {
 - **9 ore belts** across 3 security tiers (highsec ×4, lowsec ×3, nullsec ×2)
 - Lowsec requires Advanced Mining I; nullsec requires Advanced Mining III
 - **Belt skill gates**: `ORE_BELTS[beltId].requiredSkill` is checked in `setShipActivity()` before a ship can be assigned to mine a belt; if the corp's skill level is below the required minimum the assignment is rejected. The `SystemPanel` renders locked belt cards with a 🔒 disabled button and a `GameTooltip` displaying the required skill name and level; unlocked belts surface live fleet-assignment status rather than a legacy mining toggle.
+- The `SystemPanel` is the operational assignment surface for mining: each unlocked belt card can now directly assign a configured mining wing in the current system to that belt, pushing the wing's ships into `activity: 'mining'` with the selected `assignedBeltId`.
 - Each belt has a `poolSize` — it depletes as ore is extracted, then respawns
 - Ore accumulates in the storage target for the fleet: `fleet.cargoHold` for legacy fleets, or `haulingWing.cargoHold` when a hauling wing exists. The active hold has a capacity derived from assigned hull cargo.
 - Auto-haul at 80% cargo fill — see System 7 Fleet Cargo Hold for the full round-trip logic
@@ -64,6 +65,7 @@ Converts raw ores into refined minerals — the input material for all manufactu
 - **Efficiency** skill-scaled: Reprocessing, Reprocessing Efficiency, Metallurgy skills apply
 - Auto-reprocessing: per-ore toggle + configurable minimum-keep threshold
 - Yield improved by `reprocessing-efficiency` modifier
+- Locked-state UX now uses a shared unlock-preview card that shows the exact skill requirement, ETA from current corp skills, why reprocessing matters, and a direct jump to the Skills panel instead of a bare denial state
 
 ---
 
@@ -89,6 +91,7 @@ Converts minerals into manufactured components and ships via a recipe queue.
 - Manufacturing speed scaled by Industry + Advanced Industry skills
 - Ship recipes produce a `ShipInstance` (not a stackable resource)
 - Some recipes gated by skill level (e.g. Sensor Cluster requires Electronics II)
+- Locked-state UX now uses a shared unlock-preview card that explains the Industry I requirement, ETA from the current corp skill sheet, and the downstream value of converting ore and minerals into ships, components, and later blueprint research
 
 ---
 
@@ -120,6 +123,9 @@ queues for combat/mining specialisation.
 - Time per level: `SKILL_LEVEL_SECONDS[level-1] × rank` (level 1 = 60s × rank, level 5 = 64,800s × rank)
 - Skills apply effects via `modifiers` dictionary in GameState
 - Pilot skills (individual) trained through the Pilots tab in the Fleet panel
+- The Overview panel now reads the current skill sheet to frame five parallel progression tracks (Mining, Industry, Trade, Combat, Exploration), each with a next unlock target and ETA so the skill system teaches options rather than only exposing raw modifier rows
+- `SkillsPanel` now includes a path-oriented specialization guide plus outcome text in the detail pane, so players can compare payoff, ETA, and downstream unlocks before committing queue time
+- The `SkillsPanel` detail pane is independently scrollable and the full panel reserves mobile bottom-nav space so late-page training controls remain reachable on smaller viewports
 
 ---
 
@@ -182,6 +188,7 @@ Function: `tickTradeRoutes` (called in tick step 8b)
 - **MarketPanel** — tab bar: "Market Listings" (original view) | "Trade Routes"
 - **Trade Routes tab** — quota display, route cards (status/profit/run count), create-route form
 - **StarMapPanel Intel panel** — "Trade Opportunity" block showing top-3 minerals by buy-here/sell-there ratio (only if ratio > 1.05)
+- Locked-state UX now uses the shared unlock-preview card to explain the Trade I requirement, ETA, immediate sale-value payoff, and the later Trade III automation branch
 
 ---
 
@@ -202,8 +209,12 @@ systems via BFS shortest-path or Dijkstra least-cost routing.
 - Jump lanes form a connected graph; fleets advance one hop per tick
 - Fleet `fleetOrder` drives movement; `maxJumpRangeLY` constrains which hops are valid
 - RoutePlanner in StarMapPanel: calculates and dispatches multi-hop routes
+- Fleet-group dispatch now recalculates effective jump range from the fleet's live hull mix before issuing an order and refreshes stale cached range values, so saved fleets cannot silently fail valid routes because of outdated `maxJumpRangeLY` data
 - StarMapPanel right panel: Intel tab (system info, threats) | Route tab (route planning)
-- StarMapPanel label pass is priority-driven: selected, current, hovered, and route systems always retain labels, while lower-priority labels fade by zoom and depth and are culled when they overlap stronger labels. Secondary security/star-type text only appears for highlighted systems or close zoom.
+- FleetPanel navigation now surfaces the selected route posture's consequence inline (`Direct`, `Safest`, `No-null`, `High-sec`) so movement policy reads as a tradeoff between speed and exposure instead of a hidden dropdown value
+- StarMap route summaries now estimate total travel time, average hop time, and route exposure from the solved hop sequence so players can compare fast-vs-safe posture before dispatching a fleet
+- Route summaries now surface inline dispatch acceptance/failure messaging so route-planning clicks resolve into a visible fleet-order state instead of a silent no-op when a move is rejected
+- StarMapPanel defaults to rendering a name label for every visible system, including unvisited systems, so the galaxy canvas matches route-planning dropdown intel. A Display filter can hide labels for a cleaner view, and the canvas now reintroduces zoom-adaptive decluttering at wide zoom levels so non-critical labels thin out before they become unreadable. Highlighted systems (selected/current/hovered/route) still receive stronger alpha and optional secondary security/star-type text.
 - StarMapPanel hover detail is now rendered as a React overlay anchored to the projected star position instead of a canvas text box. Hover cards can show richer system intel such as fleets present, body counts, active threats, trade spreads, and route-hop context while the canvas remains responsible only for hit-testing and highlight rings.
 - StarMapPanel right rail now gives more room to route planning and system inspection: the rail is wider, the current-location summary is condensed into a compact header strip, and route controls use larger task-oriented controls with a more legible route-summary card.
 
@@ -239,6 +250,10 @@ PlayerFleet {
 }
 ```
 
+## UI Notes
+
+- `ShipCard` now surfaces a `Hull Identity` block with the hull description, warp bonus, slot layout, and a compact summary of currently fitted bonus directions (mining, combat, cargo, scan) so players can read hull tradeoffs before optimizing deeper fitting behavior
+
 ## Corp Identity
 
 The corporation state lives in `GameState.corp: CorpState { name, foundedAt }`.
@@ -248,12 +263,15 @@ The deprecated `state.pilot` field is migration-only and no longer written to.
 
 `GameState.systems.factions.homeStationId / homeStationSystemId` tracks the designated Corp HQ.
 Starter saves seed `station-home` as an already-registered HQ. Additional stations must be docked and registered through `registerWithStation(stationId)` before `setHomeStation(stationId, systemId)` can promote them to active HQ.
+Player-built outposts now occupy the same HQ slot: consuming one manufactured `pos-core` via `deployPOS(systemId)` anchors a player outpost in that system, records it in `factions.outposts`, and promotes it to the active Corp HQ immediately.
 The active HQ station also grants one faction-specific passive bonus:
 
 - Concordat HQ: +10% manufacturing speed
 - Veldris HQ: +15% mining yield in Veldris-controlled systems
 - Covenant HQ: +10% market sell price
 - Syndicate HQ: +20% combat loot quality
+
+Player outposts currently provide the infrastructure baseline without a faction passive bonus. They act as a neutral full-access HQ for manufacturing and reprocessing gating, and their level/storage hooks establish the upgrade path for the remaining FC-4 POS work.
 
 ## Fleet Cargo Hold
 
@@ -262,6 +280,7 @@ Each `PlayerFleet` has a legacy `cargoHold: Record<string, number>` for non-wing
 **Auto-haul trigger**: Every tick, the auto-haul block chooses one of two paths:
 
 - **Hauling wing present**: when the hauling wing cargo reaches ≥90% of hauling-wing capacity and the wing is not already dispatched, only the hauling wing and its optional escort wing are sent to HQ.
+- **Escort-aware route policy**: unescorted hauling wings now prefer the safest available route to HQ and only fall back to more direct routes when needed. Hauling wings with an active escort wing prefer direct routing first and fall back to safer paths if no direct route exists.
 - **No hauling wing present**: when the fleet cargo reaches ≥80% capacity and no active movement order exists, the original whole-fleet auto-haul path fires.
 
 - **Fleet already at HQ** (`currentSystemId === homeSystemId`): ore is dumped inline immediately into `state.resources`. No haul trip is dispatched and `miningOriginSystemId` is not set. This prevents cargo from being stripped on the same tick it was produced for stationary mining fleets.
@@ -651,6 +670,16 @@ Props include: `value`, `options`, `onChange`, `placeholder`, plus search/filter
 - Mouse-first interactions: open from the trigger, inspect by hover, select by click, dismiss by outside click
 - Initial adopters: `StarMapPanel` route planner, `MarketPanel` trade-route creation form, `FleetPanel` navigation + wing/fitting controls, `ManufacturingPanel` T2 blueprint picker, `ReprocessingPanel` ore selector, `DevPanel` galaxy utilities
 
+### Overview Progression Shell + `<SystemUnlockCard>`
+
+`src/ui/panels/OverviewPanel.tsx`, `src/ui/components/SystemUnlockCard.tsx`
+
+- `OverviewPanel` now functions as a command-and-progression hub, not just a status dashboard
+- `ProgressionShellCard` surfaces current opportunities plus explicit specialist and hybrid system chains so early-game players can see multiple valid next moves
+- `ProgressPathGrid` renders five parallel tracks — Mining, Industry, Trade, Combat, Exploration — each with current status, next unlock target, ETA, payoff, and synergy text
+- `<SystemUnlockCard>` provides a shared locked-system preview for early branch panels (`ManufacturingPanel`, `ReprocessingPanel`, `MarketPanel`) with requirement, ETA, payoff explanation, and a Skills-panel CTA
+- The intent is onboarding clarity without forcing a single tutorial path; focused specialisation and jack-of-all-trades play are both surfaced as legitimate strategies
+
 ### `<NavTag>` — Content-Aware Navigation Chip
 
 `src/ui/components/NavTag.tsx`
@@ -691,12 +720,13 @@ When `focusTarget` is set after navigation, the target panel should:
 - All 9 panels: import `NavTag`, use `useUiStore`
 - `StatTooltip`: thin wrapper over `GameTooltip` — external API unchanged
 - `GameDropdown`: shared rich selector for content-heavy picking flows
-- `ResourceBar`: private `Tooltip`/`HoverCard` replaced by `GameTooltip` + `TT.*`
+- `ResourceBar`: private `Tooltip`/`HoverCard` replaced by `GameTooltip` + `TT.*`; the top bar now behaves as a slim single-row live data bar with summary chips for credits, mining, fleets, training, manufacturing, reprocessing, corp status, and grouped inventory instead of a tier-sorted raw resource tape
 - `DevPanel`: `devTimeScale` field from `useUiStore`; game loop multiplies `delta` in DEV guard
 
 ## Files
 
 - `src/stores/uiStore.ts` — store
+- `src/ui/components/SystemUnlockCard.tsx` — shared early-system unlock preview card + skill ETA helper
 - `src/ui/components/GameTooltip.tsx` — shell + TT.* primitives
 - `src/ui/components/GameDropdown.tsx` — shell for searchable/filterable dropdowns
 - `src/ui/components/NavTag.tsx` — entity navigation chip
@@ -821,6 +851,7 @@ interface FleetWing {
   escortWingId: string | null;
   isDispatched: boolean;
   haulingOriginSystemId: string | null;
+  lastEscortCombatAt: number;
 }
 
 // On PlayerFleet:
@@ -844,9 +875,10 @@ File: `src/game/systems/fleet/wings.logic.ts`
 
 - `getWingCargoCapacity(wing, ships)` computes wing-local cargo capacity from the assigned hulls.
 - `getWingCargoUsed(wing)` computes current wing-held ore.
-- `dispatchHaulerWing(state, fleetId, wingId, homeSystemId)` issues per-ship fleet orders for a specific hauling wing and its optional combat escort wing.
+- `dispatchHaulerWing(state, fleetId, wingId, homeSystemId)` issues per-ship fleet orders for a specific hauling wing and its optional combat escort wing, selecting the best available route from an escort-aware security preference stack.
 - `processWingArrivalAtHQ(state, fleetId, wingId, homeSystemId)` deposits the specified hauling wing cargo hold once its dispatched ships reach HQ, then issues return orders.
 - `processWingReturn(state, fleetId, wingId)` clears dispatch state and restores the specified wing's ships to mining or idle once they return to origin.
+- `tickEscortedHaulingWingCombat(state)` resolves detached convoy skirmishes for escorted hauling wings when they traverse hostile systems, throttled by `lastEscortCombatAt`.
 
 ## Tick Integration
 
@@ -856,8 +888,10 @@ Inside `tickRunner.ts`:
 2. Fleet ships without a wing assignment are ignored by fleet mining, scanning, and combat resolution.
 3. Auto-haul checks each hauling wing independently instead of assuming a single logistics group.
 4. At `≥ 90%` full, only the selected hauling wing and its escort wing are dispatched.
-5. Fleets without a hauling wing still use the original FC-1 whole-fleet auto-haul path.
-6. After `advanceFleetOrders`, the tick checks every dispatched hauling wing for HQ arrival and later for return completion.
+5. Route selection for dispatched hauling wings is escort-aware: escorted trips prefer direct routing, while unescorted trips prefer safer routing.
+6. Fleets without a hauling wing still use the original FC-1 whole-fleet auto-haul path.
+7. After `advanceFleetOrders`, escorted hauling wings can auto-resolve a detached combat skirmish against local NPC threats without involving the rest of the fleet.
+8. After detached escort combat and route advancement, the tick checks every dispatched hauling wing for HQ arrival and later for return completion.
 
 ## Wing Commanders
 
@@ -874,6 +908,8 @@ Fleet Wings appears as a dedicated section in each expanded fleet card:
 - Create buttons for all five wing types.
 - Newly created fleets are seeded with an initial populated wing so ships are operational immediately.
 - Per-wing expandable rows showing name, type badge, ship count, hauling fill state, and dispatch status.
+- Hauling wing rows now surface route posture directly so players can tell whether a trip is running under escort cover or safe-route protocol.
+- Fleet and Overview summaries surface live escort-response state when a detached convoy is actively skirmishing in hostile space.
 - Inline wing commander selector sourced from pilots whose ships are inside that wing.
 - Inline rename support inside the expanded wing row.
 - The top storage module switches from fleet Cargo Hold to Hauling Hold or Hauling Network when hauling wings exist.
