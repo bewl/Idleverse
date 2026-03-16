@@ -7,10 +7,12 @@ const PANEL_FOR_TYPE: Record<EntityType, PanelId> = {
   fleet:    'fleet',
   pilot:    'fleet',
   ship:     'fleet',
+  wing:     'fleet',
   skill:    'skills',
   resource: 'mining',
   system:   'system',
   anomaly:  'system',
+  panel:    'overview',
 };
 
 // ─── Color palette by entity type ────────────────────────────────────────────
@@ -19,10 +21,12 @@ const COLOR_FOR_TYPE: Record<EntityType, string> = {
   fleet:    '#22d3ee', // cyan
   pilot:    '#a78bfa', // violet
   ship:     '#a78bfa', // violet
+  wing:     '#f87171', // rose
   skill:    '#fbbf24', // amber
   resource: '#fbbf24', // amber
   system:   '#ffe47a', // gold
   anomaly:  '#fb7185', // rose
+  panel:    '#94a3b8', // slate
 };
 
 // ─── NavTag ───────────────────────────────────────────────────────────────────

@@ -7,6 +7,7 @@ import { FlairProgressBar } from '@/ui/components/FlairProgressBar';
 import { StatTooltip } from '@/ui/tooltip/StatTooltip';
 import { NavTag } from '@/ui/components/NavTag';
 import { GameDropdown, type DropdownOption } from '@/ui/components/GameDropdown';
+import { PanelInfoSection } from '@/ui/components/PanelInfoSection';
 import { SystemUnlockCard } from '@/ui/components/SystemUnlockCard';
 import { getSystemById } from '@/game/galaxy/galaxy.gen';
 import { getBatchYieldPreview, getReprocessingEfficiency } from '@/game/systems/reprocessing/reprocessing.logic';
@@ -321,22 +322,33 @@ export function ReprocessingPanel() {
             );
           })()}
         </div>
-        <p className="text-xs text-slate-500 mt-0.5">
-          Convert raw ores into refined minerals. Efficiency scales with the{' '}
-          <StatTooltip modifierKey="reprocessing-efficiency">
-            <span className="text-cyan-500 border-b border-dotted border-cyan-800 cursor-help">
-              Reprocessing Efficiency
-            </span>
-          </StatTooltip>{' '}
-          modifier. Train <NavTag entityType="skill" entityId="reprocessing" label="Reprocessing" /> to improve yield.
-        </p>
       </div>
 
-      <div className={`rounded-xl border px-3 py-2 text-xs ${homeSystem ? 'border-cyan-700/20 bg-cyan-950/10 text-slate-400' : 'border-amber-700/30 bg-amber-950/15 text-amber-300'}`}>
-        {homeSystem
-          ? <>Corp HQ anchored at <span className="text-cyan-300 font-semibold">{homeSystem.name}</span>. {homeOutpost ? 'Reprocessing jobs route through your outpost refinery network.' : 'Reprocessing jobs route through this station network.'}</>
-          : <>No Corp HQ registered. Dock at a station or deploy a POS core in the System panel to enable reprocessing jobs and auto-refinery controls.</>}
-      </div>
+      <PanelInfoSection
+        sectionId="reprocessing-context"
+        title="Facility Context"
+        subtitle="Hide static refinery notes when you want the auto-refinery and manual queue controls near the top."
+        accentColor="#a78bfa"
+        defaultCollapsed
+      >
+        <div className="flex flex-col gap-3">
+          <p className="text-xs text-slate-500 mt-0.5">
+            Convert raw ores into refined minerals. Efficiency scales with the{' '}
+            <StatTooltip modifierKey="reprocessing-efficiency">
+              <span className="text-cyan-500 border-b border-dotted border-cyan-800 cursor-help">
+                Reprocessing Efficiency
+              </span>
+            </StatTooltip>{' '}
+            modifier. Train <NavTag entityType="skill" entityId="reprocessing" label="Reprocessing" /> to improve yield.
+          </p>
+
+          <div className={`rounded-xl border px-3 py-2 text-xs ${homeSystem ? 'border-cyan-700/20 bg-cyan-950/10 text-slate-400' : 'border-amber-700/30 bg-amber-950/15 text-amber-300'}`}>
+            {homeSystem
+              ? <>Corp HQ anchored at <span className="text-cyan-300 font-semibold">{homeSystem.name}</span>. {homeOutpost ? 'Reprocessing jobs route through your outpost refinery network.' : 'Reprocessing jobs route through this station network.'}</>
+              : <>No Corp HQ registered. Dock at a station or deploy a POS core in the System panel to enable reprocessing jobs and auto-refinery controls.</>}
+          </div>
+        </div>
+      </PanelInfoSection>
 
       {/* ── Auto-Refinery ── */}
       <div>

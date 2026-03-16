@@ -1,10 +1,12 @@
+import { useEffect, useRef, useState } from 'react';
 import { useGameStore } from '@/stores/gameStore';
 import { ORE_BELTS } from '@/game/systems/mining/mining.config';
 import { formatResourceAmount, RESOURCE_REGISTRY } from '@/game/resources/resourceRegistry';
 import { NavTag } from '@/ui/components/NavTag';
 import { getSystemById } from '@/game/galaxy/galaxy.gen';
 import type { PlayerFleet } from '@/types/game.types';
-import { getFleetStorageCapacity, getFleetStoredCargo, getOperationalFleetShipIds } from '@/game/systems/fleet/wings.logic';
+import { getFleetStorageCapacity, getFleetStoredCargo, getHaulingWings, getOperationalFleetShipIds, getWingByShipId } from '@/game/systems/fleet/wings.logic';
+import { useUiStore } from '@/stores/uiStore';
 
 // ─── Tier color helper ───────────────────────────────────────────────────────
 
@@ -20,16 +22,41 @@ function secLabel(sec: string) {
   return 'Null-Sec';
 }
 
+function getStorageTargetCopy(haulingWingCount: number) {
+  if (haulingWingCount <= 0) {
+    return {
+      label: 'Shared Storage',
+      detail: 'No hauling wing is configured, so this mining wing is currently routing ore into the fleet\'s shared storage pool.',
+    };
+  }
+  if (haulingWingCount === 1) {
+    return {
+      label: 'Hauling Wing Storage',
+      detail: 'This mining wing is routing ore into the fleet\'s single hauling wing cargo hold.',
+    };
+  }
+  return {
+    label: 'Hauling Network',
+    detail: `This mining wing is routing ore across ${haulingWingCount} hauling wings in the fleet storage network.`,
+  };
+}
+
 // ─── Fleet Mining Card ───────────────────────────────────────────────────────
 
-function FleetMiningCard({ fleet }: { fleet: PlayerFleet }) {
+function FleetMiningCard({ fleet, focused = false }: { fleet: PlayerFleet; focused?: boolean }) {
   const state = useGameStore(s => s.state);
   const issueHaul = useGameStore(s => s.issueFleetGroupOrder);
   const dispatchHaulingWingToHQ = useGameStore(s => s.dispatchHaulingWingToHQ);
   const ships = state.systems.fleet.ships;
   const galaxy = state.galaxy;
   const operationalShipIds = new Set(getOperationalFleetShipIds(fleet));
-  const haulingWings = (fleet.wings ?? []).filter(wing => wing.type === 'hauling');
+  const haulingWings = getHaulingWings(fleet);
+  const cardRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!focused || !cardRef.current) return;
+    cardRef.current.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  }, [focused]);
 
   // Mining ships in this fleet
   const miningShips = fleet.shipIds
@@ -42,24 +69,41 @@ function FleetMiningCard({ fleet }: { fleet: PlayerFleet }) {
   // Fleet system
   const system = galaxy ? getSystemById(galaxy.seed, fleet.currentSystemId) : null;
 
-  // Cargo stats
   const totalCargoUsed = getFleetStoredCargo(fleet);
-  const capacity = getFleetStorageCapacity(fleet, ships, state.systems.fleet.pilots);
-  const fillPct = capacity > 0 ? Math.min(100, (totalCargoUsed / capacity) * 100) : 0;
+  const sharedStorageCapacity = getFleetStorageCapacity(fleet, ships, state.systems.fleet.pilots);
+  const sharedStorageFillPct = sharedStorageCapacity > 0 ? Math.min(100, (totalCargoUsed / sharedStorageCapacity) * 100) : 0;
 
-  // Belts active in this fleet
-  const activeBeltIds = [...new Set(miningShips.map(s => s.assignedBeltId!))];
+  const activeMiningWings = (fleet.wings ?? [])
+    .filter(wing => wing.type === 'mining')
+    .map(wing => {
+      const wingShips = miningShips.filter(ship => getWingByShipId(fleet, ship.id)?.id === wing.id);
+      if (wingShips.length === 0) return null;
 
-  // Ore rates (sum outputs from each mining ship's belt)
-  const oreOutputs: Record<string, number> = {};
-  for (const ship of miningShips) {
-    const beltDef = ORE_BELTS[ship.assignedBeltId!];
-    if (!beltDef) continue;
-    for (const output of beltDef.outputs) {
-      // baseRate × skill multiplier — approximate; real logic is in fleet.tick.ts
-      oreOutputs[output.resourceId] = (oreOutputs[output.resourceId] ?? 0) + output.baseRate;
-    }
-  }
+      const activeBeltIds = [...new Set(wingShips.map(ship => ship.assignedBeltId!).filter(Boolean))];
+      const oreOutputs: Record<string, number> = {};
+      for (const ship of wingShips) {
+        const beltDef = ORE_BELTS[ship.assignedBeltId!];
+        if (!beltDef) continue;
+        for (const output of beltDef.outputs) {
+          oreOutputs[output.resourceId] = (oreOutputs[output.resourceId] ?? 0) + output.baseRate;
+        }
+      }
+
+      return {
+        wing,
+        wingShips,
+        activeBeltIds,
+        oreOutputs,
+      };
+    })
+    .filter(Boolean) as Array<{
+      wing: NonNullable<PlayerFleet['wings']>[number];
+      wingShips: NonNullable<typeof miningShips[number]>[];
+      activeBeltIds: string[];
+      oreOutputs: Record<string, number>;
+    }>;
+
+  const storageTarget = getStorageTargetCopy(haulingWings.length);
 
   const canHaul = haulingWings.length === 1
     ? !haulingWings[0].isDispatched && state.systems.factions.homeStationSystemId !== null && state.systems.factions.homeStationSystemId !== fleet.currentSystemId && totalCargoUsed > 0
@@ -67,10 +111,13 @@ function FleetMiningCard({ fleet }: { fleet: PlayerFleet }) {
 
   return (
     <div
+      ref={cardRef}
       className="rounded-xl border p-4 flex flex-col gap-3"
       style={{
-        background: 'linear-gradient(135deg, rgba(3,8,20,0.9), rgba(34,211,238,0.04))',
-        borderColor: 'rgba(34,211,238,0.15)',
+        background: focused
+          ? 'linear-gradient(135deg, rgba(3,8,20,0.96), rgba(34,211,238,0.12))'
+          : 'linear-gradient(135deg, rgba(3,8,20,0.9), rgba(34,211,238,0.04))',
+        borderColor: focused ? 'rgba(34,211,238,0.38)' : 'rgba(34,211,238,0.15)',
       }}
     >
       {/* Header */}
@@ -97,43 +144,57 @@ function FleetMiningCard({ fleet }: { fleet: PlayerFleet }) {
         <div className="text-xs font-mono text-cyan-400">{miningShips.length} mining · {operationalShipIds.size}/{fleet.shipIds.length} operational</div>
       </div>
 
-      {/* Active belts */}
-      <div className="flex flex-col gap-1.5">
-        {activeBeltIds.map(beltId => {
-          const beltDef = ORE_BELTS[beltId];
-          if (!beltDef) return null;
-          return (
-            <div key={beltId} className="flex items-center gap-2">
-              <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse shrink-0" />
-              <span className="text-xs text-slate-300 flex-1">{beltDef.name}</span>
-              <div className="flex gap-2">
-                {beltDef.outputs.map(o => (
-                  <span key={o.resourceId} className="text-xs font-mono text-cyan-300">
-                    {RESOURCE_REGISTRY[o.resourceId]?.name ?? o.resourceId} +{(oreOutputs[o.resourceId] ?? 0).toFixed(2)}/s
-                  </span>
-                ))}
+      {/* Active mining wings */}
+      <div className="flex flex-col gap-2">
+        {activeMiningWings.map(({ wing, wingShips, activeBeltIds, oreOutputs }) => (
+          <div key={wing.id} className="rounded-lg border border-slate-700/30 bg-slate-950/35 px-3 py-2.5 flex flex-col gap-2">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse shrink-0" />
+                <span className="text-xs font-semibold text-cyan-200 truncate">{wing.name}</span>
               </div>
+              <span className="text-[10px] font-mono text-cyan-400 shrink-0">{wingShips.length} miners</span>
             </div>
-          );
-        })}
-      </div>
 
-      {/* Cargo hold fill bar */}
-      <div>
-        <div className="flex items-center justify-between mb-1">
-          <span className="text-[9px] text-slate-600">Cargo Hold</span>
-          <span className="text-[9px] font-mono text-slate-500">
-            {formatResourceAmount(totalCargoUsed, 0)} / {formatResourceAmount(capacity, 0)} m³
-          </span>
-        </div>
-        <div className="h-1.5 rounded-full bg-slate-800 overflow-hidden">
-          <div
-            className={`h-full rounded-full transition-all duration-500 ${
-              fillPct >= 95 ? 'bg-rose-500' : fillPct >= 70 ? 'bg-amber-500' : 'bg-cyan-600'
-            }`}
-            style={{ width: `${fillPct}%` }}
-          />
-        </div>
+            <div className="flex flex-col gap-1.5">
+              {activeBeltIds.map(beltId => {
+                const beltDef = ORE_BELTS[beltId];
+                if (!beltDef) return null;
+                return (
+                  <div key={beltId} className="flex items-center gap-2">
+                    <span className="w-1 h-1 rounded-full bg-cyan-500 shrink-0" />
+                    <span className="text-xs text-slate-300 flex-1">{beltDef.name}</span>
+                    <div className="flex gap-2 flex-wrap justify-end">
+                      {beltDef.outputs.map(output => (
+                        <span key={output.resourceId} className="text-xs font-mono text-cyan-300">
+                          {RESOURCE_REGISTRY[output.resourceId]?.name ?? output.resourceId} +{(oreOutputs[output.resourceId] ?? 0).toFixed(2)}/s
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[9px] text-slate-600">Storage Target</span>
+                <span className="text-[9px] font-mono text-slate-500">
+                  {storageTarget.label} · {formatResourceAmount(totalCargoUsed, 0)} / {formatResourceAmount(sharedStorageCapacity, 0)} m³
+                </span>
+              </div>
+              <div className="h-1.5 rounded-full bg-slate-800 overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all duration-500 ${
+                    sharedStorageFillPct >= 95 ? 'bg-rose-500' : sharedStorageFillPct >= 70 ? 'bg-amber-500' : 'bg-cyan-600'
+                  }`}
+                  style={{ width: `${sharedStorageFillPct}%` }}
+                />
+              </div>
+              <div className="text-[9px] text-slate-600 mt-1">{storageTarget.detail}</div>
+            </div>
+          </div>
+        ))}
       </div>
 
       {/* Haul Now button */}
@@ -161,7 +222,16 @@ function FleetMiningCard({ fleet }: { fleet: PlayerFleet }) {
 
 export function MiningPanel() {
   const state = useGameStore(s => s.state);
+  const focusTarget = useUiStore(s => s.focusTarget);
+  const clearFocus = useUiStore(s => s.clearFocus);
+  const [focusedFleetId, setFocusedFleetId] = useState<string | null>(null);
   const fleets = Object.values(state.systems.fleet.fleets);
+
+  useEffect(() => {
+    if (focusTarget?.entityType !== 'fleet') return;
+    setFocusedFleetId(focusTarget.entityId);
+    clearFocus();
+  }, [focusTarget, clearFocus]);
 
   // Filter fleets that have ≥1 ship assigned to a belt
   const miningFleets = fleets.filter(fleet => {
@@ -202,7 +272,7 @@ export function MiningPanel() {
         <p className="text-slate-500 text-xs">
           {miningFleets.length === 0
             ? 'No fleets are currently mining. Open Fleet and assign ships to ore belts.'
-            : 'Ore mined by fleets fills their cargo holds. Fleets auto-haul to Corp HQ when full.'}
+            : 'Mining activity is grouped by active mining wing. Each wing shows the storage target currently backing its ore flow.'}
         </p>
       </div>
 
@@ -210,7 +280,7 @@ export function MiningPanel() {
       {miningFleets.length > 0 && (
         <div className="flex flex-col gap-3">
           {miningFleets.map(fleet => (
-            <FleetMiningCard key={fleet.id} fleet={fleet} />
+            <FleetMiningCard key={fleet.id} fleet={fleet} focused={focusedFleetId === fleet.id} />
           ))}
         </div>
       )}

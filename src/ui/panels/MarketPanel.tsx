@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useGameStore } from '@/stores/gameStore';
 import { RESOURCE_REGISTRY } from '@/game/resources/resourceRegistry';
 import { formatResourceAmount } from '@/game/resources/resourceRegistry';
@@ -8,6 +8,7 @@ import { generateGalaxy } from '@/game/galaxy/galaxy.gen';
 import { NavTag } from '@/ui/components/NavTag';
 import { GameDropdown, type DropdownOption } from '@/ui/components/GameDropdown';
 import { SystemUnlockCard } from '@/ui/components/SystemUnlockCard';
+import { useUiStore } from '@/stores/uiStore';
 
 // ─── Resource categories to display in market ─────────────────────────────
 
@@ -465,7 +466,28 @@ export function MarketPanel() {
   const state     = useGameStore(s => s.state);
   const unlocked  = state.unlocks['system-market'];
 
-  const [activeTab, setActiveTab] = useState<'listings' | 'routes'>('listings');
+  const savedPanelState = useUiStore(s => s.panelStates.market);
+  const setPanelState = useUiStore(s => s.setPanelState);
+  const [activeTab, setActiveTab] = useState<'listings' | 'routes'>(() => savedPanelState.activeTab ?? 'listings');
+  const focusTarget = useUiStore(s => s.focusTarget);
+  const clearFocus = useUiStore(s => s.clearFocus);
+
+  useEffect(() => {
+    if (!focusTarget?.panelSection) return;
+    if (focusTarget.panelSection !== 'listings' && focusTarget.panelSection !== 'routes') return;
+    setActiveTab(focusTarget.panelSection);
+    clearFocus();
+  }, [focusTarget, clearFocus]);
+
+  useEffect(() => {
+    if (savedPanelState.activeTab && savedPanelState.activeTab !== activeTab) {
+      setActiveTab(savedPanelState.activeTab);
+    }
+  }, [savedPanelState.activeTab]);
+
+  useEffect(() => {
+    setPanelState('market', { activeTab });
+  }, [activeTab, setPanelState]);
 
   if (!unlocked) {
     return (

@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useGameStore } from '@/stores/gameStore';
-import { useUiStore, type PanelId } from '@/stores/uiStore';
+import { useUiStore, type NavigationHistoryEntry, type PanelId, type PanelStateMap } from '@/stores/uiStore';
 import { StarField } from '@/ui/effects/StarField';
 import { ResourceBar } from '@/ui/panels/ResourceBar';
 import { MiningPanel } from '@/ui/panels/MiningPanel';
@@ -13,7 +13,9 @@ import { FleetPanel } from '@/ui/panels/FleetPanel';
 import { DevPanel } from '@/ui/dev/DevPanel';
 import StarMapPanel from '@/ui/panels/StarMapPanel';
 import { SystemPanel } from '@/ui/panels/SystemPanel';
-import { formatResourceAmount } from '@/game/resources/resourceRegistry';
+import { formatResourceAmount, RESOURCE_REGISTRY } from '@/game/resources/resourceRegistry';
+import { SKILL_DEFINITIONS } from '@/game/systems/skills/skills.config';
+import { getSystemById } from '@/game/galaxy/galaxy.gen';
 
 interface NavEntry {
   id: PanelId;
@@ -47,17 +49,111 @@ const PANELS: Record<PanelId, React.ReactNode> = {
   market:        <MarketPanel />,
 };
 
+function panelLabel(panelId: PanelId): string {
+  return NAV.find(entry => entry.id === panelId)?.label ?? panelId;
+}
+
+function routeContextLabel(
+  entry: { panelId: PanelId; focusTarget: NavigationHistoryEntry['focusTarget']; panelState: PanelStateMap[PanelId] },
+  state: ReturnType<typeof useGameStore.getState>['state'],
+): string | null {
+  if (entry.focusTarget) {
+    const { entityType, entityId } = entry.focusTarget;
+    if (entityType === 'skill') return SKILL_DEFINITIONS[entityId]?.name ?? entityId;
+    if (entityType === 'resource') return RESOURCE_REGISTRY[entityId]?.name ?? entityId;
+    if (entityType === 'system') {
+      try {
+        return getSystemById(state.galaxy.seed, entityId).name;
+      } catch {
+        return entityId;
+      }
+    }
+    if (entityType === 'fleet') return state.systems.fleet.fleets[entityId]?.name ?? entityId;
+    if (entityType === 'pilot') return state.systems.fleet.pilots[entityId]?.name ?? entityId;
+    if (entityType === 'ship') return state.systems.fleet.ships[entityId]?.customName ?? entityId;
+    if (entityType === 'wing') {
+      for (const fleet of Object.values(state.systems.fleet.fleets)) {
+        const wing = (fleet.wings ?? []).find(candidate => candidate.id === entityId);
+        if (wing) return wing.name;
+      }
+      return entityId;
+    }
+  }
+
+  if (entry.panelId === 'skills') {
+    const selectedSkillId = (entry.panelState as PanelStateMap['skills']).selectedSkillId;
+    if (selectedSkillId) return SKILL_DEFINITIONS[selectedSkillId]?.name ?? selectedSkillId;
+  }
+
+  if (entry.panelId === 'overview') {
+    const mode = (entry.panelState as PanelStateMap['overview']).mode;
+    if (mode === 'guidance') return 'Guidance';
+    if (mode === 'operations') return 'Operations';
+  }
+
+  if (entry.panelId === 'market') {
+    const activeTab = (entry.panelState as PanelStateMap['market']).activeTab;
+    if (activeTab === 'routes') return 'Trade Routes';
+    if (activeTab === 'listings') return 'Listings';
+  }
+
+  if (entry.panelId === 'manufacturing') {
+    const tab = (entry.panelState as PanelStateMap['manufacturing']).tab;
+    if (tab === 'blueprints') return 'Blueprints';
+    if (tab === 'jobs') return 'Jobs';
+  }
+
+  if (entry.panelId === 'system') {
+    const systemState = entry.panelState as PanelStateMap['system'];
+    if (systemState.viewingSystemId) {
+      try {
+        return getSystemById(state.galaxy.seed, systemState.viewingSystemId).name;
+      } catch {
+        return systemState.viewingSystemId;
+      }
+    }
+  }
+
+  if (entry.panelId === 'starmap') {
+    const selectedId = (entry.panelState as PanelStateMap['starmap']).selectedId;
+    if (selectedId) {
+      try {
+        return getSystemById(state.galaxy.seed, selectedId).name;
+      } catch {
+        return selectedId;
+      }
+    }
+  }
+
+  return null;
+}
+
 export function GameLayout() {
   const activePanel = useUiStore(s => s.activePanel);
   const navigate    = useUiStore(s => s.navigate);
+  const goBack      = useUiStore(s => s.goBack);
+  const restoreHistory = useUiStore(s => s.restoreHistory);
+  const navigationHistory = useUiStore(s => s.navigationHistory);
+  const panelStates = useUiStore(s => s.panelStates);
+  const focusTarget = useUiStore(s => s.focusTarget);
   const [sidebarOpen, setSidebarOpen]   = useState(true);
   const [devOpen,     setDevOpen]       = useState(false);
+  const state               = useGameStore(s => s.state);
   const unlocks             = useGameStore(s => s.state.unlocks);
   const saveToStorage       = useGameStore(s => s.saveToStorage);
   const offlineSummary      = useGameStore(s => s.offlineSummary);
   const dismissOfflineSummary = useGameStore(s => s.dismissOfflineSummary);
 
   const visibleNav = NAV.filter(n => unlocks[n.unlockKey]);
+  const breadcrumbs = useMemo(() => {
+    const current = {
+      id: 'current',
+      panelId: activePanel,
+      focusTarget,
+      panelState: panelStates[activePanel],
+    };
+    return [...navigationHistory.slice(-4), current];
+  }, [activePanel, focusTarget, navigationHistory, panelStates]);
 
   return (
     <div
@@ -111,6 +207,47 @@ export function GameLayout() {
 
       {/* ── Resource / status bar ── */}
       <ResourceBar />
+
+      <div
+        className="shrink-0 flex items-center gap-2 px-3 sm:px-4 py-2 overflow-x-auto"
+        style={{
+          background: 'rgba(3, 5, 14, 0.92)',
+          borderBottom: '1px solid rgba(22, 30, 52, 0.7)',
+        }}
+      >
+        <button
+          className="btn-secondary text-xs py-1 px-2 shrink-0 disabled:opacity-30"
+          disabled={navigationHistory.length === 0}
+          onClick={goBack}
+          title="Go back to previous view"
+        >
+          Back
+        </button>
+        <div className="flex items-center gap-1.5 min-w-0">
+          {breadcrumbs.map((entry, index) => {
+            const context = routeContextLabel(entry, state);
+            const isCurrent = entry.id === 'current';
+            return (
+              <div key={entry.id} className="flex items-center gap-1.5 shrink-0">
+                {index > 0 && <span className="text-[10px] text-slate-700">/</span>}
+                {isCurrent ? (
+                  <span className="text-[10px] text-cyan-300 font-semibold whitespace-nowrap">
+                    {panelLabel(entry.panelId)}{context ? ` · ${context}` : ''}
+                  </span>
+                ) : (
+                  <button
+                    className="text-[10px] text-slate-400 hover:text-white transition-colors whitespace-nowrap"
+                    onClick={() => restoreHistory(entry.id)}
+                    title={`Return to ${panelLabel(entry.panelId)}`}
+                  >
+                    {panelLabel(entry.panelId)}{context ? ` · ${context}` : ''}
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
 
       {/* ── Offline progress banner ── */}
       {offlineSummary && (

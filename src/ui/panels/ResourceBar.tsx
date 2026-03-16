@@ -73,6 +73,25 @@ function formatShortCount(value: number): string {
   return value.toString();
 }
 
+function getStorageTargetCopy(haulingWingCount: number) {
+  if (haulingWingCount <= 0) {
+    return {
+      label: 'Shared Storage',
+      detail: 'Mining output is currently using shared fleet storage because no hauling wing is configured.',
+    };
+  }
+  if (haulingWingCount === 1) {
+    return {
+      label: 'Hauling Wing Storage',
+      detail: 'Mining output is currently routing into the fleet\'s single hauling wing cargo hold.',
+    };
+  }
+  return {
+    label: 'Hauling Network',
+    detail: `Mining output is currently distributed across ${haulingWingCount} hauling wings in the fleet storage network.`,
+  };
+}
+
 function MiniProgress({ percent, color }: { percent: number; color: string }) {
   return (
     <div className="hud-data-chip-progress-track">
@@ -255,6 +274,8 @@ function MiningChip() {
   const state = useGameStore(s => s.state);
   const rates = useResourceRates();
   const ships = state.systems.fleet.ships;
+  const pilots = state.systems.fleet.pilots;
+  const fleets = Object.values(state.systems.fleet.fleets);
 
   const miningShips = Object.values(ships).filter(ship => ship.activity === 'mining' && !!ship.assignedBeltId);
   const activeBeltIds = Array.from(new Set(miningShips.map(ship => ship.assignedBeltId).filter((beltId): beltId is string => !!beltId)));
@@ -264,13 +285,46 @@ function MiningChip() {
   const oreFlow = oreRates.reduce((sum, [, rate]) => sum + rate, 0);
   const topOre = oreRates[0];
   const depletedBelts = activeBeltIds.filter(beltId => (state.systems.mining.beltRespawnAt[beltId] ?? 0) > Date.now()).length;
+  const miningFleetSummaries = fleets
+    .map(fleet => {
+      const operationalShipIds = new Set(getOperationalFleetShipIds(fleet));
+      const activeMinerCount = fleet.shipIds.filter(shipId => operationalShipIds.has(shipId) && !!ships[shipId]?.assignedBeltId).length;
+      if (activeMinerCount === 0) return null;
+      const storageUsed = getFleetStoredCargo(fleet);
+      const storageCapacity = getFleetStorageCapacity(fleet, ships, pilots);
+      const storageFill = storageCapacity > 0 ? Math.round((storageUsed / storageCapacity) * 100) : 0;
+      const storageTarget = getStorageTargetCopy(getHaulingWings(fleet).length);
+      return {
+        fleetId: fleet.id,
+        fleetName: fleet.name,
+        activeMinerCount,
+        storageTarget,
+        storageUsed,
+        storageCapacity,
+        storageFill,
+      };
+    })
+    .filter(Boolean) as Array<{
+      fleetId: string;
+      fleetName: string;
+      activeMinerCount: number;
+      storageTarget: { label: string; detail: string };
+      storageUsed: number;
+      storageCapacity: number;
+      storageFill: number;
+    }>;
+  const storageMeta = miningFleetSummaries.length === 1
+    ? `${miningFleetSummaries[0].storageTarget.label} ${miningFleetSummaries[0].storageFill}%`
+    : miningFleetSummaries.length > 1
+      ? `avg storage ${Math.round(miningFleetSummaries.reduce((sum, fleet) => sum + fleet.storageFill, 0) / miningFleetSummaries.length)}%`
+      : 'No storage pressure';
 
   return (
     <DataChip
       tone={oreFlow > 0 ? 'cyan' : 'slate'}
       label="Mining"
       value={oreFlow > 0 ? `${oreFlow.toFixed(2)}/s` : 'Idle'}
-      meta={miningShips.length > 0 ? `${miningShips.length} miners · ${activeBeltIds.length} belts` : 'No active miners'}
+      meta={miningShips.length > 0 ? `${miningShips.length} miners · ${activeBeltIds.length} belts · ${storageMeta}` : 'No active miners'}
       alert={depletedBelts > 0}
       tooltip={
         <>
@@ -280,6 +334,7 @@ function MiningChip() {
               <ChipLine label="Ore flow" value={oreFlow > 0 ? `${oreFlow.toFixed(2)}/s` : 'idle'} valueColor={oreFlow > 0 ? '#67e8f9' : '#94a3b8'} />
               <ChipLine label="Active miners" value={miningShips.length} valueColor="#67e8f9" />
               <ChipLine label="Active belts" value={activeBeltIds.length} valueColor="#67e8f9" />
+              <ChipLine label="Mining fleets" value={miningFleetSummaries.length} valueColor="#67e8f9" />
               <ChipLine label="Depleted belts" value={depletedBelts} valueColor={depletedBelts > 0 ? '#fbbf24' : '#94a3b8'} />
             </TT.Grid>
           </TT.Section>
@@ -288,6 +343,24 @@ function MiningChip() {
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 10 }}>
                 <span style={{ color: '#cbd5e1' }}>{RESOURCE_REGISTRY[topOre[0]]?.name ?? topOre[0]}</span>
                 <span style={{ color: '#67e8f9', fontVariantNumeric: 'tabular-nums' }}>{topOre[1].toFixed(2)}/s</span>
+              </div>
+            </TT.Section>
+          )}
+          {miningFleetSummaries.length > 0 && (
+            <TT.Section label="Storage targets">
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {miningFleetSummaries.slice(0, 4).map(summary => (
+                  <div key={summary.fleetId} style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) auto', gap: 12, fontSize: 10 }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ color: '#e2e8f0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{summary.fleetName}</div>
+                      <div style={{ color: '#64748b' }}>{summary.storageTarget.detail}</div>
+                    </div>
+                    <div style={{ textAlign: 'right', color: '#94a3b8', fontVariantNumeric: 'tabular-nums' }}>
+                      <div>{summary.storageTarget.label}</div>
+                      <div>{summary.storageFill}% · {formatResourceAmount(summary.storageUsed, 0)} / {formatResourceAmount(summary.storageCapacity, 0)}</div>
+                    </div>
+                  </div>
+                ))}
               </div>
             </TT.Section>
           )}

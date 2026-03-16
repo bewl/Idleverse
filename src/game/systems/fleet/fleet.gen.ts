@@ -130,17 +130,30 @@ export function generatePilot(globalSeed: number, pilotSeed: number): PilotInsta
  * @param globalSeed   Galaxy seed (changes as game progresses to rotate offers).
  * @param offersEpoch  Increment this to force-refresh available recruits.
  */
-export function generateRecruitmentOffers(globalSeed: number, offersEpoch: number = 0): PilotRecruitmentOffer[] {
+export function generateRecruitmentOffers(
+  globalSeed: number,
+  offersEpoch: number = 0,
+  options?: {
+    focusSequence?: PilotTrainingFocus[];
+    hiringCostRange?: [number, number];
+    source?: 'contracts' | 'milestone';
+    sourceLabel?: string;
+    recommendationReason?: string;
+    milestoneId?: string;
+  },
+): PilotRecruitmentOffer[] {
   const offers: PilotRecruitmentOffer[] = [];
   for (let i = 0; i < 3; i++) {
     const offerSeed = childSeed(childSeed(globalSeed, offersEpoch + 1), i + 1000);
     const rng = mulberry32(offerSeed);
 
-    const focus = randWeighted(rng, FOCUS_WEIGHTS);
+    const focus = options?.focusSequence?.[i] ?? randWeighted(rng, FOCUS_WEIGHTS);
     const name = generatePilotName(rng);
     const backstory = randPick(rng, BACKSTORY_TEMPLATES);
     const previewSkills = generatePreviewSkills(focus, rng);
-    const hiringCost = randInt(rng, 50_000, 300_000);
+    const hiringCost = options?.hiringCostRange
+      ? randInt(rng, options.hiringCostRange[0], options.hiringCostRange[1])
+      : randInt(rng, 50_000, 300_000);
     const payrollPerDay = randInt(rng, 1_000, 5_000);
     const pilotSeed = childSeed(offerSeed, 77);
 
@@ -153,6 +166,10 @@ export function generateRecruitmentOffers(globalSeed: number, offersEpoch: numbe
       payrollPerDay,
       backstory,
       previewSkills,
+      source: options?.source ?? 'contracts',
+      sourceLabel: options?.sourceLabel,
+      recommendationReason: options?.recommendationReason,
+      milestoneId: options?.milestoneId,
     });
   }
   return offers;

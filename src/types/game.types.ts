@@ -428,6 +428,10 @@ export interface PilotRecruitmentOffer {
   payrollPerDay: number;
   backstory: string;
   previewSkills: Record<string, number>;
+  source?: 'contracts' | 'milestone';
+  sourceLabel?: string;
+  recommendationReason?: string;
+  milestoneId?: string;
 }
 
 export interface ModuleDefinition {
@@ -461,6 +465,7 @@ export interface FleetState {
   ships: Record<string, ShipInstance>;
   pilots: Record<string, PilotInstance>;
   recruitmentOffers: PilotRecruitmentOffer[];
+  recruitmentMilestones: Record<string, boolean>;
   /** Named fleet groups (ships travel as a unit under one order). */
   fleets: Record<string, PlayerFleet>;
   /** Maximum number of concurrent fleet groups the player may command. */

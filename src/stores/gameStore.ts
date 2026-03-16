@@ -17,6 +17,7 @@ import {
 import { upgradeCost } from '@/game/balance/constants';
 import { saveGame, loadGame, deleteSave } from '@/game/persistence/saveLoad';
 import { processOfflineProgress } from '@/game/offline/offlineCalc';
+import { getTriggeredRecruitmentDirectives } from '@/game/progression/recruitmentAdvisor';
 import { calculateSellValue } from '@/game/systems/market/market.logic';
 import type { TradeRoute } from '@/types/game.types';
 import { BATCH_SIZE_BASE } from '@/game/systems/reprocessing/reprocessing.config';
@@ -208,7 +209,43 @@ export const useGameStore = create<GameStore>((set, get) => ({
   // ── Core loop ────────────────────────────────────────────────────────────
 
   tick: (deltaSeconds) => {
-    const { newState } = runTick(get().state, deltaSeconds);
+    const previousState = get().state;
+    let { newState } = runTick(previousState, deltaSeconds);
+
+    const directives = getTriggeredRecruitmentDirectives(previousState, newState);
+    if (directives.length > 0) {
+      let recruitmentOffers = [...newState.systems.fleet.recruitmentOffers];
+      const recruitmentMilestones = { ...(newState.systems.fleet.recruitmentMilestones ?? {}) };
+      let epochBase = recruitmentOffers.length + Object.keys(recruitmentMilestones).length;
+
+      for (const directive of directives) {
+        if (recruitmentMilestones[directive.milestoneId]) continue;
+        const generatedOffers = generateRecruitmentOffers(newState.galaxy.seed, epochBase, {
+          focusSequence: directive.focusSequence,
+          hiringCostRange: directive.hiringCostRange,
+          source: 'milestone',
+          sourceLabel: directive.sourceLabel,
+          recommendationReason: directive.recommendationReason,
+          milestoneId: directive.milestoneId,
+        });
+        epochBase += 1;
+        recruitmentOffers = [...generatedOffers, ...recruitmentOffers].slice(0, 6);
+        recruitmentMilestones[directive.milestoneId] = true;
+      }
+
+      newState = {
+        ...newState,
+        systems: {
+          ...newState.systems,
+          fleet: {
+            ...newState.systems.fleet,
+            recruitmentOffers,
+            recruitmentMilestones,
+          },
+        },
+      };
+    }
+
     set({ state: newState });
   },
 
@@ -1886,6 +1923,16 @@ export const useGameStore = create<GameStore>((set, get) => ({
     if (!patchedSystems.fleet.recruitmentOffers) {
       patchedSystems.fleet = { ...patchedSystems.fleet, recruitmentOffers: [] };
     }
+    if (!patchedSystems.fleet.recruitmentMilestones) {
+      patchedSystems.fleet = { ...patchedSystems.fleet, recruitmentMilestones: {} };
+    }
+    patchedSystems.fleet = {
+      ...patchedSystems.fleet,
+      recruitmentOffers: (patchedSystems.fleet.recruitmentOffers ?? []).map(offer => ({
+        ...offer,
+        source: offer.source ?? 'contracts',
+      })),
+    };
     if (!patchedSystems.fleet.fleets) {
       patchedSystems.fleet = { ...patchedSystems.fleet, fleets: {} };
     }

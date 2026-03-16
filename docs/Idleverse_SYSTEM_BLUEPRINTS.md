@@ -37,9 +37,12 @@ MiningState {
 - Lowsec requires Advanced Mining I; nullsec requires Advanced Mining III
 - **Belt skill gates**: `ORE_BELTS[beltId].requiredSkill` is checked in `setShipActivity()` before a ship can be assigned to mine a belt; if the corp's skill level is below the required minimum the assignment is rejected. The `SystemPanel` renders locked belt cards with a 🔒 disabled button and a `GameTooltip` displaying the required skill name and level; unlocked belts surface live fleet-assignment status rather than a legacy mining toggle.
 - The `SystemPanel` is the operational assignment surface for mining: each unlocked belt card can now directly assign a configured mining wing in the current system to that belt, pushing the wing's ships into `activity: 'mining'` with the selected `assignedBeltId`.
+- The `MiningPanel` now groups active operations by mining wing rather than showing a single fleet-level cargo bar, so belt assignments and storage fill are presented in the same wing section. Storage is framed everywhere as a `Storage Target`: either shared fleet storage when no hauling wing exists, a single hauling-wing cargo hold, or a multi-wing hauling network.
 - Each belt has a `poolSize` — it depletes as ore is extracted, then respawns
 - Ore accumulates in the storage target for the fleet: `fleet.cargoHold` for legacy fleets, or `haulingWing.cargoHold` when a hauling wing exists. The active hold has a capacity derived from assigned hull cargo.
 - Auto-haul at 80% cargo fill — see System 7 Fleet Cargo Hold for the full round-trip logic
+
+UI notes: the `FleetPanel` storage module and the Mining HUD tooltip use the same storage-target language so fleets, mining wings, and the top data bar no longer describe the same storage pool using different labels.
 
 ## Dependencies
 
@@ -125,6 +128,8 @@ queues for combat/mining specialisation.
 - Pilot skills (individual) trained through the Pilots tab in the Fleet panel
 - The Overview panel now reads the current skill sheet to frame five parallel progression tracks (Mining, Industry, Trade, Combat, Exploration), each with a next unlock target and ETA so the skill system teaches options rather than only exposing raw modifier rows
 - `SkillsPanel` now includes a path-oriented specialization guide plus outcome text in the detail pane, so players can compare payoff, ETA, and downstream unlocks before committing queue time
+- `SkillsPanel` now also surfaces advisory specialization lanes ranked from the live corp state. The top recommendations are computed from current inventory, unlock status, fleet activity, and first-week progression context rather than being static card ordering.
+- When the skill queue is idle or has no follow-up entries, `SkillsPanel` now collapses the empty training/queue placeholders into a compact command strip so the browser and detail pane move higher instead of losing vertical space to oversized empty states.
 - The `SkillsPanel` detail pane is independently scrollable and the full panel reserves mobile bottom-nav space so late-page training controls remain reachable on smaller viewports
 
 ---
@@ -303,6 +308,8 @@ Each `PlayerFleet` has a legacy `cargoHold: Record<string, number>` for non-wing
 - Instant repair costs 1× Hull Plate resource
 - Ships with `activity: 'hauling'` reduce the mining haul interval
 - Pilot morale tracked; morale affects combat effectiveness + training speed
+- The Recruitment Office no longer relies only on manual contract posting. Progression milestones can now auto-post targeted contracts, with offers biased toward the live bottleneck: first-sale expansion, storage-pressure hauling support, combat-ready patrol staffing, or exploration staffing after scanning unlocks
+- These one-time milestone contracts are tracked in fleet state so they only trigger once per save. Offers carry source metadata and an in-UI rationale so the player can see why a pilot is being recommended now instead of seeing recruitment as a disconnected generic shop
 
 ---
 
@@ -674,11 +681,36 @@ Props include: `value`, `options`, `onChange`, `placeholder`, plus search/filter
 
 `src/ui/panels/OverviewPanel.tsx`, `src/ui/components/SystemUnlockCard.tsx`
 
-- `OverviewPanel` now functions as a command-and-progression hub, not just a status dashboard
+- `OverviewPanel` now uses an explicit in-panel tab strip between `Operations` and `Guidance` so the default surface stays focused on command triage while heavier progression coaching lives one click away in the same route
+- `OpeningOperationsCard` gives the first-hour loop a live checkpoint briefing: extraction status, storage / haul pressure, first-sale guidance, and the first-branch prompt are all derived from current game state instead of hard-coded tutorial copy
+- `ProgressPromptStrip` adds dismissible milestone callouts for the current opening state, including first-haul-in-progress, first-haul-complete, first-sale-ready, and first-branch prompts. These are UI-state persisted so players can clear guidance that is already understood without mutating game state.
+- The same prompt strip now advertises milestone recruitment contracts when the game auto-posts targeted specialists, routing the player directly to the Fleet operations recruitment office.
+- The same Overview surface now lists the nearest early system unlocks (Manufacturing, Market, Reprocessing, Exploration) with chain-aware ETAs that include missing prerequisite skills rather than only the final skill's direct training time
+- `AdvisoryLanesCard` ranks the best near-term specialization directions for the current save instead of treating all five paths as equally urgent. This is intentionally advisory only: it recommends a best-fit lane and one strong alternative without hard-locking the player into a branch.
 - `ProgressionShellCard` surfaces current opportunities plus explicit specialist and hybrid system chains so early-game players can see multiple valid next moves
 - `ProgressPathGrid` renders five parallel tracks — Mining, Industry, Trade, Combat, Exploration — each with current status, next unlock target, ETA, payoff, and synergy text
-- `<SystemUnlockCard>` provides a shared locked-system preview for early branch panels (`ManufacturingPanel`, `ReprocessingPanel`, `MarketPanel`) with requirement, ETA, payoff explanation, and a Skills-panel CTA
+- The `Operations` subview keeps only urgent or current-state cards such as alerts, active training, resource income, fleet/manufacturing summaries, and optional collapsed activity feeds so the player is not forced to parse strategic planning content during routine play
+- The `Guidance` subview groups opening checkpoints, advisory lanes, and long-form progression framing into a dedicated planning mode without adding a new top-level sidebar destination
+- `<SystemUnlockCard>` provides a shared locked-system preview for early branch panels (`ManufacturingPanel`, `ReprocessingPanel`, `MarketPanel`) with requirement, ETA, payoff explanation, and a Skills-panel CTA. Its ETA helper is prerequisite-aware, so chained unlocks no longer under-report time by ignoring missing precursor skills.
 - The intent is onboarding clarity without forcing a single tutorial path; focused specialisation and jack-of-all-trades play are both surfaced as legitimate strategies
+
+### Shared Progression Advisor
+
+`src/game/progression/specializationAdvisor.ts`
+
+- Centralizes prerequisite-aware training ETA calculation for UI progression surfaces
+- Ranks the five early specialization lanes (Mining, Industry, Trade, Combat, Exploration) from current game state
+- Uses current inventory, fleet activity, unlock state, and first-sale/first-branch context to generate advisory ordering plus lane rationale
+- Exists specifically to keep `OverviewPanel`, `SkillsPanel`, and locked-system previews aligned on what the game thinks the best near-term branch actually is
+
+### Recruitment Milestone Advisor
+
+`src/game/progression/recruitmentAdvisor.ts`
+
+- Detects staffing-relevant progression beats by comparing the previous and next game state during the tick loop
+- Current triggers: first completed sale, active storage pressure, Spaceship Command II patrol readiness, and exploration unlock
+- Produces targeted recruitment directives consumed by `gameStore.tick`, which prepends milestone offers into the Fleet recruitment office without overwriting existing contracts
+- Keeps staffing pivots tied to actual game progression instead of a static manual refresh button
 
 ### `<NavTag>` — Content-Aware Navigation Chip
 
@@ -686,11 +718,21 @@ Props include: `value`, `options`, `onChange`, `placeholder`, plus search/filter
 
 Props: `entityType: EntityType`, `entityId: string`, `label: string`, `tooltip?: ReactNode`
 
-- On click: calls `useUiStore.getState().navigate(PANEL_FOR_TYPE[entityType], { entityType, entityId })`
+- On click: calls `useUiStore.getState().navigate(PANEL_FOR_TYPE[entityType], { entityType, entityId })`, which now records the previous panel plus its view snapshot in UI history before switching panels
 - Routing table: `fleet/pilot/ship → 'fleet'`, `skill → 'skills'`, `resource → 'mining'`, `system/anomaly → 'system'`
 - If `tooltip` provided, wraps in `<GameTooltip content={tooltip}>` — enabling NavTags inside tooltips that have their own tooltip (n-level nesting)
 - Color by entity type: fleet=cyan, pilot/ship=violet, skill/resource=amber, system=`#ffe47a`, anomaly=rose
 - Styled with `.entity-tag` CSS base class + per-type color overrides
+
+### UI History + Breadcrumbs
+
+`src/stores/uiStore.ts`, `src/ui/layouts/GameLayout.tsx`
+
+- The UI layer now keeps a bounded back stack of navigation entries rather than only the current panel ID
+- Each history entry stores panel ID, focus target, and a snapshot of the panel's current UI state (tab, selection, expanded row, viewed system, and similar high-value context)
+- `GameLayout` renders a compact breadcrumb row plus a Back button immediately under the data bar
+- Breadcrumb restoration is context-aware: returning to Skills, Fleet, Market, System, Manufacturing, or Star Map restores the tab/selection state that was active when the user left that page
+- This history is intentionally UI-only and session-scoped; it does not write into save data or alter simulation state
 
 ### Focus Handling in Panels
 

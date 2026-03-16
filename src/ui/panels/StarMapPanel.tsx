@@ -13,6 +13,9 @@
 import { useState, useRef, useCallback, useEffect, useMemo, forwardRef, useImperativeHandle } from 'react';
 import { useGameStore } from '@/stores/gameStore';
 import { getAliveNpcGroupsInSystem } from '@/game/systems/combat/combat.logic';
+import { GameDropdown, type DropdownOption } from '@/ui/components/GameDropdown';
+import { NavTag } from '@/ui/components/NavTag';
+import { useUiStore } from '@/stores/uiStore';
 import {
   generateGalaxy, getSystemById, systemDistance,
   SECTOR_GRID_SIZE, sectorId, systemSector, buildSectors,
@@ -24,7 +27,6 @@ import { HULL_DEFINITIONS } from '@/game/systems/fleet/fleet.config';
 import { FACTION_DEFINITIONS } from '@/game/systems/factions/faction.config';
 import { getLocalPrice } from '@/game/systems/market/market.logic';
 import { RESOURCE_REGISTRY } from '@/game/resources/resourceRegistry';
-import { GameDropdown, type DropdownOption } from '@/ui/components/GameDropdown';
 import type { StarSystem, GalacticSector, WarpState } from '@/types/galaxy.types';
 import type { StarType, SystemSecurity } from '@/types/galaxy.types';
 import type { ShipInstance, FleetActivity, PlayerFleet } from '@/types/game.types';
@@ -2087,12 +2089,15 @@ function StarMapPanelInner() {
     [seed, galaxy.currentSystemId],
   );
 
-  const [selectedId,   setSelectedId]   = useState<string | null>(null);
+  const savedPanelState = useUiStore(s => s.panelStates.starmap);
+  const setPanelState = useUiStore(s => s.setPanelState);
+
+  const [selectedId,   setSelectedId]   = useState<string | null>(() => savedPanelState.selectedId ?? null);
   const [zSlice,       setZSlice]       = useState(galaxy.galacticSliceZ ?? 0.5);
   const [searchQuery,  setSearchQuery]  = useState('');
   const [showFilters,  setShowFilters]  = useState(true);
   const [showRight,    setShowRight]    = useState(true);
-  const [rightTab,    setRightTab]    = useState<'intel' | 'route'>('intel');
+  const [rightTab,    setRightTab]    = useState<'intel' | 'route'>(() => savedPanelState.rightTab ?? 'intel');
   const [filters, setFilters] = useState<MapFilters>({
     highsec: true, lowsec: true, nullsec: true,
     showLabels: true,
@@ -2110,6 +2115,19 @@ function StarMapPanelInner() {
   const [overlay,        setOverlay]        = useState<OverlayMode>('default');
   const [hoverPreview,   setHoverPreview]   = useState<HoverPreview | null>(null);
   const gridRef = useRef<GalaxyGridHandle>(null);
+
+  useEffect(() => {
+    if (savedPanelState.selectedId !== undefined && savedPanelState.selectedId !== selectedId) {
+      setSelectedId(savedPanelState.selectedId ?? null);
+    }
+    if (savedPanelState.rightTab && savedPanelState.rightTab !== rightTab) {
+      setRightTab(savedPanelState.rightTab);
+    }
+  }, [savedPanelState.selectedId, savedPanelState.rightTab]);
+
+  useEffect(() => {
+    setPanelState('starmap', { selectedId, rightTab });
+  }, [selectedId, rightTab, setPanelState]);
 
   // Warp ticker
   const warp    = galaxy.warp;

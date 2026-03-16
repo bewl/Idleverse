@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useGameStore } from '@/stores/gameStore';
 import { getSystemById } from '@/game/galaxy/galaxy.gen';
 import { MANUFACTURING_RECIPES, RECIPE_ORDER, BLUEPRINT_DEFINITIONS } from '@/game/systems/manufacturing/manufacturing.config';
@@ -13,7 +13,9 @@ import {
 import { StatTooltip } from '@/ui/tooltip/StatTooltip';
 import { NavTag } from '@/ui/components/NavTag';
 import { GameDropdown, type DropdownOption } from '@/ui/components/GameDropdown';
+import { PanelInfoSection } from '@/ui/components/PanelInfoSection';
 import { SystemUnlockCard } from '@/ui/components/SystemUnlockCard';
+import { useUiStore } from '@/stores/uiStore';
 import type { Blueprint, ResearchJob, CopyJob } from '@/types/game.types';
 
 const QTY_PRESETS = [1, 5, 10, 25] as const;
@@ -886,8 +888,29 @@ function BlueprintsTab() {
 
 export function ManufacturingPanel() {
   const state           = useGameStore(s => s.state);
-  const [tab, setTab]   = useState<'jobs' | 'blueprints'>('jobs');
+  const savedPanelState = useUiStore(s => s.panelStates.manufacturing);
+  const setPanelState = useUiStore(s => s.setPanelState);
+  const [tab, setTab]   = useState<'jobs' | 'blueprints'>(() => savedPanelState.tab ?? 'jobs');
   const hasManufacturing = state.unlocks['system-manufacturing'];
+  const focusTarget = useUiStore(s => s.focusTarget);
+  const clearFocus = useUiStore(s => s.clearFocus);
+
+  useEffect(() => {
+    if (!focusTarget?.panelSection) return;
+    if (focusTarget.panelSection !== 'jobs' && focusTarget.panelSection !== 'blueprints') return;
+    setTab(focusTarget.panelSection);
+    clearFocus();
+  }, [focusTarget, clearFocus]);
+
+  useEffect(() => {
+    if (savedPanelState.tab && savedPanelState.tab !== tab) {
+      setTab(savedPanelState.tab);
+    }
+  }, [savedPanelState.tab]);
+
+  useEffect(() => {
+    setPanelState('manufacturing', { tab });
+  }, [tab, setPanelState]);
 
   if (!hasManufacturing) {
     return (
@@ -915,12 +938,22 @@ export function ManufacturingPanel() {
       {/* Header */}
       <div>
         <h2 className="panel-header">?? Manufacturing Complex</h2>
-        <p className="text-slate-500 text-xs">
-          Queue production jobs, manage blueprints, and research T2 technology.
-        </p>
       </div>
 
-      <ManufacturingHqBanner />
+      <PanelInfoSection
+        sectionId="manufacturing-context"
+        title="Facility Context"
+        subtitle="Hide static production notes when you want the queue and blueprint controls immediately visible."
+        accentColor="#fbbf24"
+        defaultCollapsed
+      >
+        <div className="flex flex-col gap-3">
+          <p className="text-slate-500 text-xs">
+            Queue production jobs, manage blueprints, and research T2 technology.
+          </p>
+          <ManufacturingHqBanner />
+        </div>
+      </PanelInfoSection>
 
       {/* Tab bar */}
       <div className="flex gap-1 border-b border-slate-800/60 pb-1">

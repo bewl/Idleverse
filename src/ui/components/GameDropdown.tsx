@@ -85,12 +85,18 @@ function DefaultValue({ option, placeholder }: { option: DropdownOption | null; 
     return <span style={{ color: '#64748b' }}>{placeholder}</span>;
   }
 
+  const secondaryText = option.description && option.meta
+    ? `${option.description} · ${option.meta}`
+    : option.description ?? option.meta ?? null;
+
   return (
-    <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', minWidth: 0 }}>
-      <span style={{ color: '#e2e8f0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }}>{option.label}</span>
-      {(option.description || option.meta) && (
-        <span style={{ color: '#64748b', fontSize: 10, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }}>
-          {option.description ?? option.meta}
+    <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, width: '100%' }}>
+      <span style={{ color: '#e2e8f0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0, flex: 1 }}>
+        {option.label}
+      </span>
+      {secondaryText && (
+        <span style={{ color: '#64748b', fontSize: 9, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0, flexShrink: 1, maxWidth: '45%' }}>
+          {secondaryText}
         </span>
       )}
     </span>
@@ -99,20 +105,22 @@ function DefaultValue({ option, placeholder }: { option: DropdownOption | null; 
 
 function DefaultOption({ option, selected, active }: { option: DropdownOption; selected: boolean; active: boolean }) {
   const toneColor = getToneColor(option.tone);
+  const secondaryText = option.description && option.meta
+    ? `${option.description} · ${option.meta}`
+    : option.description ?? option.meta ?? null;
 
   return (
     <div style={{
       display: 'flex',
-      alignItems: 'flex-start',
-      gap: 8,
+      alignItems: 'center',
+      gap: 7,
       width: '100%',
       minWidth: 0,
     }}>
       <span style={{
-        width: 6,
-        height: 6,
+        width: 5,
+        height: 5,
         borderRadius: '50%',
-        marginTop: 6,
         flexShrink: 0,
         background: selected ? toneColor : active ? `${toneColor}bb` : '#334155',
         boxShadow: selected ? `0 0 10px ${toneColor}55` : 'none',
@@ -120,23 +128,24 @@ function DefaultOption({ option, selected, active }: { option: DropdownOption; s
 
       {option.icon && <span style={{ flexShrink: 0, color: toneColor }}>{option.icon}</span>}
 
-      <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, flex: 1 }}>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-          <span style={{ color: selected ? '#f8fafc' : '#cbd5e1', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+      <span style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0, flex: 1 }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0, flex: 1 }}>
+          <span style={{ color: selected ? '#f8fafc' : '#cbd5e1', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>
             {option.label}
           </span>
           {option.badges && option.badges.length > 0 && (
-            <span style={{ display: 'flex', gap: 4, flexWrap: 'wrap', minWidth: 0 }}>
+            <span style={{ display: 'flex', gap: 4, flexWrap: 'nowrap', minWidth: 0, flexShrink: 1, overflow: 'hidden' }}>
               {option.badges.slice(0, 3).map((badge, index) => (
                 <span key={`${badge.label}-${index}`} style={{
-                  fontSize: 8,
-                  padding: '1px 5px',
+                  fontSize: 7,
+                  padding: '1px 4px',
                   borderRadius: 999,
                   color: badge.color ?? '#94a3b8',
                   border: `1px solid ${(badge.color ?? '#94a3b8')}33`,
                   background: `${badge.color ?? '#94a3b8'}14`,
                   letterSpacing: '0.06em',
                   textTransform: 'uppercase',
+                  whiteSpace: 'nowrap',
                 }}>
                   {badge.label}
                 </span>
@@ -144,14 +153,9 @@ function DefaultOption({ option, selected, active }: { option: DropdownOption; s
             </span>
           )}
         </span>
-        {(option.description || option.meta) && (
-          <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, minWidth: 0 }}>
-            <span style={{ color: '#64748b', fontSize: 10, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {option.description ?? option.meta}
-            </span>
-            {option.meta && option.description && (
-              <span style={{ color: '#475569', fontSize: 10, fontFamily: 'monospace', flexShrink: 0 }}>{option.meta}</span>
-            )}
+        {secondaryText && (
+          <span style={{ color: '#64748b', fontSize: 9, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0, flexShrink: 1, maxWidth: '42%' }}>
+            {secondaryText}
           </span>
         )}
       </span>
@@ -344,8 +348,11 @@ export function GameDropdown({
   }, []);
 
   const toneColor = getToneColor(selectedOption?.tone ?? triggerTone);
-  const triggerPadding = size === 'compact' ? '7px 9px' : '9px 11px';
+  const triggerPadding = size === 'compact' ? '0 9px' : '0 11px';
   const triggerFontSize = size === 'compact' ? 10 : 11;
+  const triggerMinHeight = size === 'compact' ? 28 : 34;
+  const optionPadding = size === 'compact' ? '5px 8px' : '6px 9px';
+  const optionMinHeight = size === 'compact' ? 28 : 32;
   const hasDetailPane = !!renderDetail;
   const contentDirection = detailPlacement === 'bottom' ? 'column' : 'row';
 
@@ -363,17 +370,20 @@ export function GameDropdown({
           justifyContent: 'space-between',
           gap: 10,
           padding: triggerPadding,
+          minHeight: triggerMinHeight,
           borderRadius: 8,
           border: `1px solid ${open ? `${toneColor}55` : 'rgba(51,65,85,0.65)'}`,
           background: open ? 'rgba(8,51,68,0.24)' : 'rgba(15,23,42,0.72)',
           color: '#cbd5e1',
           fontFamily: 'JetBrains Mono, Fira Code, Consolas, monospace',
           fontSize: triggerFontSize,
+          lineHeight: 1.1,
+          boxSizing: 'border-box',
           textAlign: 'left',
           boxShadow: open ? `0 0 0 1px ${toneColor}14, 0 0 16px ${toneColor}18` : 'none',
+          ...buttonStyle,
           opacity: disabled ? 0.45 : 1,
           cursor: disabled ? 'not-allowed' : 'pointer',
-          ...buttonStyle,
         }}
       >
         <span style={{ minWidth: 0, flex: 1 }}>
@@ -405,12 +415,13 @@ export function GameDropdown({
                 style={{
                   width: '100%',
                   boxSizing: 'border-box',
-                  padding: size === 'compact' ? '7px 9px' : '8px 10px',
+                  padding: size === 'compact' ? '6px 8px' : '7px 9px',
                   borderRadius: 7,
                   border: '1px solid rgba(51,65,85,0.7)',
                   background: 'rgba(15,23,42,0.82)',
                   color: '#e2e8f0',
-                  fontSize: 11,
+                  fontSize: size === 'compact' ? 10 : 11,
+                  lineHeight: 1.1,
                   outline: 'none',
                 }}
               />
@@ -474,9 +485,12 @@ export function GameDropdown({
                     width: '100%',
                     display: 'flex',
                     flexDirection: 'column',
+                    justifyContent: 'center',
                     alignItems: 'flex-start',
-                    gap: 2,
-                    padding: size === 'compact' ? '8px 9px' : '9px 10px',
+                    gap: 1,
+                    padding: optionPadding,
+                    minHeight: optionMinHeight,
+                    boxSizing: 'border-box',
                     borderRadius: 8,
                     border: '1px solid transparent',
                     background: hoveredValue === emptyEntryValue ? 'rgba(148,163,184,0.10)' : 'transparent',
@@ -505,7 +519,9 @@ export function GameDropdown({
                     onClick={() => !option.disabled && selectValue(option.value)}
                     style={{
                       width: '100%',
-                      padding: size === 'compact' ? '8px 9px' : '9px 10px',
+                      padding: optionPadding,
+                      minHeight: optionMinHeight,
+                      boxSizing: 'border-box',
                       borderRadius: 8,
                       border: selected ? `1px solid ${getToneColor(option.tone)}44` : '1px solid transparent',
                       background: selected
@@ -514,6 +530,8 @@ export function GameDropdown({
                           ? 'rgba(148,163,184,0.10)'
                           : 'transparent',
                       color: option.disabled ? '#475569' : '#cbd5e1',
+                      fontSize: size === 'compact' ? 10 : 11,
+                      lineHeight: 1.1,
                       textAlign: 'left',
                       opacity: option.disabled ? 0.5 : 1,
                       cursor: option.disabled ? 'not-allowed' : 'pointer',

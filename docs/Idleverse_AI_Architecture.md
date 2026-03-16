@@ -178,6 +178,9 @@ game/systems/mining/
 #### `game/progression`
 Unlocks, milestones, research, and account progression rules.
 
+This layer now also owns state-derived progression advisory helpers. Shared recommendation logic such as specialization-lane ranking and prerequisite-aware training ETA calculation should live here so Overview, Skills, and locked-system previews do not drift into conflicting progression advice.
+Recruitment timing and milestone staffing advice also belong here when they are driven by progression beats rather than by a raw UI action.
+
 #### `game/automation`
 Automation rules, worker assignment, AI behavior, clone slots, scheduling logic.
 
@@ -236,6 +239,8 @@ full Overview cards.
 One file per top-level panel. No game simulation logic lives here — panels read from stores
 and call store actions only.
 
+`OverviewPanel.tsx` is expected to separate operational triage from strategic guidance rather than stacking every card into one scroll. The default `Operations` subview should answer what needs attention now, while the `Guidance` subview holds opening-loop explanation, branch advice, and progression framing. Early-game guidance should remain state-derived and action-oriented: explain what the starter loop is currently doing, surface the nearest unlocks with truthful prerequisite-aware ETAs, and route the player directly to the panel or skill that resolves the current blocker.
+
 ## UI State Model
 
 UI-only state (navigation, focus, dev time scale) is kept in a **separate Zustand store**
@@ -248,21 +253,52 @@ interface UiStore {
   activePanel: PanelId;
   focusTarget: FocusTarget | null;
   devTimeScale: number;           // DEV only
+  collapsedInfoSections: Record<string, boolean>;
+  dismissedProgressPrompts: Record<string, boolean>;
+  panelStates: PanelStateMap;
+  navigationHistory: NavigationHistoryEntry[];
 
   navigate(panelId: PanelId, focus?: FocusTarget): void;
+  goBack(): void;
+  restoreHistory(historyId: string): void;
   clearFocus(): void;
   setDevTimeScale(scale: number): void;
+  setInfoSectionCollapsed(sectionId: string, collapsed: boolean): void;
+  toggleInfoSection(sectionId: string): void;
+  dismissProgressPrompt(promptId: string): void;
+  restoreProgressPrompt(promptId: string): void;
+  setPanelState(panelId: PanelId, nextState: Partial<PanelStateMap[PanelId]>): void;
 }
 
 type PanelId = 'overview' | 'skills' | 'fleet' | 'starmap' | 'system'
              | 'mining' | 'manufacturing' | 'reprocessing' | 'market';
 
-type EntityType = 'fleet' | 'pilot' | 'ship' | 'skill' | 'resource' | 'system' | 'anomaly';
+type EntityType = 'fleet' | 'pilot' | 'ship' | 'wing' | 'skill' | 'resource' | 'system' | 'anomaly' | 'panel';
+
+type FocusTarget = {
+  entityType: EntityType;
+  entityId: string;
+  panelSection?: string;
+  parentEntityId?: string;
+};
+
+`collapsedInfoSections` stores panel-level progressive-disclosure preferences for static guide/context blocks.
+Use `PanelInfoSection.tsx` for any non-interactive explanatory content that should be hideable to keep controls near the top of the panel.
+
+`dismissedProgressPrompts` stores dismissible onboarding and progression callouts separately from panel info disclosure. Use it for milestone-style guidance that is derived from live game state but should be closable once the player understands the point.
+
+`panelStates` stores restorable per-panel view context such as active tabs, current selections, and intra-panel modes. Use it for UI state that should come back when the player returns through breadcrumbs or entity-tag navigation, but should still remain outside persistent simulation state.
+
+`navigationHistory` stores the UI-only back stack. Each history entry captures the previous panel, focus target, and the leaving panel's snapshot from `panelStates`, allowing a breadcrumb or Back action to restore the view the player actually left instead of only reopening a panel shell.
+
+`focusTarget` is section-aware: panel navigation can land on a page, switch to the correct tab/section, and optionally expand a nested entity such as a specific fleet wing.
 type FocusTarget = { entityType: EntityType; entityId: string };
 ```
 
 **Rule:** never put UI-only transient state (active tab, open/closed panel, highlight state)
 into `gameStore`. `gameStore` is for persistent game simulation state only.
+
+`GameLayout.tsx` now owns a compact breadcrumb row and Back control driven entirely by `useUiStore`. Navigation initiated from sidebar buttons, mobile nav, and `NavTag` chips all feeds the same history stack.
 
 ## Tooltip System
 
@@ -327,6 +363,8 @@ export provides composable primitives for building layouts:
   - Mouse-first interaction model: open from the trigger, inspect options by hover, select by click, dismiss by outside click
   - Viewport-clamped positioning based on trigger geometry, with width anchored to trigger or an explicit menu width
   - Optional split detail pane for dense pickers such as fleet fittings and blueprint selection, so option scanning and option inspection stay in the same popup
+  - Trigger height is normalized by size (`compact` vs `default`) so dropdown controls keep a consistent vertical rhythm across panels even when option metadata differs
+  - Default option rows are compressed into a denser single-row-biased layout so more items remain visible in the menu at once while keeping tones, badges, and metadata styling
 
   ### Content Model
 

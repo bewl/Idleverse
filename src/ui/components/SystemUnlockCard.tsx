@@ -1,32 +1,13 @@
 import { NavTag } from '@/ui/components/NavTag';
 import { useGameStore } from '@/stores/gameStore';
 import { useUiStore, type PanelId } from '@/stores/uiStore';
+import { getTrainingEtaToLevel } from '@/game/progression/specializationAdvisor';
 import { SKILL_DEFINITIONS } from '@/game/systems/skills/skills.config';
 import { formatTrainingEta } from '@/game/systems/skills/skills.logic';
-import { skillTrainingSeconds } from '@/game/balance/constants';
 
 import type { GameState } from '@/types/game.types';
 
 const ROMAN = ['0', 'I', 'II', 'III', 'IV', 'V'] as const;
-
-export function getTrainingEtaToLevel(state: GameState, skillId: string, targetLevel: number): number {
-  const def = SKILL_DEFINITIONS[skillId];
-  if (!def) return 0;
-
-  const currentLevel = state.systems.skills.levels[skillId] ?? 0;
-  if (currentLevel >= targetLevel) return 0;
-
-  let total = 0;
-  for (let level = currentLevel + 1; level <= targetLevel; level += 1) {
-    total += skillTrainingSeconds(def.rank, level);
-  }
-
-  if (state.systems.skills.activeSkillId === skillId) {
-    total = Math.max(0, total - state.systems.skills.activeProgress);
-  }
-
-  return total;
-}
 
 interface SystemUnlockCardProps {
   icon: string;

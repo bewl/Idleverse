@@ -1187,11 +1187,13 @@ function SystemPanelInner() {
 
   const focusTarget = useUiStore(s => s.focusTarget);
   const clearFocus  = useUiStore(s => s.clearFocus);
+  const savedPanelState = useUiStore(s => s.panelStates.system);
+  const setPanelState = useUiStore(s => s.setPanelState);
 
   // Ref to the orrery wrapper so we can compute tooltip position on focus navigation
   const orreryWrapRef = useRef<HTMLDivElement>(null);
 
-  const [viewingSystemId, setViewingSystemId] = useState<string>(galaxy.currentSystemId);
+  const [viewingSystemId, setViewingSystemId] = useState<string>(() => savedPanelState.viewingSystemId ?? galaxy.currentSystemId);
 
   // Fleet tooltip state (declared early so focusTarget effect can pin)
   const [hovFleetId, setHovFleetId] = useState<string | null>(null);
@@ -1245,8 +1247,24 @@ function SystemPanelInner() {
   );
   const isBrowsing = viewingSystemId !== galaxy.currentSystemId;
 
-  const [selectedBodyId, setSelectedBodyId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'orrery' | 'anomalies'>('orrery');
+  const [selectedBodyId, setSelectedBodyId] = useState<string | null>(() => savedPanelState.selectedBodyId ?? null);
+  const [activeTab, setActiveTab] = useState<'orrery' | 'anomalies'>(() => savedPanelState.activeTab ?? 'orrery');
+
+  useEffect(() => {
+    if (savedPanelState.viewingSystemId && savedPanelState.viewingSystemId !== viewingSystemId) {
+      setViewingSystemId(savedPanelState.viewingSystemId);
+    }
+    if (savedPanelState.selectedBodyId !== undefined && savedPanelState.selectedBodyId !== selectedBodyId) {
+      setSelectedBodyId(savedPanelState.selectedBodyId ?? null);
+    }
+    if (savedPanelState.activeTab && savedPanelState.activeTab !== activeTab) {
+      setActiveTab(savedPanelState.activeTab);
+    }
+  }, [savedPanelState.viewingSystemId, savedPanelState.selectedBodyId, savedPanelState.activeTab]);
+
+  useEffect(() => {
+    setPanelState('system', { viewingSystemId, selectedBodyId, activeTab });
+  }, [viewingSystemId, selectedBodyId, activeTab, setPanelState]);
 
   const selectedBody = useMemo(
     () => system.bodies.find(b => b.id === selectedBodyId) ?? null,

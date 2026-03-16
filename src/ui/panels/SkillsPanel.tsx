@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useGameStore } from '@/stores/gameStore';
 import { useUiStore, type PanelId } from '@/stores/uiStore';
+import { buildSpecializationAdvice, getTrainingEtaToLevel } from '@/game/progression/specializationAdvisor';
 import { SKILL_DEFINITIONS, SKILL_CATEGORIES, SKILL_CATEGORY_LABELS, SKILL_CATEGORY_ICONS } from '@/game/systems/skills/skills.config';
 import {
   canTrainSkill,
@@ -9,11 +10,11 @@ import {
   trainingSecondsForNextLevel,
 } from '@/game/systems/skills/skills.logic';
 import { skillTrainingSeconds } from '@/game/balance/constants';
-import type { SkillCategory } from '@/types/game.types';
+import type { SkillCategory, SkillQueueEntry } from '@/types/game.types';
 import { StarfieldBackground } from '@/ui/effects/StarfieldBackground';
 import { StatTooltip } from '@/ui/tooltip/StatTooltip';
 import { NavTag } from '@/ui/components/NavTag';
-import { getTrainingEtaToLevel } from '@/ui/components/SystemUnlockCard';
+import { PanelInfoSection } from '@/ui/components/PanelInfoSection';
 
 // ─── Design tokens ─────────────────────────────────────────────────────────
 
@@ -155,6 +156,15 @@ function totalQueueEta(
   return total;
 }
 
+function visibleQueuedSkills(
+  queue: SkillQueueEntry[],
+  activeSkillId: string | null,
+) {
+  return activeSkillId && queue[0]?.skillId === activeSkillId
+    ? queue.slice(1)
+    : queue;
+}
+
 function unlockLabel(unlockKey: string) {
   return UNLOCK_LABELS[unlockKey] ?? unlockKey.replace(/-/g, ' ');
 }
@@ -199,17 +209,44 @@ function skillOutcomeSummary(skillId: string): string {
 function PathGuideCard() {
   const state = useGameStore(s => s.state);
   const navigate = useUiStore(s => s.navigate);
+  const advisoryLanes = buildSpecializationAdvice(state).slice(0, 2);
 
   return (
-    <div
-      className="shrink-0 mx-4 mb-3 rounded-xl p-3 flex flex-col gap-3"
-      style={{ background: 'rgba(3,8,20,0.68)', border: '1px solid rgba(255,255,255,0.06)' }}
+    <PanelInfoSection
+      sectionId="skills-specialization-guide"
+      title="Specialization Guide"
+      subtitle="Hide the long-form path framing when you want the queue and train controls closer to the top."
+      accentColor="#22d3ee"
+      defaultCollapsed
+      className="shrink-0 mx-4 mb-3"
     >
-      <div>
-        <div className="text-[10px] uppercase tracking-widest text-cyan-400 font-bold">Specialization Guide</div>
-        <p className="text-slate-400 text-xs mt-1">Use this as a map of consequences, not a fixed order. Every path stays valid if you decide to pivot later.</p>
-      </div>
-      <div className="grid grid-cols-1 xl:grid-cols-5 gap-2">
+      <div className="flex flex-col gap-3">
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-2">
+          {advisoryLanes.map(lane => (
+            <button
+              key={lane.id}
+              onClick={() => navigate(lane.panelId, { entityType: 'skill', entityId: lane.skillId })}
+              className="rounded-lg border px-3 py-3 text-left transition-colors hover:bg-white/[0.03]"
+              style={{ background: 'rgba(255,255,255,0.03)', borderColor: `${lane.accentColor}35` }}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <div className="text-[10px] uppercase tracking-widest font-bold" style={{ color: lane.accentColor }}>
+                    {lane.icon} {lane.title}
+                  </div>
+                  <div className="text-[11px] text-white font-semibold mt-1">{unlockLabel(lane.skillId)} {TIER_CHIP[lane.targetLevel]}</div>
+                </div>
+                <span className={`text-[8px] px-1.5 py-0.5 rounded border ${lane.tone === 'recommended' ? 'text-emerald-300 border-emerald-500/30 bg-emerald-900/15' : 'text-cyan-300 border-cyan-500/30 bg-cyan-950/20'}`}>
+                  {lane.tone === 'recommended' ? 'recommended' : 'strong fit'}
+                </span>
+              </div>
+              <div className="text-[10px] text-slate-400 mt-2 leading-relaxed">{lane.reasons[0] ?? lane.summary}</div>
+              <div className="text-[10px] mt-2" style={{ color: lane.accentColor }}>{lane.payoff}</div>
+            </button>
+          ))}
+        </div>
+
+        <div className="grid grid-cols-1 xl:grid-cols-5 gap-2">
         {SKILL_PATH_CARDS.map(card => {
           const eta = getTrainingEtaToLevel(state, card.skillId, card.targetLevel);
           const isReady = eta === 0;
@@ -236,8 +273,9 @@ function PathGuideCard() {
             </button>
           );
         })}
+        </div>
       </div>
-    </div>
+    </PanelInfoSection>
   );
 }
 
@@ -308,14 +346,7 @@ function ActiveTrainingCard() {
   }, []);
 
   if (!skillsState.activeSkillId) {
-    return (
-      <div
-        className="rounded-lg border border-dashed border-slate-700/50 p-4 text-center"
-        style={{ background: 'rgba(3,8,20,0.5)' }}
-      >
-        <p className="text-slate-500 text-sm">No skill training. Add skills to the queue below.</p>
-      </div>
-    );
+    return null;
   }
 
   const def      = SKILL_DEFINITIONS[skillsState.activeSkillId];
@@ -416,17 +447,10 @@ function TrainingQueue() {
   const { queue, levels, activeSkillId, activeProgress } = skillsState;
   const totalEta = totalQueueEta(levels, queue, activeSkillId, activeProgress);
 
-  // The active skill occupies queue[0] — hide it here since it's shown in ActiveTrainingCard
-  const displayQueue = activeSkillId && queue[0]?.skillId === activeSkillId
-    ? queue.slice(1)
-    : queue;
+  const displayQueue = visibleQueuedSkills(queue, activeSkillId);
 
   if (displayQueue.length === 0) {
-    return (
-      <div className="text-slate-600 text-xs text-center py-3">
-        Queue is empty. Click a skill to add it.
-      </div>
-    );
+    return null;
   }
 
   return (
@@ -470,6 +494,39 @@ function TrainingQueue() {
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+function TrainingIdleCard({ hasActiveTraining }: { hasActiveTraining: boolean }) {
+  return (
+    <div
+      className="shrink-0 mx-4 mb-3 rounded-xl px-4 py-3"
+      style={{ background: 'rgba(3,8,20,0.6)', border: '1px solid rgba(255,255,255,0.06)' }}
+    >
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${hasActiveTraining ? 'bg-amber-400/60' : 'bg-slate-600'}`} />
+            <span className="text-[10px] uppercase tracking-widest font-bold text-slate-400">
+              {hasActiveTraining ? 'Queue staging' : 'Training idle'}
+            </span>
+          </div>
+          <div className="text-[11px] text-slate-200 font-semibold mt-1">
+            {hasActiveTraining
+              ? 'No follow-up skills queued after the active level.'
+              : 'No skill training active and the queue is empty.'}
+          </div>
+          <div className="text-[10px] text-slate-500 mt-1 leading-relaxed">
+            {hasActiveTraining
+              ? 'Select another skill below to extend training time and keep offline progress rolling.'
+              : 'Pick a skill below to start training immediately, then queue additional levels or adjacent skills.'}
+          </div>
+        </div>
+        <div className="text-[10px] uppercase tracking-widest text-slate-600 shrink-0">
+          {hasActiveTraining ? '1 active · 0 queued' : '0 active · 0 queued'}
+        </div>
       </div>
     </div>
   );
@@ -782,11 +839,18 @@ function SkillDetail({ skillId }: { skillId: string }) {
 // ─── Main panel ────────────────────────────────────────────────────────────
 
 export function SkillsPanel() {
-  const [activeCategory, setActiveCategory] = useState<SkillCategory>('mining');
-  const [selectedSkillId, setSelectedSkillId] = useState<string | null>(
-    () => SKILL_CATEGORIES['mining']?.[0] ?? null
-  );
+  const savedPanelState = useUiStore(s => s.panelStates.skills);
+  const setPanelState = useUiStore(s => s.setPanelState);
+  const [activeCategory, setActiveCategory] = useState<SkillCategory>(() => {
+    const savedCategory = savedPanelState.activeCategory;
+    return (savedCategory && savedCategory in SKILL_CATEGORIES ? savedCategory as SkillCategory : 'mining');
+  });
+  const [selectedSkillId, setSelectedSkillId] = useState<string | null>(() => {
+    if (savedPanelState.selectedSkillId) return savedPanelState.selectedSkillId;
+    return SKILL_CATEGORIES['mining']?.[0] ?? null;
+  });
 
+  const skillsState = useGameStore(s => s.state.systems.skills);
   const focusTarget = useUiStore(s => s.focusTarget);
   const clearFocus  = useUiStore(s => s.clearFocus);
 
@@ -799,7 +863,24 @@ export function SkillsPanel() {
     clearFocus();
   }, [focusTarget, clearFocus]);
 
+  useEffect(() => {
+    if (savedPanelState.activeCategory && savedPanelState.activeCategory !== activeCategory && savedPanelState.activeCategory in SKILL_CATEGORIES) {
+      setActiveCategory(savedPanelState.activeCategory as SkillCategory);
+    }
+    if (savedPanelState.selectedSkillId !== undefined && savedPanelState.selectedSkillId !== selectedSkillId) {
+      setSelectedSkillId(savedPanelState.selectedSkillId ?? null);
+    }
+  }, [savedPanelState.activeCategory, savedPanelState.selectedSkillId]);
+
+  useEffect(() => {
+    setPanelState('skills', { activeCategory, selectedSkillId });
+  }, [activeCategory, selectedSkillId, setPanelState]);
+
   const categorySkills = SKILL_CATEGORIES[activeCategory] ?? [];
+  const displayQueue = visibleQueuedSkills(skillsState.queue, skillsState.activeSkillId);
+  const hasActiveTraining = Boolean(skillsState.activeSkillId);
+  const hasQueuedSkills = displayQueue.length > 0;
+  const showIdleTrainingCard = !hasQueuedSkills;
 
   return (
     <div
@@ -828,19 +909,25 @@ export function SkillsPanel() {
         </div>
 
         {/* ── Active training ──────────────────────────────────────────── */}
-        <div className="shrink-0 px-4 pb-3">
-          <ActiveTrainingCard />
-        </div>
+        {hasActiveTraining && (
+          <div className="shrink-0 px-4 pb-3">
+            <ActiveTrainingCard />
+          </div>
+        )}
 
         <PathGuideCard />
 
-        {/* ── Queue ────────────────────────────────────────────────────── */}
-        <div
-          className="shrink-0 mx-4 mb-3 rounded-xl p-3"
-          style={{ background: 'rgba(3,8,20,0.6)', border: '1px solid rgba(255,255,255,0.06)' }}
-        >
-          <TrainingQueue />
-        </div>
+        {/* ── Queue / idle state ──────────────────────────────────────── */}
+        {showIdleTrainingCard ? (
+          <TrainingIdleCard hasActiveTraining={hasActiveTraining} />
+        ) : (
+          <div
+            className="shrink-0 mx-4 mb-3 rounded-xl p-3"
+            style={{ background: 'rgba(3,8,20,0.6)', border: '1px solid rgba(255,255,255,0.06)' }}
+          >
+            <TrainingQueue />
+          </div>
+        )}
 
         {/* ── Skill browser ────────────────────────────────────────────── */}
         <div className="flex-1 flex flex-col lg:flex-row gap-3 px-4 pb-4 min-h-0">

@@ -163,6 +163,7 @@ export function createInitialState(): GameState {
           },
         },
         recruitmentOffers: [],
+        recruitmentMilestones: {},
         fleets: {
           'fleet-starter': {
             id: 'fleet-starter',

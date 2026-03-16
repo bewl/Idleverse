@@ -65,6 +65,25 @@ const ROUTE_FILTER_EXPLANATIONS: Record<RouteSecurityFilter, string> = {
   'avoid-low': 'Strictest posture. Favors highsec-only chains when they exist.',
 };
 
+function getStorageTargetCopy(haulingWingCount: number) {
+  if (haulingWingCount <= 0) {
+    return {
+      label: 'Shared Storage',
+      detail: 'No hauling wing is configured, so mining output remains in the fleet\'s shared storage pool.',
+    };
+  }
+  if (haulingWingCount === 1) {
+    return {
+      label: 'Hauling Wing Storage',
+      detail: 'Mining output is currently routed into the fleet\'s single hauling wing cargo hold.',
+    };
+  }
+  return {
+    label: 'Hauling Network',
+    detail: `Mining output is distributed across ${haulingWingCount} hauling wings in the fleet storage network.`,
+  };
+}
+
 // ─── Role minibar ──────────────────────────────────────────────────────────
 
 function RoleMinibar({ ships }: { ships: ShipInstance[] }) {
@@ -109,6 +128,7 @@ function WingRow({
   onAssignShip,
   onSetEscort,
   onDispatch,
+  focused,
 }: {
   fleetId: string;
   fleet: PlayerFleet;
@@ -124,6 +144,7 @@ function WingRow({
   onAssignShip: (fleetId: string, shipId: string, wingId: string | null) => boolean;
   onSetEscort: (fleetId: string, wingId: string, escortWingId: string | null) => boolean;
   onDispatch: (fleetId: string, wingId: string) => boolean;
+  focused?: boolean;
 }) {
   const [expanded, setExpanded] = useState(wing.isDispatched);
   const [editingName, setEditingName] = useState(false);
@@ -132,6 +153,10 @@ function WingRow({
   useEffect(() => {
     setNameInput(wing.name);
   }, [wing.name]);
+
+  useEffect(() => {
+    if (focused) setExpanded(true);
+  }, [focused]);
 
   const wingShips = wing.shipIds.map(id => allShips[id]).filter(Boolean) as ShipInstance[];
   const wingPilots = wingShips
@@ -431,6 +456,7 @@ function FleetCard({
   isLast,
   onToggle,
   state,
+  focusedWingId,
 }: {
   fleetId: string;
   expanded: boolean;
@@ -438,6 +464,7 @@ function FleetCard({
   isLast: boolean;
   onToggle: () => void;
   state: ReturnType<typeof useGameStore.getState>['state'];
+  focusedWingId?: string | null;
 }) {
   const setShipRole     = useGameStore(s => s.setShipRole);
   const setDoctrine     = useGameStore(s => s.setFleetDoctrine);
@@ -515,6 +542,7 @@ function FleetCard({
     ? haulingWings.reduce((sum, wing) => sum + getWingCargoUsed(wing), 0) + Object.values(fleet.cargoHold).reduce((sum, qty) => sum + qty, 0)
     : getFleetStoredCargo(fleet);
   const cargoPct      = cargoCapacity > 0 ? Math.min(1, cargoUsed / cargoCapacity) : 0;
+  const storageTarget = getStorageTargetCopy(haulingWings.length);
   const hqSystemId    = state.systems.factions.homeStationSystemId;
   const canHaulNow    = haulingWings.length === 1
     ? !haulingWings[0].isDispatched && hqSystemId !== null && hqSystemId !== fleet.currentSystemId && cargoUsed > 0
@@ -640,13 +668,13 @@ function FleetCard({
           style={{ borderColor: fleetColor + '22' }}
           onClick={e => e.stopPropagation()}
         >
-          {/* Cargo hold */}
+          {/* Storage target */}
           {cargoCapacity > 0 && (
             <div className="flex flex-col gap-1.5">
               <div className="flex items-center justify-between">
-                <span className="text-[8px] uppercase tracking-widest text-slate-500">{haulingWings.length > 1 ? 'Hauling Network' : haulingWings.length === 1 ? 'Hauling Hold' : 'Cargo Hold'}</span>
+                <span className="text-[8px] uppercase tracking-widest text-slate-500">Storage Target</span>
                 <span className="text-[9px] font-mono text-slate-400">
-                  {Math.round(cargoUsed).toLocaleString()} / {Math.round(cargoCapacity).toLocaleString()} m³
+                  {storageTarget.label} · {Math.round(cargoUsed).toLocaleString()} / {Math.round(cargoCapacity).toLocaleString()} m³
                 </span>
               </div>
               <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
@@ -657,6 +685,7 @@ function FleetCard({
                   style={{ width: `${cargoPct * 100}%` }}
                 />
               </div>
+              <div className="text-[8px] text-slate-600">{storageTarget.detail}</div>
               {Object.entries(cargoTotals).filter(([, v]) => v > 0).length > 0 && (
                 <div className="flex flex-wrap gap-x-3 gap-y-0.5">
                   {Object.entries(cargoTotals)
@@ -798,6 +827,7 @@ function FleetCard({
                   onAssignShip={assignShipToWing}
                   onSetEscort={setWingEscort}
                   onDispatch={dispatchHaulingWingToHQ}
+                  focused={focusedWingId === wing.id}
                 />
               );
             })}
@@ -1296,7 +1326,7 @@ function FleetCard({
 
 // ─── Fleets tab ─────────────────────────────────────────────────────────────
 
-function FleetsTab({ state, focusId }: { state: ReturnType<typeof useGameStore.getState>['state']; focusId?: string | null }) {
+function FleetsTab({ state, focusId, focusWingId }: { state: ReturnType<typeof useGameStore.getState>['state']; focusId?: string | null; focusWingId?: string | null }) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -1327,6 +1357,7 @@ function FleetsTab({ state, focusId }: { state: ReturnType<typeof useGameStore.g
             isLast={idx === fleetIds.length - 1}
             onToggle={() => toggleExpand(id)}
             state={state}
+            focusedWingId={focusId === id ? focusWingId : null}
           />
         ))
       )}
@@ -2135,6 +2166,15 @@ function OperationsTab({ state }: { state: ReturnType<typeof useGameStore.getSta
           )}
         </div>
 
+        {offers.some(offer => offer.source === 'milestone') && (
+          <div className="rounded border border-cyan-500/20 bg-cyan-950/10 px-3 py-2">
+            <div className="text-[10px] font-semibold text-cyan-300">Priority contracts available</div>
+            <div className="text-[9px] text-slate-400 mt-0.5">
+              These candidates were posted automatically because your current progression state suggests a staffing bottleneck or a newly opened operational lane.
+            </div>
+          </div>
+        )}
+
         {offers.length === 0 && (
           <p className="text-[9px] text-slate-600">No candidates on file. Post recruitment contracts to find pilots.</p>
         )}
@@ -2154,8 +2194,16 @@ function OperationsTab({ state }: { state: ReturnType<typeof useGameStore.getSta
                     <span className={`text-[8px] px-1 rounded border ${FOCUS_COLOR[offer.trainingFocus]} border-current`}>
                       {FOCUS_LABEL[offer.trainingFocus]}
                     </span>
+                    {offer.sourceLabel && (
+                      <span className={`text-[8px] px-1 rounded border ${offer.source === 'milestone' ? 'text-cyan-300 border-cyan-500/30 bg-cyan-950/30' : 'text-slate-400 border-slate-700/40 bg-slate-900/30'}`}>
+                        {offer.sourceLabel}
+                      </span>
+                    )}
                   </div>
                   <p className="text-[9px] text-slate-500 mt-0.5">{offer.backstory}</p>
+                  {offer.recommendationReason && (
+                    <p className="text-[9px] text-cyan-300/80 mt-1 leading-relaxed">{offer.recommendationReason}</p>
+                  )}
                   {Object.keys(offer.previewSkills).length > 0 && (
                     <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1">
                       {Object.entries(offer.previewSkills).map(([sid, lv]) => (
@@ -2205,9 +2253,12 @@ function OperationsTab({ state }: { state: ReturnType<typeof useGameStore.getSta
 // ─── Main panel ────────────────────────────────────────────────────────────
 
 export function FleetPanel() {
-  const [activeTab, setActiveTab] = useState<Tab>('fleets');
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const savedPanelState = useUiStore(s => s.panelStates.fleet);
+  const setPanelState = useUiStore(s => s.setPanelState);
+  const [activeTab, setActiveTab] = useState<Tab>(() => savedPanelState.activeTab ?? 'fleets');
+  const [expandedId, setExpandedId] = useState<string | null>(() => savedPanelState.expandedId ?? null);
   const [focusFleetId, setFocusFleetId] = useState<string | null>(null);
+  const [focusWingId, setFocusWingId] = useState<string | null>(null);
   const state = useGameStore(s => s.state);
 
   const focusTarget = useUiStore(s => s.focusTarget);
@@ -2215,18 +2266,52 @@ export function FleetPanel() {
 
   useEffect(() => {
     if (!focusTarget) return;
-    if (focusTarget.entityType === 'fleet') {
+    const requestedTab = focusTarget.panelSection;
+    if (requestedTab === 'fleets' || requestedTab === 'pilots' || requestedTab === 'ships' || requestedTab === 'operations') {
+      setActiveTab(requestedTab);
+    }
+    if (focusTarget.entityType === 'wing') {
+      const ownerFleetId = focusTarget.parentEntityId
+        ?? Object.values(state.systems.fleet.fleets).find(fleet => (fleet.wings ?? []).some(wing => wing.id === focusTarget.entityId))?.id
+        ?? null;
+      if (!ownerFleetId) return;
       setActiveTab('fleets');
+      setFocusFleetId(ownerFleetId);
+      setFocusWingId(focusTarget.entityId);
+    } else if (focusTarget.entityType === 'fleet') {
+      setActiveTab(requestedTab === 'operations' ? 'operations' : 'fleets');
       setFocusFleetId(focusTarget.entityId);
+      setFocusWingId(null);
     } else if (focusTarget.entityType === 'pilot') {
       setActiveTab('pilots');
       setExpandedId(focusTarget.entityId);
+      setFocusFleetId(null);
+      setFocusWingId(null);
     } else if (focusTarget.entityType === 'ship') {
       setActiveTab('ships');
       setExpandedId(focusTarget.entityId);
+      setFocusFleetId(null);
+      setFocusWingId(null);
+    } else if (focusTarget.entityType === 'panel') {
+      if (!requestedTab) return;
+      setFocusFleetId(null);
+      setFocusWingId(null);
     } else { return; }
     clearFocus();
-  }, [focusTarget, clearFocus]);
+  }, [focusTarget, clearFocus, state.systems.fleet.fleets]);
+
+  useEffect(() => {
+    if (savedPanelState.activeTab && savedPanelState.activeTab !== activeTab) {
+      setActiveTab(savedPanelState.activeTab);
+    }
+    if (savedPanelState.expandedId !== undefined && savedPanelState.expandedId !== expandedId) {
+      setExpandedId(savedPanelState.expandedId ?? null);
+    }
+  }, [savedPanelState.activeTab, savedPanelState.expandedId]);
+
+  useEffect(() => {
+    setPanelState('fleet', { activeTab, expandedId });
+  }, [activeTab, expandedId, setPanelState]);
   const fleet = state.systems.fleet;
 
   const pilots = Object.values(fleet.pilots);
@@ -2277,7 +2362,7 @@ export function FleetPanel() {
 
       {/* Content */}
       <div className="relative z-10 flex-1 overflow-y-auto p-3 flex flex-col gap-2">
-        {activeTab === 'fleets' && <FleetsTab state={state} focusId={focusFleetId} />}
+        {activeTab === 'fleets' && <FleetsTab state={state} focusId={focusFleetId} focusWingId={focusWingId} />}
 
         {activeTab === 'pilots' && (
           <>
