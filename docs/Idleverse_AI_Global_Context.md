@@ -171,6 +171,8 @@ For detailed specs see `Idleverse_SYSTEM_BLUEPRINTS.md`. For the upcoming pipeli
 - Pilots (individual crew with skills, morale, training focus, skill queue)
 - Blueprint Research & T2 Manufacturing (research levels 0–10, BPC copies, T2 recipes)
 - Exploration & Anomaly Scanning (scan progress, 5 anomaly types, discovery feed)
+- Notifications & Inbox (save-backed event history, top-bar drawer, toast popups, deep links back to source panels)
+- First-Pass Tutorial Tour (save-scoped onboarding overlay, no replay after completion, hard-gated opening flow from Guidance through Trade/Market into starter-fleet travel, destination-system mining assignment, and Mining readout handoff)
 - Procedural Audio Cues (top-bar audio toggle + master volume, soft navigation/save/completion SFX, browser-safe lazy unlock)
 
 ### Planned Systems (see Design Plan)

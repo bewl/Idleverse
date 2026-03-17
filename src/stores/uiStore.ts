@@ -55,6 +55,7 @@ function persistDismissedProgressPrompts(next: Record<string, boolean>) {
 
 export type PanelId =
   | 'overview'
+  | 'inbox'
   | 'skills'
   | 'mining'
   | 'manufacturing'
@@ -66,6 +67,8 @@ export type PanelId =
 
 export type EntityType = 'fleet' | 'pilot' | 'ship' | 'wing' | 'skill' | 'resource' | 'system' | 'anomaly' | 'panel';
 
+export type InboxView = 'all' | 'unread' | 'alerts' | 'messages';
+
 export type FocusTarget = {
   entityType: EntityType;
   entityId: string;
@@ -76,6 +79,11 @@ export type FocusTarget = {
 export interface PanelStateMap {
   overview: {
     mode?: 'operations' | 'guidance';
+  };
+  inbox: {
+    activeView?: InboxView;
+    selectedNotificationId?: string | null;
+    showArchived?: boolean;
   };
   skills: {
     activeCategory?: string;
@@ -113,9 +121,19 @@ export interface NavigationHistoryEntry {
   panelState: PanelStateMap[PanelId];
 }
 
+export interface ActiveToastEntry {
+  notificationId: string;
+  expiresAt: number;
+}
+
 const DEFAULT_PANEL_STATES: PanelStateMap = {
   overview: {
     mode: 'operations',
+  },
+  inbox: {
+    activeView: 'all',
+    selectedNotificationId: null,
+    showArchived: false,
   },
   skills: {},
   mining: {},
@@ -166,6 +184,9 @@ interface UiStore {
   dismissedProgressPrompts: Record<string, boolean>;
   panelStates: PanelStateMap;
   navigationHistory: NavigationHistoryEntry[];
+  notificationDrawerOpen: boolean;
+  activeToasts: ActiveToastEntry[];
+  tutorialOverlayOpen: boolean;
   navigate(panelId: PanelId, focus?: FocusTarget): void;
   goBack(): void;
   restoreHistory(historyId: string): void;
@@ -175,6 +196,14 @@ interface UiStore {
   toggleInfoSection(sectionId: string): void;
   dismissProgressPrompt(promptId: string): void;
   restoreProgressPrompt(promptId: string): void;
+  openNotificationDrawer(): void;
+  closeNotificationDrawer(): void;
+  toggleNotificationDrawer(): void;
+  queueNotificationToasts(notificationIds: string[], durationMs?: number): void;
+  dismissNotificationToast(notificationId: string): void;
+  pruneNotificationToasts(now?: number): void;
+  openTutorialOverlay(): void;
+  closeTutorialOverlay(): void;
   setPanelState<K extends PanelId>(panelId: K, nextState: Partial<PanelStateMap[K]>): void;
 }
 
@@ -186,6 +215,9 @@ export const useUiStore = create<UiStore>((set) => ({
   dismissedProgressPrompts: loadDismissedProgressPrompts(),
   panelStates: DEFAULT_PANEL_STATES,
   navigationHistory: [],
+  notificationDrawerOpen: false,
+  activeToasts: [],
+  tutorialOverlayOpen: true,
   navigate: (panelId, focus) => set((state) => {
     const currentEntry = createHistoryEntry(
       state.activePanel,
@@ -255,6 +287,28 @@ export const useUiStore = create<UiStore>((set) => ({
     persistDismissedProgressPrompts(next);
     return { dismissedProgressPrompts: next };
   }),
+  openNotificationDrawer: () => set({ notificationDrawerOpen: true }),
+  closeNotificationDrawer: () => set({ notificationDrawerOpen: false }),
+  toggleNotificationDrawer: () => set((state) => ({ notificationDrawerOpen: !state.notificationDrawerOpen })),
+  queueNotificationToasts: (notificationIds, durationMs = 7000) => set((state) => {
+    const existingIds = new Set(state.activeToasts.map(entry => entry.notificationId));
+    const now = Date.now();
+    const nextEntries = notificationIds
+      .filter(notificationId => !existingIds.has(notificationId))
+      .map(notificationId => ({ notificationId, expiresAt: now + durationMs }));
+    if (nextEntries.length === 0) return state;
+    return {
+      activeToasts: [...state.activeToasts, ...nextEntries].slice(-4),
+    };
+  }),
+  dismissNotificationToast: (notificationId) => set((state) => ({
+    activeToasts: state.activeToasts.filter(entry => entry.notificationId !== notificationId),
+  })),
+  pruneNotificationToasts: (now = Date.now()) => set((state) => ({
+    activeToasts: state.activeToasts.filter(entry => entry.expiresAt > now),
+  })),
+  openTutorialOverlay: () => set({ tutorialOverlayOpen: true }),
+  closeTutorialOverlay: () => set({ tutorialOverlayOpen: false }),
   setPanelState: (panelId, nextState) => set((state) => ({
     panelStates: {
       ...state.panelStates,

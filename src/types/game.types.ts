@@ -231,6 +231,86 @@ export interface MarketState {
   lifetimeSold: Record<string, number>;
 }
 
+// ─── Notifications / Inbox ───────────────────────────────────────────────
+
+export type NotificationCategory =
+  | 'progression'
+  | 'industry'
+  | 'fleet'
+  | 'combat'
+  | 'exploration'
+  | 'economy'
+  | 'faction'
+  | 'system';
+
+export type NotificationKind = 'alert' | 'message' | 'update';
+
+export type NotificationSeverity = 'critical' | 'warning' | 'success' | 'info' | 'queued';
+
+export type NotificationTargetPanelId =
+  | 'overview'
+  | 'inbox'
+  | 'skills'
+  | 'mining'
+  | 'manufacturing'
+  | 'reprocessing'
+  | 'market'
+  | 'fleet'
+  | 'starmap'
+  | 'system';
+
+export type NotificationTargetEntityType = 'fleet' | 'pilot' | 'ship' | 'wing' | 'skill' | 'resource' | 'system' | 'anomaly' | 'panel';
+
+export interface NotificationFocusTarget {
+  panelId: NotificationTargetPanelId;
+  entityType: NotificationTargetEntityType;
+  entityId: string;
+  panelSection?: string;
+  parentEntityId?: string;
+}
+
+export interface NotificationEntry {
+  id: string;
+  category: NotificationCategory;
+  kind: NotificationKind;
+  severity: NotificationSeverity;
+  title: string;
+  body: string;
+  createdAt: number;
+  readAt: number | null;
+  archivedAt: number | null;
+  sourceSystem: string;
+  sourceKey?: string;
+  actionLabel?: string;
+  focusTarget?: NotificationFocusTarget;
+}
+
+export interface NotificationState {
+  entries: NotificationEntry[];
+}
+
+// ─── Tutorial / Onboarding ───────────────────────────────────────────────
+
+export type TutorialStepId =
+  | 'welcome-briefing'
+  | 'command-deck'
+  | 'queue-first-skill'
+  | 'complete-first-skill'
+  | 'first-sale'
+  | 'fleet-command-intro'
+  | 'starmap-dispatch-fleet'
+  | 'fleet-arrival-watch'
+  | 'system-assign-mining'
+  | 'mining-readout'
+  | 'guidance-handoff';
+
+export interface TutorialState {
+  currentStepId: TutorialStepId | null;
+  completedStepIds: TutorialStepId[];
+  skippedAt: number | null;
+  completedAt: number | null;
+}
+
 // ─── Trade Routes ────────────────────────────────────────────────────────────
 
 export interface TradeRoute {
@@ -547,6 +627,8 @@ export interface GameState {
   unlocks: Record<string, boolean>;
   /** Aggregated multipliers computed from skills + structures. */
   modifiers: Record<string, number>;
+  notifications: NotificationState;
+  tutorial: TutorialState;
   settings: GameSettings;
   galaxy: GalaxyState;
 }

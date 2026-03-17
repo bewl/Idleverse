@@ -91,10 +91,12 @@ src/
     core/           — tick runner, game loop
     galaxy/         — galaxy generation, system graph, NPC group seeding, warp timing helpers
     hooks/          — useResourceRates and other computed hooks
+    notifications/  — notification aggregation, inbox entry builders, toast policy
     offline/        — offline progress catch-up calculation
     persistence/    — save/load, migration, serialization
     prestige/       — stub (Phase 7)
     progression/    — unlock checks, milestone tracking
+    |               tutorialSequence.ts for save-backed onboarding step definitions
     resources/      — resourceRegistry.ts, formatters
     systems/
       combat/       — combat.logic.ts, combat.tick.ts
@@ -122,11 +124,12 @@ src/
     faction.types.ts — factions, FleetOrder timed-leg transit state
     combat.types.ts  — CombatOrder, NpcGroupDef, CombatLogEntry
   ui/
-    components/     — shared UI primitives (GameTooltip, GameDropdown, NavTag, SystemUnlockCard)
+    components/     — shared UI primitives (GameTooltip, GameDropdown, NavTag, SystemUnlockCard, NotificationCenter, TutorialOverlay)
     dev/            — DevPanel (cheat/debug panel)
     effects/        — StarField, StarfieldBackground
     layouts/        — GameLayout (nav + panel switcher)
     panels/
+      InboxPanel.tsx
       FleetPanel.tsx
       ManufacturingPanel.tsx
       MarketPanel.tsx
@@ -274,6 +277,9 @@ interface UiStore {
   dismissedProgressPrompts: Record<string, boolean>;
   panelStates: PanelStateMap;
   navigationHistory: NavigationHistoryEntry[];
+  notificationDrawerOpen: boolean;
+  activeToasts: ActiveToastEntry[];
+  tutorialOverlayOpen: boolean;
 
   navigate(panelId: PanelId, focus?: FocusTarget): void;
   goBack(): void;
@@ -284,10 +290,18 @@ interface UiStore {
   toggleInfoSection(sectionId: string): void;
   dismissProgressPrompt(promptId: string): void;
   restoreProgressPrompt(promptId: string): void;
+  openNotificationDrawer(): void;
+  closeNotificationDrawer(): void;
+  toggleNotificationDrawer(): void;
+  queueNotificationToasts(notificationIds: string[], durationMs?: number): void;
+  dismissNotificationToast(notificationId: string): void;
+  pruneNotificationToasts(now?: number): void;
+  openTutorialOverlay(): void;
+  closeTutorialOverlay(): void;
   setPanelState(panelId: PanelId, nextState: Partial<PanelStateMap[PanelId]>): void;
 }
 
-type PanelId = 'overview' | 'skills' | 'fleet' | 'starmap' | 'system'
+type PanelId = 'overview' | 'inbox' | 'skills' | 'fleet' | 'starmap' | 'system'
              | 'mining' | 'manufacturing' | 'reprocessing' | 'market';
 
 type EntityType = 'fleet' | 'pilot' | 'ship' | 'wing' | 'skill' | 'resource' | 'system' | 'anomaly' | 'panel';
@@ -305,6 +319,10 @@ Use `PanelInfoSection.tsx` for any non-interactive explanatory content that shou
 `dismissedProgressPrompts` stores dismissible onboarding and progression callouts separately from panel info disclosure. Use it for milestone-style guidance that is derived from live game state but should be closable once the player understands the point.
 
 `panelStates` stores restorable per-panel view context such as active tabs, current selections, and intra-panel modes. Use it for UI state that should come back when the player returns through breadcrumbs or entity-tag navigation, but should still remain outside persistent simulation state.
+
+The Inbox follows the same separation strictly: durable notification records live in save-backed `GameState.notifications`, while the drawer-open flag, toast queue, and Inbox filter state remain in `uiStore` because they are presentational runtime state rather than simulation state.
+
+The tutorial uses the same split intentionally. Canonical tutorial progress lives in save-backed `GameState.tutorial` so onboarding is scoped to each save, while the active overlay visibility is stored in `uiStore.tutorialOverlayOpen` because the shell is still a presentation concern. In the stricter guided mode now in use, `GameLayout` forces the overlay back open while a tutorial save is active, removes replay after completion for that save, and layers cutout-aligned dim scrims above the app so only the current tutorial target control remains interactive and visually emphasized. The same shell now drives cross-panel Fleet, Star Map, System, and Mining steps by reusing `panelStates` and `focusTarget` rather than introducing a separate tutorial-only router.
 
 `navigationHistory` stores the UI-only back stack. Each history entry captures the previous panel, focus target, and the leaving panel's snapshot from `panelStates`, allowing a breadcrumb or Back action to restore the view the player actually left instead of only reopening a panel shell.
 
@@ -435,6 +453,8 @@ interface GameState {
   corp: CorpState;
   pilot?: PilotState;    // legacy migration field only
   resources: Record<string, number>;
+  notifications: NotificationState;
+  tutorial: TutorialState;
   systems: {
     skills: SkillsState;
     mining: MiningState;
@@ -455,6 +475,10 @@ interface GameState {
 Avoid deeply tangled state relationships when possible.
 
 Fleet state now includes fleet commanders, wing commanders, hauling-wing cargo holds, and typed `wings` on each `PlayerFleet`. New-game defaults in `src/stores/initialState.ts` seed a starter fleet, starter ship, Corp HQ, and an initial populated mining wing so the opening state is immediately operational.
+
+`notifications.entries` is the durable player-facing event log. New entries are aggregated centrally from the tick seam in `gameStore.tick()` using `src/game/notifications/notification.logic.ts`, then capped to a rolling history window. `GameLayout.tsx` consumes that state to drive both the persistent Inbox panel and the transient toast layer.
+
+`tutorial` is a small save-backed onboarding progress model. `src/game/progression/tutorialSequence.ts` now owns both the ordered step registry and the derived presentation payload for the overlay: lock copy, step checklists, live metrics, progress bars, and current interaction targets. The registry also derives a deterministic first remote mining destination from the generated galaxy so Fleet, Star Map, System, and Mining onboarding can target real reachable content without adding tutorial-only save state. `gameStore` owns save-backed mutations such as skip, restart, explicit step completion, and immediate reevaluation after actions like fleet dispatch or mining-wing assignment. `GameLayout.tsx` mounts the visual tutorial shell, routes step CTAs back through existing panel navigation and panel-state restoration, and enforces the guided interaction lock by floating only the current tutorial target above a fixed blocker layer.
 
 ## Tick / Simulation Model
 

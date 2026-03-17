@@ -2,6 +2,7 @@ import type { CSSProperties, ReactNode } from 'react';
 
 export type ThemedIconName =
   | 'overview'
+  | 'inbox'
   | 'skills'
   | 'fleet'
   | 'starmap'
@@ -30,6 +31,7 @@ export type ThemedIconName =
 
 const LEGACY_ICON_MAP: Record<string, ThemedIconName> = {
   '📊': 'overview',
+  '📬': 'inbox',
   '📈': 'market',
   '⚡': 'skills',
   '🚀': 'fleet',
@@ -63,6 +65,7 @@ const LEGACY_ICON_MAP: Record<string, ThemedIconName> = {
 
 const ICON_PALETTES: Record<ThemedIconName, { primary: string; secondary: string; accent: string; glow: string }> = {
   overview: { primary: '#60a5fa', secondary: '#22d3ee', accent: '#f8fafc', glow: '#38bdf8' },
+  inbox: { primary: '#22d3ee', secondary: '#a78bfa', accent: '#f8fafc', glow: '#06b6d4' },
   skills: { primary: '#a78bfa', secondary: '#f59e0b', accent: '#fde68a', glow: '#8b5cf6' },
   fleet: { primary: '#22d3ee', secondary: '#f59e0b', accent: '#f8fafc', glow: '#06b6d4' },
   starmap: { primary: '#38bdf8', secondary: '#818cf8', accent: '#facc15', glow: '#60a5fa' },
@@ -98,6 +101,14 @@ function renderIconGlyph(name: ThemedIconName): ReactNode {
           <circle cx="12" cy="12" r="7.5" className="idleverse-icon__stroke-primary" />
           <path d="M12 4.5v15M4.5 12h15" className="idleverse-icon__stroke-secondary" />
           <path d="M7 16.5h2.5M10.75 13.5h2.5M14.5 9.5H17" className="idleverse-icon__stroke-accent" />
+        </>
+      );
+    case 'inbox':
+      return (
+        <>
+          <path d="M5 8.2h14v7.8H5Z" className="idleverse-icon__stroke-primary" />
+          <path d="M7.3 8.2 12 12.2l4.7-4" className="idleverse-icon__stroke-secondary" />
+          <path d="M8 15.6h8" className="idleverse-icon__stroke-accent" />
         </>
       );
     case 'skills':

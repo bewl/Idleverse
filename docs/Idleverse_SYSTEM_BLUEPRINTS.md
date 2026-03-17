@@ -1016,3 +1016,126 @@ See `Idleverse_DESIGN_PLAN.md` for detailed specs on:
 | Factions, Stations & Mission Boards | Phase 5 |
 | Structures & Player Outposts | Phase 6 |
 | Prestige / New Game+ | Phase 7 |
+
+---
+
+# System 16 — Notifications & Inbox
+
+## Role
+
+Provide a durable command-history layer for important gameplay events while pairing it with short-lived toast popups when those events first happen. This keeps Overview and panel headers focused on current operational status instead of becoming the only home for alerts, completions, and updates.
+
+## State
+
+`src/game/notifications/`, `src/stores/gameStore.ts`, `src/stores/uiStore.ts`
+
+```ts
+NotificationState {
+  entries: NotificationEntry[]
+}
+
+NotificationEntry {
+  id: string
+  category: 'progression' | 'industry' | 'fleet' | 'combat' | 'exploration' | 'economy' | 'faction' | 'system'
+  kind: 'alert' | 'message' | 'update'
+  severity: 'critical' | 'warning' | 'success' | 'info' | 'queued'
+  title: string
+  body: string
+  createdAt: number
+  readAt: number | null
+  archivedAt: number | null
+  sourceSystem: string
+  actionLabel?: string
+  focusTarget?: NotificationFocusTarget
+}
+```
+
+Durable entries live in save-backed `GameState.notifications.entries`. UI-only state for the top-bar drawer, toast queue, and Inbox view filters lives in `useUiStore`.
+
+## Mechanics
+
+- Notifications are generated centrally in `gameStore.tick()` after simulation changes have been applied.
+- `tickRunner.ts` now returns additional completion metadata for research, copy, and reprocessing so industry notifications can be emitted without UI-side polling.
+- `notification.logic.ts` converts state deltas and tick-result telemetry into normalized `NotificationEntry` records, caps the rolling history, and decides which entries should also surface as toasts.
+- Toasts are transient: they are stored only in `uiStore.activeToasts`, auto-expire, and can be dismissed manually.
+- Toast dismissal is visually softened in `NotificationToastStack`: entries stay mounted briefly in a local exit state so auto-expiring or manually dismissed toasts fade out instead of disappearing abruptly.
+- The Inbox drawer is a top-bar triage surface for rapid review; the full Inbox panel is the durable history surface with unread, alert, message, and archived filtering.
+- Notifications can deep-link back into the relevant panel or entity through `focusTarget`, reusing the same navigation model as `NavTag` and breadcrumb history.
+
+## Phase 1 Event Coverage
+
+- Progression: skill advances, unlock deltas, recruitment directives
+- Industry: manufacturing completions, blueprint research completion, blueprint copy completion, reprocessing batch completion
+- Fleet: arrivals, hauling-wing delivery completion
+- Combat: new combat log entries
+- Exploration: newly discovered sites
+- Economy: first sales, large sales, trade-route completed runs
+
+## UI
+
+- `GameLayout.tsx` mounts the top-bar Inbox button, drawer preview, and toast stack.
+- `InboxPanel.tsx` exposes the full archive with selection, archive/restore actions, and deep-link actions back to source panels.
+- `NotificationCenter.tsx` provides the shared list, filter tabs, drawer, and toast primitives so notification styling stays consistent across all surfaces.
+
+---
+
+# System 17 — First-Pass Tutorial Tour
+
+## Role
+
+Provide a visually guided onboarding layer for brand-new saves so the early Idleverse loop is understandable without outside explanation. The current pass is guided rather than purely advisory: it walks the player through the exact first unlock chain, shows live blocking progress inside the tutorial card itself, and temporarily locks unrelated game interaction until the current required action is complete or the tour is skipped.
+
+## State
+
+`src/game/progression/tutorialSequence.ts`, `src/stores/gameStore.ts`, `src/stores/uiStore.ts`
+
+```ts
+TutorialState {
+  currentStepId: TutorialStepId | null
+  completedStepIds: TutorialStepId[]
+  skippedAt: number | null
+  completedAt: number | null
+}
+```
+
+Durable tutorial progress lives in save-backed `GameState.tutorial`. Runtime overlay visibility lives in `useUiStore.tutorialOverlayOpen`, but `GameLayout` now forces the shell back open while a tutorial save is still active so onboarding remains hard-gated unless skipped. Once a save completes the guided tour, the top-bar replay affordance is removed for that save.
+
+## Mechanics
+
+- New saves start with the tutorial active; legacy saves that predate the system migrate into a skipped state so existing players are not forced into onboarding retroactively.
+- `tutorialSequence.ts` defines the ordered first-pass step registry and the distinction between acknowledge-only briefing steps and automatic completion steps.
+- `gameStore` owns tutorial mutations: explicit step completion for briefing steps, skip, restart, and evaluation of automatic completion against live state.
+- Automatic steps now resolve from real progression signals such as Trade I being queued, Trade I actually completing, the first market sale being recorded, a fleet receiving a live movement order, fleet arrival in a destination system, and a mining wing being assigned to a target belt.
+- `tutorialSequence.ts` also derives per-step presentation state: lock messaging, checklist rows, live metrics, and progress-bar payloads so the overlay can explain why the player is blocked instead of only naming the next click target.
+- `GameLayout.tsx` enforces a transparent interaction blocker above the rest of the game. Only the current tutorial target control is floated above that blocker, so unrelated UI cannot be used during the guided portion of onboarding.
+- Active tours can still be skipped, but completed tours are not replayable for that save.
+
+## First-Pass Step Coverage
+
+- Welcome briefing
+- Command-deck orientation
+- Start Trade I training
+- Wait for Trade I completion with live training progress shown in the overlay
+- First market sale
+- Fleet Command introduction for the starter mining fleet
+- Star Map dispatch into the first remote mining system
+- Fleet transit watch state until arrival completes
+- Destination-system mining assignment from `SystemPanel`
+- Mining-screen readout interpretation for ore flow, storage, active wings, and hauling
+- Handoff to Overview Guidance mode
+
+## UI
+
+- `GameLayout.tsx` mounts the overlay shell, owns the interaction blocker, and exposes top-bar skip or in-progress resume state while suppressing replay after completion.
+- `GameLayout.tsx` now groups top-bar save-adjacent utilities into a dedicated Settings menu that owns tutorial resume/skip access, SFX controls, and a confirmed wipe-save action instead of scattering those controls across separate top-bar buttons.
+- `TutorialOverlay.tsx` now provides the premium card treatment plus per-step metrics, checklist rows, live progress bars, blocking explanations, and a near-opaque modal surface so tutorial copy stays legible over busy panels.
+- The tutorial window is now draggable from the full header region, with only a small centered grip indicator instead of a labeled drag control, so players can reposition it without adding extra tutorial chrome.
+- The interaction blocker now cuts a more shape-conforming live opening around the currently allowed tutorial control or controls and darkens the surrounding UI with a stronger but still readable dim scrim, so required inputs such as `Guidance`, `Train to I`, `Qty`, and `Sell` remain clickable while everything else stays locked and more heavily de-emphasized.
+- Tutorial steps can also define non-interactive spotlight windows for status areas the player is meant to watch rather than click. For example, when training is in progress, the active training card at the top of `SkillsPanel` stays visually lifted through the dim layer without becoming an unintended interaction hole.
+- The fleet-arrival watch step now spotlights the full `In transit` status module in `FleetPanel`, including route label, ETA, next jump, and progress bar, instead of anchoring only the inline destination text.
+- Tutorial copy now visually highlights direct UI labels such as `Operations`, `Guidance`, `Skill Queue`, `Market`, `Qty`, and `Sell` so the wording in the card maps more clearly onto the interface.
+- During the Star Map dispatch step, the `Route` tab plus the currently allowed route-planner controls now receive an additional glow and breathing treatment so the fleet selector, destination selector, `Find Route`, and `Dispatch` actions read as the only intended path forward.
+- The same Star Map dispatch step now also auto-binds the starter fleet as the route origin and flies the galaxy camera into that fleet's current system at a closer route-planning zoom so the available local context is visible instead of leaving the player at the galaxy-wide default distance.
+- Step actions reuse existing panel navigation and panel-state adjustments instead of introducing a separate routing system.
+- Overview Guidance, the Trade I train button, the market quantity/sell controls, the starter fleet card, the route planner controls, the destination-belt assignment controls, and the Mining summary metrics are now concrete spotlight targets elevated above the blocker.
+- The tour complements, rather than replaces, the existing Guidance subview in `OverviewPanel.tsx`.

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useGameStore } from '@/stores/gameStore';
 import { useUiStore, type PanelId } from '@/stores/uiStore';
 import { buildSpecializationAdvice, getTrainingEtaToLevel } from '@/game/progression/specializationAdvisor';
+import { isTutorialStepCurrent } from '@/game/progression/tutorialSequence';
 import { SKILL_DEFINITIONS, SKILL_CATEGORIES, SKILL_CATEGORY_LABELS, SKILL_CATEGORY_ICONS } from '@/game/systems/skills/skills.config';
 import {
   canTrainSkill,
@@ -337,6 +338,7 @@ function SkillPips({ level, pendingLevel, color }: { level: number; pendingLevel
 // ─── Active training card ──────────────────────────────────────────────────
 
 function ActiveTrainingCard() {
+  const state = useGameStore(s => s.state);
   const skillsState = useGameStore(s => s.state.systems.skills);
   const [, forceUpdate] = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval>>();
@@ -357,10 +359,12 @@ function ActiveTrainingCard() {
   const pct      = Math.min(1, progress / total);
   const eta      = activeTrainingEta(skillsState);
   const color    = def ? CATEGORY_COLOR[def.category] : '#22d3ee';
+  const highlightActiveTraining = isTutorialStepCurrent(state, 'complete-first-skill') && skillsState.activeSkillId === 'trade';
 
   return (
     <div
-      className="rounded-xl p-4 relative overflow-hidden"
+      data-tutorial-anchor={highlightActiveTraining ? 'skills-active-training' : undefined}
+      className={`rounded-xl p-4 relative overflow-hidden ${highlightActiveTraining ? 'tutorial-breathe' : ''}`}
       style={{
         background: `linear-gradient(135deg, rgba(3,8,20,0.95) 0%, rgba(${
           color === '#22d3ee' ? '34,211,238' :
@@ -626,6 +630,7 @@ function SkillDetail({ skillId }: { skillId: string }) {
 
   const isMaxed      = pendingLevel >= 5;
   const isFullyDone  = level >= 5; // actually completed, not just queued
+  const highlightTrainAction = isTutorialStepCurrent(state, 'queue-first-skill') && skillId === 'trade';
 
   const trainingTimes = [1, 2, 3, 4, 5].map(lv => ({
     lv,
@@ -809,7 +814,8 @@ function SkillDetail({ skillId }: { skillId: string }) {
             <button
               key={targetLv}
               onClick={() => addSkillToQueue(skillId, targetLv as 1 | 2 | 3 | 4 | 5)}
-              className="flex-1 py-2 px-3 rounded-lg text-xs font-bold uppercase tracking-wide transition-all duration-150 hover:scale-[1.02] active:scale-[0.98]"
+              data-tutorial-anchor={(highlightTrainAction && targetLv === pendingLevel + 1) ? 'skills-trade-train-next' : undefined}
+              className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold uppercase tracking-wide transition-all duration-150 hover:scale-[1.02] active:scale-[0.98] ${(highlightTrainAction && targetLv === pendingLevel + 1) ? 'tutorial-breathe relative z-[74]' : ''}`}
               style={{
                 background: targetLv === pendingLevel + 1
                   ? `linear-gradient(135deg, ${color}44, ${color}33)`

@@ -1,5 +1,6 @@
 import { create } from 'zustand';
-import type { GameState, OfflineSummary, ManufacturingJob, SkillQueueEntry, ReprocessingJob, FleetActivity, PilotTrainingFocus, WingType } from '@/types/game.types';
+import { useUiStore } from '@/stores/uiStore';
+import type { GameState, NotificationEntry, OfflineSummary, ManufacturingJob, SkillQueueEntry, ReprocessingJob, FleetActivity, PilotTrainingFocus, WingType } from '@/types/game.types';
 import type { FactionId, RouteSecurityFilter } from '@/types/faction.types';
 import { createInitialState } from './initialState';
 import { runTick } from '@/game/core/tickRunner';
@@ -19,6 +20,14 @@ import { saveGame, loadGame, deleteSave } from '@/game/persistence/saveLoad';
 import { processOfflineProgress } from '@/game/offline/offlineCalc';
 import { playManufacturingComplete, playSkillAdvance } from '@/game/audio/soundEvents';
 import { getTriggeredRecruitmentDirectives } from '@/game/progression/recruitmentAdvisor';
+import {
+  completeTutorialStep as completeTutorialStepState,
+  evaluateTutorialState,
+  restartTutorialState,
+  skipTutorialState,
+  tutorialStatesEqual,
+} from '@/game/progression/tutorialSequence';
+import { appendNotificationEntries, buildTickNotifications } from '@/game/notifications/notification.logic';
 import { calculateSellValue } from '@/game/systems/market/market.logic';
 import type { TradeRoute } from '@/types/game.types';
 import { BATCH_SIZE_BASE } from '@/game/systems/reprocessing/reprocessing.config';
@@ -202,6 +211,15 @@ interface GameStore {
   loadFromStorage: () => void;
   dismissOfflineSummary: () => void;
   clearSave: () => void;
+  completeTutorialStep: (stepId?: import('@/types/game.types').TutorialStepId) => void;
+  skipTutorial: () => void;
+  restartTutorial: () => void;
+  evaluateTutorialProgress: () => void;
+  markNotificationRead: (notificationId: string) => void;
+  markAllNotificationsRead: () => void;
+  archiveNotification: (notificationId: string) => void;
+  restoreNotification: (notificationId: string) => void;
+  archiveReadNotifications: () => void;
 }
 
 // ─── Store ─────────────────────────────────────────────────────────────────
@@ -214,7 +232,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
   tick: (deltaSeconds) => {
     const previousState = get().state;
-    let { newState, completedManufacturing, skillsAdvanced } = runTick(previousState, deltaSeconds);
+    let tickResult = runTick(previousState, deltaSeconds);
+    let { newState, completedManufacturing, skillsAdvanced } = tickResult;
 
     const directives = getTriggeredRecruitmentDirectives(previousState, newState);
     if (directives.length > 0) {
@@ -250,7 +269,26 @@ export const useGameStore = create<GameStore>((set, get) => ({
       };
     }
 
-    set({ state: newState });
+    const notificationBatch = buildTickNotifications(previousState, newState, tickResult, directives);
+    if (notificationBatch.entries.length > 0) {
+      newState = {
+        ...newState,
+        notifications: {
+          entries: appendNotificationEntries(newState.notifications.entries, notificationBatch.entries),
+        },
+      };
+    }
+
+    const evaluatedTutorial = evaluateTutorialState(newState);
+    const nextState = tutorialStatesEqual(newState.tutorial, evaluatedTutorial)
+      ? newState
+      : { ...newState, tutorial: evaluatedTutorial };
+
+    set({ state: nextState });
+
+    if (notificationBatch.toastIds.length > 0) {
+      useUiStore.getState().queueNotificationToasts(notificationBatch.toastIds);
+    }
 
     const completedManufacturingCount = Object.values(completedManufacturing).reduce((sum, qty) => sum + qty, 0);
     if (completedManufacturingCount > 0) {
@@ -369,15 +407,19 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
     // If nothing is actively training, start this skill immediately
     const shouldActivate = !newSkillsState.activeSkillId;
+    const updatedState = {
+      ...state,
+      systems: {
+        ...state.systems,
+        skills: shouldActivate
+          ? { ...newSkillsState, activeSkillId: skillId, activeProgress: 0 }
+          : newSkillsState,
+      },
+    };
     set({
       state: {
-        ...state,
-        systems: {
-          ...state.systems,
-          skills: shouldActivate
-            ? { ...newSkillsState, activeSkillId: skillId, activeProgress: 0 }
-            : newSkillsState,
-        },
+        ...updatedState,
+        tutorial: evaluateTutorialState(updatedState),
       },
     });
     return true;
@@ -775,18 +817,23 @@ export const useGameStore = create<GameStore>((set, get) => ({
       [resourceId]: ((state.systems.market.lifetimeSold ?? {})[resourceId] ?? 0) + isk,
     };
 
+    const updatedState = {
+      ...state,
+      resources: {
+        ...state.resources,
+        [resourceId]: have - sell,
+        'credits': (state.resources['credits'] ?? 0) + isk,
+      },
+      systems: {
+        ...state.systems,
+        market: { ...state.systems.market, lifetimeSold: newLifetime },
+      },
+    };
+
     set({
       state: {
-        ...state,
-        resources: {
-          ...state.resources,
-          [resourceId]: have - sell,
-          'credits': (state.resources['credits'] ?? 0) + isk,
-        },
-        systems: {
-          ...state.systems,
-          market: { ...state.systems.market, lifetimeSold: newLifetime },
-        },
+        ...updatedState,
+        tutorial: evaluateTutorialState(updatedState),
       },
     });
     return true;
@@ -820,7 +867,6 @@ export const useGameStore = create<GameStore>((set, get) => ({
   setAutoSellThreshold: (resourceId, amount) => {
     const { state } = get();
     const current = state.systems.market.autoSell?.[resourceId];
-    const newEntry = { enabled: current?.enabled ?? false, threshold: Math.max(0, Math.floor(amount)) };
     set({
       state: {
         ...state,
@@ -828,7 +874,13 @@ export const useGameStore = create<GameStore>((set, get) => ({
           ...state.systems,
           market: {
             ...state.systems.market,
-            autoSell: { ...(state.systems.market.autoSell ?? {}), [resourceId]: newEntry },
+            autoSell: {
+              ...(state.systems.market.autoSell ?? {}),
+              [resourceId]: {
+                enabled: current?.enabled ?? false,
+                threshold: Math.max(0, amount),
+              },
+            },
           },
         },
       },
@@ -1134,7 +1186,12 @@ export const useGameStore = create<GameStore>((set, get) => ({
     if (!fleet || hasDispatchedHaulingWing(fleet)) return false;
     const newState = issueFleetGroupOrder(state, fleetId, destinationId, securityFilter, pauseOnArrival);
     if (!newState) return false;
-    set({ state: newState });
+    const evaluatedTutorial = evaluateTutorialState(newState);
+    set({
+      state: tutorialStatesEqual(newState.tutorial, evaluatedTutorial)
+        ? newState
+        : { ...newState, tutorial: evaluatedTutorial },
+    });
     return true;
   },
 
@@ -1823,7 +1880,12 @@ export const useGameStore = create<GameStore>((set, get) => ({
   assignWingToMiningBelt: (fleetId, wingId, beltId) => {
     const newState = assignWingToMiningBelt(get().state, fleetId, wingId, beltId);
     if (!newState) return false;
-    set({ state: newState });
+    const evaluatedTutorial = evaluateTutorialState(newState);
+    set({
+      state: tutorialStatesEqual(newState.tutorial, evaluatedTutorial)
+        ? newState
+        : { ...newState, tutorial: evaluatedTutorial },
+    });
     return true;
   },
 
@@ -1990,6 +2052,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const patchedUnlocks = { ...defaults.unlocks,  ...save.state.unlocks };
     const patchedSettings = { ...defaults.settings, ...save.state.settings };
     const patchedResources = { ...defaults.resources, ...save.state.resources };
+    const patchedNotifications = {
+      ...defaults.notifications,
+      ...save.state.notifications,
+      entries: Array.isArray(save.state.notifications?.entries) ? save.state.notifications.entries as NotificationEntry[] : [],
+    };
 
     // Patch fleet — ensure pilots + recruitmentOffers exist (added after initial release)
     if (!patchedSystems.fleet.pilots) {
@@ -2103,6 +2170,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
       systems:   patchedSystems,
       unlocks:   { ...patchedUnlocks,  ...recomputedUnlocks },
       modifiers: { ...save.state.modifiers, ...recomputedModifiers },
+      notifications: patchedNotifications,
+      tutorial: save.state.tutorial ?? defaults.tutorial,
       // Patch galaxy if it was added after this save was written
       galaxy:    save.state.galaxy
         ? {
@@ -2114,7 +2183,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
         : defaults.galaxy,
     };
 
-    const { newState, summary } = processOfflineProgress(patchedState, Date.now());
+    const tutorialEvaluatedState = {
+      ...patchedState,
+      tutorial: evaluateTutorialState(patchedState),
+    };
+    const { newState, summary } = processOfflineProgress(tutorialEvaluatedState, Date.now());
     set({
       state: newState,
       offlineSummary: summary.elapsedSeconds > 60 ? summary : null,
@@ -2122,6 +2195,101 @@ export const useGameStore = create<GameStore>((set, get) => ({
   },
 
   dismissOfflineSummary: () => set({ offlineSummary: null }),
+
+  completeTutorialStep: (stepId) => set((store) => ({
+    state: {
+      ...store.state,
+      tutorial: completeTutorialStepState(store.state, stepId),
+    },
+  })),
+
+  skipTutorial: () => set((store) => ({
+    state: {
+      ...store.state,
+      tutorial: skipTutorialState(store.state),
+    },
+  })),
+
+  restartTutorial: () => set((store) => ({
+    state: {
+      ...store.state,
+      tutorial: restartTutorialState(),
+    },
+  })),
+
+  evaluateTutorialProgress: () => set((store) => {
+    const nextTutorial = evaluateTutorialState(store.state);
+    if (tutorialStatesEqual(store.state.tutorial, nextTutorial)) {
+      return store;
+    }
+    return {
+      state: {
+        ...store.state,
+        tutorial: nextTutorial,
+      },
+    };
+  }),
+
+  markNotificationRead: (notificationId) => set((store) => ({
+    state: {
+      ...store.state,
+      notifications: {
+        entries: store.state.notifications.entries.map(entry => (
+          entry.id === notificationId && entry.readAt === null
+            ? { ...entry, readAt: Date.now() }
+            : entry
+        )),
+      },
+    },
+  })),
+
+  markAllNotificationsRead: () => set((store) => ({
+    state: {
+      ...store.state,
+      notifications: {
+        entries: store.state.notifications.entries.map(entry => (
+          entry.readAt === null ? { ...entry, readAt: Date.now() } : entry
+        )),
+      },
+    },
+  })),
+
+  archiveNotification: (notificationId) => set((store) => ({
+    state: {
+      ...store.state,
+      notifications: {
+        entries: store.state.notifications.entries.map(entry => (
+          entry.id === notificationId
+            ? { ...entry, archivedAt: entry.archivedAt ?? Date.now(), readAt: entry.readAt ?? Date.now() }
+            : entry
+        )),
+      },
+    },
+  })),
+
+  restoreNotification: (notificationId) => set((store) => ({
+    state: {
+      ...store.state,
+      notifications: {
+        entries: store.state.notifications.entries.map(entry => (
+          entry.id === notificationId ? { ...entry, archivedAt: null } : entry
+        )),
+      },
+    },
+  })),
+
+  archiveReadNotifications: () => set((store) => ({
+    state: {
+      ...store.state,
+      notifications: {
+        entries: store.state.notifications.entries.map(entry => (
+          entry.readAt !== null && entry.archivedAt === null
+            ? { ...entry, archivedAt: Date.now() }
+            : entry
+        )),
+      },
+    },
+  })),
 
   clearSave: () => {
     deleteSave();

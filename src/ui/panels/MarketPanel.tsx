@@ -17,6 +17,7 @@ import { NavTag } from '@/ui/components/NavTag';
 import { GameDropdown, type DropdownOption } from '@/ui/components/GameDropdown';
 import { SystemUnlockCard } from '@/ui/components/SystemUnlockCard';
 import { useUiStore } from '@/stores/uiStore';
+import { isTutorialStepCurrent } from '@/game/progression/tutorialSequence';
 import { ActivityBar } from '@/ui/effects/ActivityBar';
 
 // ─── Resource categories to display in market ─────────────────────────────
@@ -516,6 +517,7 @@ function MarketRow({ resourceId }: { resourceId: string }) {
   const surplus = Math.max(0, Math.floor(have - autoThreshold));
   const autoReady = autoEnabled && surplus > 0;
   const statusDot = autoReady ? 'bg-emerald-400' : have > 0 ? 'bg-amber-400/60' : 'bg-slate-600';
+  const highlightSellControls = isTutorialStepCurrent(state, 'first-sale') && have > 0;
 
   return (
     <div className="grid grid-cols-[minmax(0,1.35fr)_auto_auto_auto] gap-x-3 gap-y-1 items-center py-2 border-t border-slate-800/50 first:border-t-0">
@@ -605,12 +607,14 @@ function MarketRow({ resourceId }: { resourceId: string }) {
             value={sellAmount}
             onChange={e => setSellAmount(Math.max(0, Math.min(have, Number(e.target.value))))}
             placeholder="Qty"
-            className="w-16 text-[9px] font-mono bg-slate-800/60 border border-slate-700/40 rounded px-1.5 py-0.5 text-slate-400 focus:outline-none focus:border-cyan-700/50"
+            data-tutorial-anchor={highlightSellControls ? 'market-sell-input' : undefined}
+            className={`w-16 text-[9px] font-mono bg-slate-800/60 border border-slate-700/40 rounded px-1.5 py-0.5 text-slate-400 focus:outline-none focus:border-cyan-700/50 ${highlightSellControls ? 'tutorial-breathe relative z-[74]' : ''}`}
           />
           <button
             onClick={() => { sellResource(resourceId, sellAmount); setSellAmount(0); }}
             disabled={sellAmount <= 0 || have <= 0}
-            className="text-[9px] px-2 py-0.5 rounded border border-cyan-700/40 bg-cyan-900/20 text-cyan-400 hover:bg-cyan-800/30 disabled:opacity-30 disabled:cursor-not-allowed transition-all whitespace-nowrap"
+            data-tutorial-anchor={highlightSellControls ? 'market-sell-button' : undefined}
+            className={`text-[9px] px-2 py-0.5 rounded border border-cyan-700/40 bg-cyan-900/20 text-cyan-400 hover:bg-cyan-800/30 disabled:opacity-30 disabled:cursor-not-allowed transition-all whitespace-nowrap ${highlightSellControls ? 'tutorial-breathe relative z-[74]' : ''}`}
           >
             Sell
           </button>

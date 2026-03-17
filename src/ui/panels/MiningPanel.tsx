@@ -10,6 +10,7 @@ import { useUiStore } from '@/stores/uiStore';
 import { ActivityBar } from '@/ui/effects/ActivityBar';
 import { describeFleetActivity, describeWingActivity } from '@/ui/utils/fleetActivity';
 import { ThemedIcon } from '@/ui/components/ThemedIcon';
+import { isTutorialStepCurrent } from '@/game/progression/tutorialSequence';
 
 // ─── Tier color helper ───────────────────────────────────────────────────────
 
@@ -326,6 +327,7 @@ function FleetMiningCard({ fleet, focused = false }: { fleet: PlayerFleet; focus
 
 export function MiningPanel() {
   const state = useGameStore(s => s.state);
+  const highlightMiningReadout = isTutorialStepCurrent(state, 'mining-readout');
   const focusTarget = useUiStore(s => s.focusTarget);
   const clearFocus = useUiStore(s => s.clearFocus);
   const [focusedFleetId, setFocusedFleetId] = useState<string | null>(null);
@@ -392,10 +394,21 @@ export function MiningPanel() {
       {miningFleets.length > 0 && (
         <div className="rounded-xl border border-slate-700/30 bg-slate-900/35 px-3 py-2.5">
           <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4 mb-3">
-            <CommandMetric label="Mining Fleets" value={`${miningFleets.length}`} meta={`${totalMiningWings} wings extracting`} tone="cyan" />
-            <CommandMetric label="Ore Flow" value={`${totalOreRate.toFixed(2)}/s`} meta="aggregate extraction" tone="cyan" />
-            <CommandMetric label="Cargo Pressure" value={`${avgCargoFill.toFixed(0)}%`} meta={highPressureFleets > 0 ? `${highPressureFleets} fleets near full` : 'storage stable'} tone={highPressureFleets > 0 ? 'amber' : 'slate'} />
-            <CommandMetric label="Hauling Lines" value={`${haulingLines}`} meta={haulingActive > 0 ? `${haulingActive} hauling now` : 'all staged'} tone={haulingActive > 0 ? 'amber' : haulingLines > 0 ? 'emerald' : 'slate'} />
+            <div>
+              <CommandMetric label="Mining Fleets" value={`${miningFleets.length}`} meta={`${totalMiningWings} wings extracting`} tone="cyan" />
+            </div>
+            <div data-tutorial-anchor={highlightMiningReadout ? 'mining-summary-ore-flow' : undefined}>
+              <CommandMetric label="Ore Flow" value={`${totalOreRate.toFixed(2)}/s`} meta="aggregate extraction" tone="cyan" />
+            </div>
+            <div data-tutorial-anchor={highlightMiningReadout ? 'mining-summary-storage' : undefined}>
+              <CommandMetric label="Storage" value={`${avgCargoFill.toFixed(0)}%`} meta={highPressureFleets > 0 ? `${highPressureFleets} fleets near full` : 'storage stable'} tone={highPressureFleets > 0 ? 'amber' : 'slate'} />
+            </div>
+            <div data-tutorial-anchor={highlightMiningReadout ? 'mining-summary-wings' : undefined}>
+              <CommandMetric label="Mining Wings" value={`${totalMiningWings}`} meta={`${miningFleets.length} fleets contributing`} tone={totalMiningWings > 0 ? 'violet' : 'slate'} />
+            </div>
+            <div data-tutorial-anchor={highlightMiningReadout ? 'mining-summary-hauling' : undefined}>
+              <CommandMetric label="Hauling" value={`${haulingLines}`} meta={haulingActive > 0 ? `${haulingActive} hauling now` : 'all staged'} tone={haulingActive > 0 ? 'amber' : haulingLines > 0 ? 'emerald' : 'slate'} />
+            </div>
           </div>
           <ActivityBar active={totalOreRate > 0 || haulingActive > 0} rate={activityRate} color={haulingActive > 0 ? 'amber' : 'cyan'} label="Mining load" valueLabel={haulingActive > 0 ? `${haulingActive} hauling` : `${totalMiningWings} wings`} />
         </div>

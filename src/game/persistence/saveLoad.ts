@@ -74,6 +74,30 @@ export function loadGame(): SaveFile | null {
         }
       }
     }
+    if (!save.state.notifications || !Array.isArray(save.state.notifications.entries)) {
+      save.state.notifications = { entries: [] };
+    }
+    if (!save.state.tutorial || typeof save.state.tutorial !== 'object') {
+      save.state.tutorial = {
+        currentStepId: null,
+        completedStepIds: [],
+        skippedAt: Date.now(),
+        completedAt: null,
+      };
+    } else {
+      if (!Array.isArray(save.state.tutorial.completedStepIds)) {
+        save.state.tutorial.completedStepIds = [];
+      }
+      if (typeof save.state.tutorial.currentStepId === 'undefined') {
+        save.state.tutorial.currentStepId = null;
+      }
+      if (typeof save.state.tutorial.skippedAt === 'undefined') {
+        save.state.tutorial.skippedAt = null;
+      }
+      if (typeof save.state.tutorial.completedAt === 'undefined') {
+        save.state.tutorial.completedAt = null;
+      }
+    }
     return save;
   } catch (e) {
     console.error('[Idleverse] Failed to load game:', e);

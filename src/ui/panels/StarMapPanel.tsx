@@ -28,6 +28,7 @@ import { HULL_DEFINITIONS } from '@/game/systems/fleet/fleet.config';
 import { FACTION_DEFINITIONS } from '@/game/systems/factions/faction.config';
 import { getLocalPrice } from '@/game/systems/market/market.logic';
 import { RESOURCE_REGISTRY } from '@/game/resources/resourceRegistry';
+import { getTutorialFleetTravelContext, isTutorialStepCurrent } from '@/game/progression/tutorialSequence';
 import type { StarSystem, GalacticSector, WarpState } from '@/types/galaxy.types';
 import type { StarType, SystemSecurity } from '@/types/galaxy.types';
 import type { ShipInstance, FleetActivity, PlayerFleet } from '@/types/game.types';
@@ -317,7 +318,7 @@ function buildCam3(
 // ─── 3D Galaxy Map component (Zoom Level 1) ───────────────────────────────────
 
 export interface GalaxyGridHandle {
-  focusSystem: (systemId: string) => void;
+  focusSystem: (systemId: string, options?: { distance?: number; phi?: number; durationMs?: number }) => void;
 }
 
 const GalaxyGridView = forwardRef<GalaxyGridHandle, {
@@ -991,16 +992,23 @@ const GalaxyGridView = forwardRef<GalaxyGridHandle, {
   }, []);
 
   useImperativeHandle(ref, () => ({
-    focusSystem(systemId: string) {
+    focusSystem(systemId: string, options) {
       const sys = propsRef.current.allSystems.find(s => s.id === systemId);
       if (!sys) return;
       const [wx, wy, wz] = sysToWorld(sys);
       const c = cam.current;
       camAnim.current = {
         from: { ...c },
-        to: { theta: c.theta, phi: c.phi, dist: Math.min(c.dist, 280), tx: wx, ty: wy, tz: wz },
+        to: {
+          theta: c.theta,
+          phi: options?.phi ?? c.phi,
+          dist: Math.min(c.dist, options?.distance ?? 280),
+          tx: wx,
+          ty: wy,
+          tz: wz,
+        },
         startTime: performance.now(),
-        duration: 700,
+        duration: options?.durationMs ?? 700,
       };
       rafId.current = requestAnimationFrame(draw);
     },
@@ -1402,6 +1410,8 @@ function RoutePlanner({
   dispatchFeedback: RouteDispatchFeedback | null;
 }) {
   const gameState = useGameStore(s => s.state);
+  const tutorialDispatchStep = isTutorialStepCurrent(gameState, 'starmap-dispatch-fleet');
+  const tutorialFleetContext = getTutorialFleetTravelContext(gameState);
   const knownSystems = useMemo(
     () => allSystems.filter(s => visitedSystems[s.id]).sort((a, b) => a.name.localeCompare(b.name)),
     [allSystems, visitedSystems],
@@ -1416,6 +1426,29 @@ function RoutePlanner({
     background: 'rgba(6,9,20,0.8)', color: '#94a3b8',
     border: '1px solid rgba(30,40,60,0.8)', borderRadius: 6,
   };
+  const tutorialFocusWrapStyle: React.CSSProperties = tutorialDispatchStep
+    ? {
+        borderRadius: 10,
+        padding: 4,
+        background: 'linear-gradient(135deg, rgba(34,211,238,0.14), rgba(6,9,20,0))',
+        boxShadow: '0 0 0 1px rgba(34,211,238,0.16), 0 0 18px rgba(34,211,238,0.16)',
+      }
+    : {};
+  const tutorialButtonStyle: React.CSSProperties = tutorialDispatchStep
+    ? {
+        boxShadow: '0 0 0 1px rgba(34,211,238,0.18), 0 0 18px rgba(34,211,238,0.18)',
+        borderColor: 'rgba(103,232,249,0.5)',
+      }
+    : {};
+  const tutorialDropdownStyle: React.CSSProperties = tutorialDispatchStep
+    ? {
+        ...selStyle,
+        border: '1px solid rgba(103,232,249,0.48)',
+        background: 'rgba(8,51,68,0.30)',
+        color: '#cffafe',
+        boxShadow: '0 0 0 1px rgba(34,211,238,0.14), 0 0 16px rgba(34,211,238,0.14)',
+      }
+    : selStyle;
 
   const ROUTE_FLEET_COLORS = ['#a78bfa', '#fb923c', '#34d399', '#f472b6', '#60a5fa'];
   const selectedFleet = routeFleetId ? (playerFleets.find(f => f.id === routeFleetId) ?? null) : null;
@@ -1540,7 +1573,11 @@ function RoutePlanner({
       </div>
 
       {/* Fleet selector */}
-      <div>
+      <div
+        data-tutorial-anchor={tutorialDispatchStep ? 'starmap-route-fleet' : undefined}
+        className={tutorialDispatchStep ? 'tutorial-breathe relative z-[74]' : undefined}
+        style={tutorialDispatchStep ? tutorialFocusWrapStyle : undefined}
+      >
         <div style={{ fontSize: 8, color: '#475569', marginBottom: 3 }}>Fleet (as origin)</div>
         <GameDropdown
           value={routeFleetId ?? ''}
@@ -1552,7 +1589,7 @@ function RoutePlanner({
           searchPlaceholder="Search fleets or staging systems..."
           size="compact"
           menuWidth={320}
-          buttonStyle={selStyle}
+          buttonStyle={tutorialDropdownStyle}
         />
       </div>
 
@@ -1588,7 +1625,11 @@ function RoutePlanner({
         )}
       </div>
 
-      <div>
+      <div
+        data-tutorial-anchor={tutorialDispatchStep ? 'starmap-route-destination' : undefined}
+        className={tutorialDispatchStep ? 'tutorial-breathe relative z-[74]' : undefined}
+        style={tutorialDispatchStep ? tutorialFocusWrapStyle : undefined}
+      >
         <div style={{ fontSize: 8, color: '#475569', marginBottom: 3 }}>Destination</div>
         <GameDropdown
           value={routeTo ?? ''}
@@ -1600,10 +1641,12 @@ function RoutePlanner({
           searchPlaceholder="Search all known and unknown systems..."
           size="compact"
           menuWidth={340}
-          buttonStyle={selStyle}
+          buttonStyle={tutorialDropdownStyle}
         />
-        <div style={{ fontSize: 7, color: '#334155', marginTop: 4, lineHeight: 1.45 }}>
-          Tip: while the Route tab is open, click a system directly on the map to set the destination.
+        <div style={{ fontSize: 7, color: tutorialDispatchStep ? '#67e8f9' : '#334155', marginTop: 4, lineHeight: 1.45 }}>
+          {tutorialDispatchStep && tutorialFleetContext.targetSystemName
+            ? `Route the starter fleet into ${tutorialFleetContext.targetSystemName}, then solve and dispatch the route.`
+            : 'Tip: while the Route tab is open, click a system directly on the map to set the destination.'}
         </div>
       </div>
 
@@ -1668,12 +1711,15 @@ function RoutePlanner({
 
       <div style={{ display: 'flex', gap: 4 }}>
         <button onClick={onComputeRoute} disabled={!routeFrom || !routeTo}
+          data-tutorial-anchor={tutorialDispatchStep ? 'starmap-route-find' : undefined}
+          className={tutorialDispatchStep ? 'tutorial-breathe relative z-[74]' : undefined}
           style={{
             flex: 1, padding: '8px 10px', fontSize: 9, fontWeight: 700,
             border: '1px solid rgba(34,211,238,0.3)', borderRadius: 6,
             background: routeFrom && routeTo ? 'rgba(8,51,68,0.4)' : 'rgba(6,9,20,0.2)',
             color: routeFrom && routeTo ? '#22d3ee' : '#334155',
             cursor: routeFrom && routeTo ? 'pointer' : 'not-allowed',
+            ...tutorialButtonStyle,
           }}
         >
           Find Route
@@ -1686,13 +1732,15 @@ function RoutePlanner({
       </div>
 
       {activeRoute && (
-        <div style={{ padding: '10px 12px', borderRadius: 8, border: '1px solid rgba(34,211,238,0.2)', background: 'linear-gradient(180deg, rgba(8,51,68,0.22), rgba(4,6,18,0.88))' }}>
+        <div data-tutorial-anchor={tutorialDispatchStep ? 'starmap-route-summary' : undefined} style={{ padding: '10px 12px', borderRadius: 8, border: '1px solid rgba(34,211,238,0.2)', background: 'linear-gradient(180deg, rgba(8,51,68,0.22), rgba(4,6,18,0.88))' }}>
           <div style={{ fontSize: 9, color: '#22d3ee', fontWeight: 700, marginBottom: 8, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Route Summary</div>
 
           {/* Dispatch button */}
           {selectedFleet && (
             <button
               onClick={() => onDispatch(selectedFleet.id)}
+              data-tutorial-anchor={tutorialDispatchStep ? 'starmap-route-dispatch' : undefined}
+              className={tutorialDispatchStep ? 'tutorial-breathe relative z-[74]' : undefined}
               style={{
                 width: '100%', padding: '8px 10px', fontSize: 9, fontWeight: 700,
                 border: `1px solid ${selectedFleetColor}55`,
@@ -1702,6 +1750,7 @@ function RoutePlanner({
                 cursor: 'pointer',
                 marginBottom: 8,
                 letterSpacing: '0.06em',
+                boxShadow: tutorialDispatchStep ? '0 0 0 1px rgba(34,211,238,0.16), 0 0 18px rgba(34,211,238,0.16)' : undefined,
               }}
             >
               ▶ Dispatch {selectedFleet.name} →
@@ -2067,6 +2116,7 @@ function StarSystemHoverCard({
 
 function StarMapPanelInner() {
   const galaxy          = useGameStore(s => s.state.galaxy)!;
+  const tutorialDispatchStep = useGameStore(s => isTutorialStepCurrent(s.state, 'starmap-dispatch-fleet'));
   const initiateWarp           = useGameStore(s => s.initiateWarp);
   const cancelWarp             = useGameStore(s => s.cancelWarp);
   const doIssueFleetOrder      = useGameStore(s => s.issueFleetOrder);
@@ -2124,6 +2174,10 @@ function StarMapPanelInner() {
   const [overlay,        setOverlay]        = useState<OverlayMode>('default');
   const [hoverPreview,   setHoverPreview]   = useState<HoverPreview | null>(null);
   const gridRef = useRef<GalaxyGridHandle>(null);
+  const tutorialStarterFleetId = useMemo(() => {
+    if (fleetFleetsRecord['fleet-starter']) return 'fleet-starter';
+    return playerFleets[0]?.id ?? null;
+  }, [fleetFleetsRecord, playerFleets]);
 
   useEffect(() => {
     if (savedPanelState.selectedId !== undefined && savedPanelState.selectedId !== selectedId) {
@@ -2214,13 +2268,31 @@ function StarMapPanelInner() {
     setDispatchFeedback(null);
   }, []);
 
+  useEffect(() => {
+    if (!tutorialDispatchStep) {
+      return;
+    }
+    if (rightTab !== 'route') {
+      setRightTab('route');
+    }
+    if (tutorialStarterFleetId && routeFleetId !== tutorialStarterFleetId) {
+      setRouteFleetId(tutorialStarterFleetId);
+    }
+  }, [tutorialDispatchStep, rightTab, routeFleetId, tutorialStarterFleetId]);
+
   // When a fleet is selected as origin, sync its current system + jump range
   useEffect(() => {
     if (!routeFleetId) return;
     const fleet = playerFleets.find(f => f.id === routeFleetId);
     if (!fleet) { setRouteFleetId(null); return; }
     setRouteFrom(fleet.currentSystemId);
-    gridRef.current?.focusSystem(fleet.currentSystemId);
+    const tutorialRouteFocus = tutorialDispatchStep && routeFleetId === tutorialStarterFleetId;
+    gridRef.current?.focusSystem(
+      fleet.currentSystemId,
+      tutorialRouteFocus
+        ? { distance: 120, phi: 1.24, durationMs: 850 }
+        : undefined,
+    );
     const ships = fleetShips.filter(s => fleet.shipIds.includes(s.id));
     let maxBonus = 0;
     for (const ship of ships) {
@@ -2232,7 +2304,7 @@ function StarMapPanelInner() {
     setRouteComputed(false);
     setDispatchFeedback(null);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [routeFleetId]);
+  }, [routeFleetId, tutorialDispatchStep, tutorialStarterFleetId]);
 
   const handleDispatchFleet = useCallback((fleetId: string) => {
     if (!routeTo) {
@@ -2426,13 +2498,14 @@ function StarMapPanelInner() {
                 ['intel',  'Intel'],
                 ['route',  'Route'],
               ] as [typeof rightTab, string][]).map(([tab, label]) => (
-                <button key={tab} onClick={() => setRightTab(tab)} style={{
+                <button key={tab} onClick={() => setRightTab(tab)} data-tutorial-anchor={tutorialDispatchStep && tab === 'route' ? 'starmap-route-tab' : undefined} className={tutorialDispatchStep && tab === 'route' ? 'tutorial-breathe relative z-[74]' : undefined} style={{
                   flex: 1, padding: '7px 4px', fontSize: 9, fontWeight: 600,
                   letterSpacing: '0.08em', textTransform: 'uppercase', cursor: 'pointer',
                   background: rightTab === tab ? 'rgba(8,51,68,0.3)' : 'transparent',
                   color: rightTab === tab ? '#22d3ee' : '#334155',
                   border: 'none',
                   borderBottom: rightTab === tab ? '2px solid #22d3ee' : '2px solid transparent',
+                  boxShadow: tutorialDispatchStep && tab === 'route' ? 'inset 0 0 0 1px rgba(34,211,238,0.14), 0 0 14px rgba(34,211,238,0.12)' : undefined,
                 }}>
                   {label}
                 </button>

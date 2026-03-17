@@ -1,4 +1,4 @@
-﻿import type { GameState } from '@/types/game.types';
+﻿import type { CopyJob, GameState, ResearchJob } from '@/types/game.types';
 import { tickMining } from '@/game/systems/mining/mining.logic';
 import { ORE_BELTS } from '@/game/systems/mining/mining.config';
 import { tickSkills } from '@/game/systems/skills/skills.logic';
@@ -21,6 +21,9 @@ export interface TickResult {
   newState: GameState;
   completedManufacturing: Record<string, number>;
   skillsAdvanced: Array<{ skillId: string; fromLevel: number; toLevel: number }>;
+  completedResearch: ResearchJob[];
+  completedCopies: CopyJob[];
+  completedReprocessing: Array<{ oreId: string; amount: number }>;
 }
 
 function getEffectiveWingCargoCapacity(state: GameState, fleet: GameState['systems']['fleet']['fleets'][string], wing: GameState['systems']['fleet']['fleets'][string]['wings'][number]): number {
@@ -71,6 +74,9 @@ function distributeCargoAcrossHaulingWings(
 export function runTick(state: GameState, deltaSeconds: number): TickResult {
   const completedManufacturing: Record<string, number> = {};
   let skillsAdvanced: Array<{ skillId: string; fromLevel: number; toLevel: number }> = [];
+  const completedResearch: ResearchJob[] = [];
+  const completedCopies: CopyJob[] = [];
+  const completedReprocessing: Array<{ oreId: string; amount: number }> = [];
 
   // ── 1. Skills: advance training queue ─────────────────────────────────
   const skillsResult = tickSkills(state, deltaSeconds);
@@ -115,6 +121,7 @@ export function runTick(state: GameState, deltaSeconds: number): TickResult {
   // ── 3. Reprocessing: auto-queue and advance active batch ───────────────
   if (s.unlocks['system-reprocessing']) {
     const reprResult = tickReprocessing(s, deltaSeconds);
+    const activeBatch = s.systems.reprocessing.queue[0];
 
     // Apply ore consumed by auto-batching
     const newResAfterOre = { ...s.resources };
@@ -124,6 +131,9 @@ export function runTick(state: GameState, deltaSeconds: number): TickResult {
     // Apply mineral deltas from completed batches
     for (const [mineralId, gained] of Object.entries(reprResult.mineralDeltas)) {
       newResAfterOre[mineralId] = (newResAfterOre[mineralId] ?? 0) + gained;
+    }
+    if (activeBatch && Object.keys(reprResult.mineralDeltas).length > 0) {
+      completedReprocessing.push({ oreId: activeBatch.oreId, amount: activeBatch.amount });
     }
 
     s = {
@@ -188,6 +198,8 @@ export function runTick(state: GameState, deltaSeconds: number): TickResult {
       researchResult.completedCopies.length > 0 ||
       researchResult.newBlueprints.length > 0
     ) {
+      completedResearch.push(...researchResult.completedResearch);
+      completedCopies.push(...researchResult.completedCopies);
       const completedResearchIds = new Set(researchResult.completedResearch.map(j => j.id));
       const completedCopyIds     = new Set(researchResult.completedCopies.map(j => j.id));
       const unlockIds            = new Set(researchResult.unlockBlueprintIds);
@@ -610,6 +622,13 @@ export function runTick(state: GameState, deltaSeconds: number): TickResult {
   // ── 11. Advance timestamp ─────────────────────────────────────────────────
   s = { ...s, lastUpdatedAt: nowMs };
 
-  return { newState: s, completedManufacturing, skillsAdvanced };
+  return {
+    newState: s,
+    completedManufacturing,
+    skillsAdvanced,
+    completedResearch,
+    completedCopies,
+    completedReprocessing,
+  };
 }
 

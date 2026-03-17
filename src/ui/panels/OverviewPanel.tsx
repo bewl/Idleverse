@@ -6,6 +6,7 @@ import { getManufacturingSpeedMultiplier } from '@/game/systems/manufacturing/ma
 import { FlairProgressBar } from '@/ui/components/FlairProgressBar';
 import { PanelInfoSection } from '@/ui/components/PanelInfoSection';
 import { buildSpecializationAdvice, getTrainingEtaToLevel } from '@/game/progression/specializationAdvisor';
+import { isTutorialStepCurrent } from '@/game/progression/tutorialSequence';
 import { useResourceRates } from '@/game/hooks/useResourceRates';
 import { formatCredits, formatResourceAmount, RESOURCE_REGISTRY } from '@/game/resources/resourceRegistry';
 import { SKILL_DEFINITIONS } from '@/game/systems/skills/skills.config';
@@ -671,7 +672,9 @@ function OverviewModeTabs() {
   const overviewState = useUiStore(s => s.panelStates.overview);
   const setPanelState = useUiStore(s => s.setPanelState);
   const state = useGameStore(s => s.state);
+  const completeTutorialStep = useGameStore(s => s.completeTutorialStep);
   const mode = overviewState.mode ?? 'operations';
+  const highlightGuidanceTab = isTutorialStepCurrent(state, 'command-deck') || isTutorialStepCurrent(state, 'guidance-handoff');
   const promptCount = buildProgressPrompts(state).length;
   const manufacturingQueue = state.systems.manufacturing.queue.length;
   const reprocessingQueue = state.systems.reprocessing.queue.length;
@@ -721,12 +724,18 @@ function OverviewModeTabs() {
               key={tab.id}
               role="tab"
               aria-selected={active}
-              className={`px-4 py-2 rounded-t-lg text-xs font-bold uppercase tracking-wide transition-all duration-150 border ${
+              data-tutorial-anchor={highlightGuidanceTab && tab.id === 'guidance' ? 'overview-guidance-tab' : undefined}
+              className={`px-4 py-2 rounded-t-lg text-xs font-bold uppercase tracking-wide transition-all duration-150 border ${(highlightGuidanceTab && tab.id === 'guidance') ? 'tutorial-breathe relative z-[74] ' : ''}${
                 active
                   ? 'bg-cyan-900/30 border-cyan-600/40 border-b-transparent text-cyan-300'
                   : 'border-transparent text-slate-500 hover:text-slate-300 hover:bg-white/[0.02]'
               }`}
-              onClick={() => setPanelState('overview', { mode: tab.id })}
+              onClick={() => {
+                setPanelState('overview', { mode: tab.id });
+                if (tab.id === 'guidance' && highlightGuidanceTab) {
+                  completeTutorialStep();
+                }
+              }}
             >
               <span className="flex items-center gap-2">
                 <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${active ? 'bg-cyan-400 animate-pulse' : 'bg-slate-600'}`} />

@@ -1603,6 +1603,97 @@ loop. Prestige feels like completing a chapter — preserving identity while ope
 
 - 3+ fully upgraded Level 5 outposts
 - 20+ completed Tier 3 missions
+
+---
+
+# Initiative — Inbox And Toast Notifications
+> **Status:** Active
+> **Last updated:** March 2026
+> **Depends on:** `gameStore` tick integration, `uiStore` navigation state, themed icon layer
+
+## Goal
+
+Add a player-facing command inbox that preserves important gameplay events after they happen, while pairing those durable records with short-lived toast popups when the event first fires. The system should reduce missed information without forcing the Overview panel to absorb every alert, unlock, or completion message.
+
+## Scope
+
+- Persist notification records in save-backed `GameState.notifications.entries`.
+- Add a top-bar drawer for rapid triage and a full Inbox panel for longer-lived history.
+- Generate Phase 1 notifications from progression, industry, fleet travel, combat, exploration, and economy event seams already present in the tick pipeline.
+- Allow notifications to deep-link back into the relevant panel or entity when context exists.
+- Explicitly out of scope: player-authored mail, faction diplomacy conversation trees, or configurable notification-rule filters.
+
+## Implementation Outline
+
+1. Add the canonical notification schema, save migration, and tick-result event aggregation so notifications are produced centrally rather than ad hoc in UI code.
+2. Add UI-only drawer and toast state in `uiStore`, then mount a top-bar inbox affordance, drawer preview, toast stack, and full Inbox panel from `GameLayout`.
+3. Tune event coverage and toast noise after the first live slice ships, using the Inbox panel as the durable audit trail for events that should not rely on transient HUD messaging.
+
+## Risks / Open Questions
+
+- Toast noise can get out of hand quickly if too many medium-value events are surfaced as popups instead of passive inbox entries.
+- Notification focus targets need to stay aligned with panel routing rules or deep links will rot as panels evolve.
+- Archived versus unread behavior is intentionally lightweight in the first slice; later filtering or pinning may be warranted if the event volume grows.
+
+## Files Likely Affected
+
+- `src/game/core/tickRunner.ts`
+- `src/game/notifications/notification.logic.ts`
+- `src/stores/gameStore.ts`
+- `src/stores/uiStore.ts`
+- `src/types/game.types.ts`
+- `src/ui/components/NotificationCenter.tsx`
+- `src/ui/layouts/GameLayout.tsx`
+- `src/ui/panels/InboxPanel.tsx`
+- `docs/Idleverse_AI_Architecture.md`
+- `docs/Idleverse_SYSTEM_BLUEPRINTS.md`
+
+---
+
+# Initiative — First-Pass Tutorial Tour
+> **Status:** Active
+> **Last updated:** March 2026
+> **Depends on:** Overview guidance mode, top-level shell in `GameLayout`, save/load migration, focus-target navigation
+
+## Goal
+
+Add a visually appealing onboarding layer for brand-new players so the opening loop is understandable without external explanation. The current direction is stricter than the original soft-tour concept: the tutorial remains skippable while active, but it holds the player on the current onboarding task, shows the live blocking progress directly in the tutorial window, unlocks the broader interface only after the required early-game action is actually complete, and does not offer guided replay once the save has fully completed the tour.
+
+## Scope
+
+- Add a save-scoped tutorial progression model so each new save gets its own onboarding state.
+- Add a shell-mounted overlay tour with themed cards, progress framing, checklists, live metrics, and explicit skip behavior.
+- Cover the real opening loop plus the first cross-panel fleet/mining expansion: welcome/orientation, command deck framing, start Trade I, wait for Trade I completion, first sale, starter-fleet inspection, star-map dispatch into a remote mining system, transit watch, mining assignment from the destination system, mining-screen interpretation, and handoff back to Overview Guidance.
+- Restrict game interaction during the active tutorial so only the current highlighted control can be used.
+- Add top-bar tutorial controls for active or incomplete saves, but do not allow guided replay after completion.
+- Explicitly out of scope: branching narrative, long-form lore, voiceover, or a large standalone help system.
+
+## Implementation Outline
+
+1. Add canonical tutorial progress to `GameState` and migrate older saves to a skipped state so existing players are not forced into the tour retroactively.
+2. Add a tutorial step registry plus store actions that advance the tour from real state changes rather than only from button clicks, including an explicit waiting step for Trade I completion.
+3. Extend the same registry and blocker model into Fleet, Star Map, System, and Mining so the tutorial can dispatch the starter fleet to a real destination, wait on true travel state, assign mining from the destination system, and then teach how to read the mining status board.
+4. Mount a premium overlay shell from `GameLayout`, wire skip/incomplete-tour controls into the top bar, surface live blocker/progress data in the card, dim the surrounding UI around the cutout target, and enforce a guided interaction lock that only exposes the current tutorial control.
+
+## Risks / Open Questions
+
+- Hard-gated onboarding improves clarity for first-session users but raises the penalty for stale copy or mis-targeted controls, so the highlighted targets must stay aligned with real UI affordances.
+- The current blocker approach is intentionally lighter than a true masked spotlight system; later polish may still want geometry-aware cutouts if more steps become spatially complex.
+- Route-planner inputs currently live in panel-local state, so the strongest automatic milestone for the Star Map slice is the real dispatched fleet order rather than every intermediate planner edit.
+- Tutorial copy must stay aligned with actual opening progression as the early game evolves, or the tour will rot faster than normal system docs.
+
+## Files Likely Affected
+
+- `src/types/game.types.ts`
+- `src/stores/initialState.ts`
+- `src/game/persistence/saveLoad.ts`
+- `src/game/progression/tutorialSequence.ts`
+- `src/stores/gameStore.ts`
+- `src/stores/uiStore.ts`
+- `src/ui/components/TutorialOverlay.tsx`
+- `src/ui/layouts/GameLayout.tsx`
+- `docs/Idleverse_AI_Architecture.md`
+- `docs/Idleverse_SYSTEM_BLUEPRINTS.md`
 - 8+ T2 blueprints researched
 
 ## What Resets

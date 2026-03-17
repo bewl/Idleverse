@@ -24,6 +24,7 @@ import { getEscortWing, getFleetStoredCargo, getFleetStorageCapacity, getHauling
 import { ActivityBar } from '@/ui/effects/ActivityBar';
 import { describeFleetActivity, describeWingActivity } from '@/ui/utils/fleetActivity';
 import { ThemedIcon, splitIconLabel } from '@/ui/components/ThemedIcon';
+import { getTutorialFleetTravelContext, isTutorialStepCurrent } from '@/game/progression/tutorialSequence';
 
 const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V'];
 
@@ -581,6 +582,10 @@ function FleetCard({
   const fleet = state.systems.fleet.fleets[fleetId];
   if (!fleet) return null;
 
+  const tutorialFleetContext = getTutorialFleetTravelContext(state);
+  const highlightFleetIntro = isTutorialStepCurrent(state, 'fleet-command-intro') && fleetId === tutorialFleetContext.starterFleetId;
+  const highlightTransit = isTutorialStepCurrent(state, 'fleet-arrival-watch') && fleetId === tutorialFleetContext.starterFleetId;
+
   const allShips   = state.systems.fleet.ships;
   const allPilots  = state.systems.fleet.pilots;
   const fleetShips = fleet.shipIds.map(id => allShips[id]).filter(Boolean) as ShipInstance[];
@@ -652,6 +657,7 @@ function FleetCard({
     <div
       className="rounded border bg-slate-900/40 overflow-hidden"
       style={{ borderColor: fleetColor + '44' }}
+      data-tutorial-anchor={highlightFleetIntro ? 'fleet-starter-card' : undefined}
     >
       {/* Collapsed header */}
       <div
@@ -860,7 +866,10 @@ function FleetCard({
               </span>
               <span className="text-[8px] text-slate-500">{fleetActivity.detail}</span>
               {isMoving && (
-                <div className="flex flex-col gap-1 min-w-[220px]">
+                <div
+                  className={highlightTransit ? 'tutorial-breathe flex flex-col gap-1 min-w-[220px] rounded-md border border-cyan-400/25 bg-cyan-950/10 p-2' : 'flex flex-col gap-1 min-w-[220px]'}
+                  data-tutorial-anchor={highlightTransit ? 'fleet-starter-transit' : undefined}
+                >
                   <span className="text-[9px] px-2 py-0.5 rounded bg-cyan-900/40 text-cyan-300 border border-cyan-400/25">
                     ▶ In transit → <NavTag entityType="system" entityId={fleet.fleetOrder?.destinationSystemId ?? ''} label={systemNameById[fleet.fleetOrder?.destinationSystemId ?? ''] ?? fleet.fleetOrder?.destinationSystemId ?? ''} />
                   </span>

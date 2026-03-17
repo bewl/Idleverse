@@ -3,6 +3,7 @@ import { RESOURCE_IDS } from '@/game/resources/resourceRegistry';
 import { SAVE_VERSION } from '@/game/balance/constants';
 import { generateFoundingPilot } from '@/game/systems/fleet/fleet.gen';
 import { STARTER_BLUEPRINT_RECIPE_IDS } from '@/game/systems/manufacturing/manufacturing.config';
+import { createInitialTutorialState } from '@/game/progression/tutorialSequence';
 
 const INITIAL_BLUEPRINTS: Blueprint[] = STARTER_BLUEPRINT_RECIPE_IDS.map(recipeId => ({
   id: `bpo-${recipeId}`,
@@ -37,6 +38,8 @@ export function createInitialState(): GameState {
     },
 
     resources,
+
+  tutorial: createInitialTutorialState(),
 
     systems: {
       skills: {
@@ -240,6 +243,10 @@ export function createInitialState(): GameState {
     },
 
     modifiers: {},
+
+    notifications: {
+      entries: [],
+    },
 
     settings: {
       autoSave: true,

@@ -26,6 +26,7 @@ import { ActivityBar } from '@/ui/effects/ActivityBar';
 import { SKILL_DEFINITIONS } from '@/game/systems/skills/skills.config';
 import type { CelestialBody } from '@/types/galaxy.types';
 import type { Anomaly, AnomalyType, PlayerFleet } from '@/types/game.types';
+import { getTutorialFleetTravelContext, isTutorialStepCurrent } from '@/game/progression/tutorialSequence';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -680,6 +681,8 @@ interface BeltAssignmentFeedback {
 function BodyDetail({ body, inWarp, maxOrbit, systemId }: { body: CelestialBody; inWarp: boolean; maxOrbit: number; systemId: string }) {
   const state      = useGameStore(s => s.state);
   const assignWingMining = useGameStore(s => s.assignWingToMiningBelt);
+  const tutorialFleetContext = getTutorialFleetTravelContext(state);
+  const highlightMiningAssignment = isTutorialStepCurrent(state, 'system-assign-mining');
   const [selectedWingByBelt, setSelectedWingByBelt] = useState<Record<string, string>>({});
   const [feedbackByBelt, setFeedbackByBelt] = useState<Record<string, BeltAssignmentFeedback | null>>({});
 
@@ -782,6 +785,9 @@ function BodyDetail({ body, inWarp, maxOrbit, systemId }: { body: CelestialBody;
             const selectedWingEntry = selectedWingId ? wingById.get(selectedWingId) ?? null : null;
             const fallbackWingEntry = readyMiningWings.length === 1 ? readyMiningWings[0] : null;
             const feedback = feedbackByBelt[beltId] ?? null;
+            const isTutorialTargetBelt = highlightMiningAssignment
+              && systemId === tutorialFleetContext.targetSystemId
+              && beltId === tutorialFleetContext.targetBeltId;
 
             const handleAssignWing = () => {
               const targetWing = selectedWingEntry ?? fallbackWingEntry;
@@ -805,6 +811,7 @@ function BodyDetail({ body, inWarp, maxOrbit, systemId }: { body: CelestialBody;
             return (
               <div
                 key={beltId}
+                data-tutorial-anchor={isTutorialTargetBelt ? 'system-target-belt-card' : undefined}
                 style={{
                   padding: '7px 9px',
                   borderRadius: 5,
@@ -885,7 +892,7 @@ function BodyDetail({ body, inWarp, maxOrbit, systemId }: { body: CelestialBody;
                 {!isLocked && !isDepleted && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginTop: 2 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                      <div style={{ flex: '1 1 180px', minWidth: 160 }}>
+                      <div style={{ flex: '1 1 180px', minWidth: 160 }} data-tutorial-anchor={isTutorialTargetBelt ? 'system-target-belt-wing-select' : undefined}>
                         <GameDropdown
                           value={selectedWingId}
                           onChange={nextValue => {
@@ -906,6 +913,7 @@ function BodyDetail({ body, inWarp, maxOrbit, systemId }: { body: CelestialBody;
                       <button
                         onClick={handleAssignWing}
                         disabled={inWarp || readyMiningWings.length === 0}
+                        data-tutorial-anchor={isTutorialTargetBelt ? 'system-target-belt-assign' : undefined}
                         style={{
                           padding: '6px 10px',
                           fontSize: 9,
