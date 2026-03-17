@@ -1114,7 +1114,7 @@ export function MarketPanel() {
     return (
       <div className="py-10">
         <SystemUnlockCard
-          icon="📈"
+          icon="market"
           title="Regional Market"
           skillId="trade"
           summary="Sell ore, components, and hulls for credits, then grow into route-based hauling and price-driven trade. Trade is the cleanest early branch for players who want liquidity and logistics instead of pure production."

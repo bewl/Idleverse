@@ -23,6 +23,7 @@ import { commanderSkillEtaSeconds, getCombinedCommanderBonus } from '@/game/syst
 import { getEscortWing, getFleetStoredCargo, getFleetStorageCapacity, getHaulingWingEffectiveSecurityFilter, getOperationalFleetShipIds, getWingCargoCapacity, getWingCargoTotals, getWingCargoUsed, getWingCurrentSystemId, getWingDispatchShipIds, hasActiveEscortWing, hasDispatchedHaulingWing } from '@/game/systems/fleet/wings.logic';
 import { ActivityBar } from '@/ui/effects/ActivityBar';
 import { describeFleetActivity, describeWingActivity } from '@/ui/utils/fleetActivity';
+import { ThemedIcon, splitIconLabel } from '@/ui/components/ThemedIcon';
 
 const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V'];
 
@@ -1085,7 +1086,15 @@ function FleetCard({
                           className="text-[8px] px-1.5 py-0.5 rounded border border-amber-400/30 bg-amber-900/20 text-amber-300"
                           title={COMMANDER_BONUS_LABELS[key]}
                         >
-                          {COMMANDER_BONUS_LABELS[key]} +{Math.round(val * 100)}%
+                          {(() => {
+                            const parsed = splitIconLabel(COMMANDER_BONUS_LABELS[key]);
+                            return (
+                              <span className="inline-flex items-center gap-1.5">
+                                {parsed.icon && <ThemedIcon icon={parsed.icon} size={11} tone="#fbbf24" interactive />}
+                                <span>{parsed.text} +{Math.round(val * 100)}%</span>
+                              </span>
+                            );
+                          })()}
                         </span>
                       );
                     })}

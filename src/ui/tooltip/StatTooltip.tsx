@@ -1,6 +1,7 @@
 import React from 'react';
 import { useModifierBreakdown } from '@/ui/hooks/useModifierBreakdown';
 import { GameTooltip } from '@/ui/components/GameTooltip';
+import { ThemedIcon } from '@/ui/components/ThemedIcon';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -69,8 +70,8 @@ function StatSheet({ modifierKey }: { modifierKey: string }) {
               padding: '2px 0',
               borderTop: i > 0 ? '1px solid rgba(15,23,42,0.7)' : undefined,
             }}>
-              <span style={{ fontSize: 10, color: src.type === 'skill' ? '#a78bfa' : '#fb923c', display: 'flex', alignItems: 'center', gap: 3 }}>
-                <span style={{ fontSize: 8 }}>{src.type === 'skill' ? '⚡' : '🔧'}</span>
+              <span style={{ fontSize: 10, color: src.type === 'skill' ? '#a78bfa' : '#fb923c', display: 'flex', alignItems: 'center', gap: 4 }}>
+                <ThemedIcon icon={src.type === 'skill' ? 'skills' : 'tool'} size={11} tone={src.type === 'skill' ? '#a78bfa' : '#fb923c'} />
                 {src.name}
               </span>
               <span style={{ fontSize: 10, color: '#64748b', letterSpacing: '-0.02em' }}>
@@ -111,8 +112,9 @@ function StatSheet({ modifierKey }: { modifierKey: string }) {
           </div>
           {improvements.slice(0, 3).map((imp, i) => (
             <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#334155', padding: '1px 0' }}>
-              <span style={{ color: imp.type === 'skill' ? '#6d28d9' : '#92400e' }}>
-                {imp.type === 'skill' ? '⚡' : '🔧'} {imp.name} Lv{imp.level + 1}
+              <span style={{ color: imp.type === 'skill' ? '#6d28d9' : '#92400e', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                <ThemedIcon icon={imp.type === 'skill' ? 'skills' : 'tool'} size={11} tone={imp.type === 'skill' ? '#6d28d9' : '#f59e0b'} />
+                {imp.name} Lv{imp.level + 1}
               </span>
               <span style={{ color: '#1e3a3a' }}>+{(imp.bonusPerLevel * 100).toFixed(1)}%</span>
             </div>

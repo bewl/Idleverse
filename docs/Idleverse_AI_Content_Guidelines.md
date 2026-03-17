@@ -105,6 +105,15 @@ Animated progress labels should use a consistent vocabulary across the UI.
 
 Avoid mixing near-synonyms like `tempo`, `pressure`, `activity`, and `throughput` unless they are the exact gameplay term the player already sees elsewhere.
 
+## UI Iconography
+
+- Player-facing UI should use themed SVG icon primitives instead of emoji glyphs.
+- Prefer semantic icon tokens like `mining`, `market`, `manufacturing`, `fleet`, `reprocessing`, `scan`, `cargo`, and `shield` over raw symbol literals in panel code.
+- Icon treatment should stay within the operational-console style: flat sci-fi linework, restrained glow, restrained hover motion, and subtle particle drift only.
+- Use per-icon palette variation to separate systems visually. Multi-color icons are preferred when the secondary color communicates a real subsystem, signal, warning, or focal accent.
+- When an icon belongs to a clickable row, card, tab, or button, the icon response should trigger from hovering the full interactive item, not just the icon hitbox.
+- When an icon appears in more than one screen, centralize it in a shared component rather than duplicating one-off symbols.
+
 ---
 
 ## Resources

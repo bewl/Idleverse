@@ -15,6 +15,7 @@ import { StarfieldBackground } from '@/ui/effects/StarfieldBackground';
 import { StatTooltip } from '@/ui/tooltip/StatTooltip';
 import { NavTag } from '@/ui/components/NavTag';
 import { PanelInfoSection } from '@/ui/components/PanelInfoSection';
+import { ThemedIcon } from '@/ui/components/ThemedIcon';
 
 // ─── Design tokens ─────────────────────────────────────────────────────────
 
@@ -385,7 +386,7 @@ function ActiveTrainingCard() {
         <div>
           <div className="flex items-center gap-2 mb-1">
             <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color }}>
-              {SKILL_CATEGORY_ICONS[def?.category ?? 'mining']} Training
+              <span className="inline-flex items-center gap-2"><ThemedIcon icon={SKILL_CATEGORY_ICONS[def?.category ?? 'mining']} size={13} tone={color} interactive />Training</span>
             </span>
             <span
               className="text-[9px] px-1.5 py-0.5 rounded font-mono"
@@ -646,7 +647,7 @@ function SkillDetail({ skillId }: { skillId: string }) {
       <div>
         <div className="flex items-center gap-2 mb-1">
           <span className="text-xs font-bold uppercase tracking-widest" style={{ color }}>
-            {SKILL_CATEGORY_ICONS[def.category]} {SKILL_CATEGORY_LABELS[def.category]}
+            <span className="inline-flex items-center gap-2"><ThemedIcon icon={SKILL_CATEGORY_ICONS[def.category]} size={13} tone={color} interactive />{SKILL_CATEGORY_LABELS[def.category]}</span>
           </span>
           <span className="text-[10px] px-1.5 py-0.5 rounded font-mono text-slate-400"
             style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)' }}>
@@ -790,7 +791,7 @@ function SkillDetail({ skillId }: { skillId: string }) {
                 color: unlocked ? color : queued ? `${color}99` : '#475569',
               }}>
                 {TIER_CHIP[lv]}
-                {queued && <span className="ml-0.5 opacity-60">⏳</span>}
+                  {queued && <span className="ml-1 inline-flex align-middle"><ThemedIcon icon="transit" size={10} tone={color} /></span>}
               </span>
               <span className="text-[9px] text-center text-slate-400 leading-tight font-mono">
                 {formatTrainingEta(seconds)}
@@ -899,7 +900,7 @@ export function SkillsPanel() {
               className="text-cyan-400 font-bold text-xs uppercase tracking-widest"
               style={{ textShadow: '0 0 14px rgba(34,211,238,0.45)' }}
             >
-              ⚡ Skill Queue
+              <span className="inline-flex items-center gap-2"><ThemedIcon icon="skills" size={16} tone="#22d3ee" interactive />Skill Queue</span>
             </h1>
             <QueueEtaBadge />
           </div>
@@ -952,7 +953,7 @@ export function SkillsPanel() {
                       boxShadow: isActive ? `0 0 8px ${color}22` : 'none',
                     }}
                   >
-                    {SKILL_CATEGORY_ICONS[cat]}
+                    <span className="inline-flex items-center justify-center"><ThemedIcon icon={SKILL_CATEGORY_ICONS[cat]} size={15} tone={isActive ? color : '#64748b'} interactive /></span>
                     <span className="block mt-0.5">{SKILL_CATEGORY_LABELS[cat].split(' ')[0]}</span>
                   </button>
                 );
@@ -966,7 +967,7 @@ export function SkillsPanel() {
             >
               <div className="p-2 space-y-0.5">
                 <p className="text-[10px] uppercase tracking-widest text-slate-600 px-1 py-1 font-bold">
-                  {SKILL_CATEGORY_ICONS[activeCategory]} {SKILL_CATEGORY_LABELS[activeCategory]}
+                  <span className="inline-flex items-center gap-2"><ThemedIcon icon={SKILL_CATEGORY_ICONS[activeCategory]} size={13} tone={CATEGORY_COLOR[activeCategory]} interactive />{SKILL_CATEGORY_LABELS[activeCategory]}</span>
                 </p>
                 {categorySkills.map(id => (
                   <SkillRow

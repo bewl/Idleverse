@@ -14,6 +14,7 @@ import { FleetPanel } from '@/ui/panels/FleetPanel';
 import { DevPanel } from '@/ui/dev/DevPanel';
 import StarMapPanel from '@/ui/panels/StarMapPanel';
 import { SystemPanel } from '@/ui/panels/SystemPanel';
+import { ThemedIcon } from '@/ui/components/ThemedIcon';
 import { formatResourceAmount, RESOURCE_REGISTRY } from '@/game/resources/resourceRegistry';
 import { SKILL_DEFINITIONS } from '@/game/systems/skills/skills.config';
 import { getSystemById } from '@/game/galaxy/galaxy.gen';
@@ -250,7 +251,7 @@ export function GameLayout() {
             onClick={handleToggleAudio}
             title={audioEnabled ? 'Mute audio' : 'Enable audio'}
           >
-            {audioEnabled ? '🔊' : '🔇'}
+            <ThemedIcon icon={audioEnabled ? 'audio-on' : 'audio-off'} size={15} tone={audioEnabled ? '#67e8f9' : '#64748b'} interactive />
           </button>
           {import.meta.env.DEV && (
             <button
@@ -357,7 +358,7 @@ export function GameLayout() {
                   className={isActive ? 'nav-btn-active' : 'nav-btn'}
                   onClick={() => navigate(n.id)}
                 >
-                  <span className="mr-2 text-sm">{n.icon}</span>
+                  <span className="mr-2 inline-flex items-center justify-center"><ThemedIcon icon={n.icon} size={16} tone={isActive ? '#67e8f9' : '#94a3b8'} interactive /></span>
                   <span className="flex-1 text-left">{n.label}</span>
                 </button>
               );
@@ -391,7 +392,7 @@ export function GameLayout() {
               className={isActive ? 'mob-nav-btn mob-nav-active' : 'mob-nav-btn'}
               onClick={() => navigate(n.id)}
             >
-              <span className="text-lg leading-none">{n.icon}</span>
+              <span className="leading-none inline-flex items-center justify-center"><ThemedIcon icon={n.icon} size={18} tone={isActive ? '#67e8f9' : '#475569'} interactive /></span>
               <span
                 className="text-[9px] leading-none font-mono tracking-wide"
                 style={{ color: isActive ? '#22d3ee' : '#334155' }}

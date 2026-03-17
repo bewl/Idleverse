@@ -218,6 +218,12 @@ Examples:
 
 Reusable UI primitives shared across panels.
 
+The shared icon renderer in `src/ui/components/ThemedIcon.tsx` is responsible for semantic SVG icon output, flat multi-tone line styling, restrained glow, and parent-hover animation hooks so interactive rows and buttons can animate their icons as one unit.
+
+This now includes the themed icon layer in `src/ui/components/ThemedIcon.tsx`, which is the preferred path for player-facing iconography in nav, panels, tooltips, and status chips.
+
+Shared icon hover glow and particle treatment live in `src/index.css`; panels should consume the shared primitive rather than reintroducing emoji or bespoke icon effects.
+
 Key components:
 
 - `GameTooltip.tsx` — behavioral tooltip shell + `TT.*` composable content primitives

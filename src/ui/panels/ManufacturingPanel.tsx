@@ -1285,7 +1285,7 @@ export function ManufacturingPanel() {
     return (
       <div className="py-10">
         <SystemUnlockCard
-          icon="🏭"
+          icon="manufacturing"
           title="Manufacturing Complex"
           skillId="industry"
           summary="Turn minerals into components, ships, and later blueprint-driven T2 production. Industry is the first step into a focused industrial path, but it also pairs cleanly with mining and trade."

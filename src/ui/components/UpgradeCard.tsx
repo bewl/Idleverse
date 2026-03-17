@@ -1,3 +1,5 @@
+import { ThemedIcon } from '@/ui/components/ThemedIcon';
+
 interface UpgradeCardProps {
   name: string;
   description: string;
@@ -67,12 +69,12 @@ export function UpgradeCard({
           <div className="flex items-center gap-1.5 shrink-0">
             {isPendingAutoBuild && (
               <button className="btn-secondary text-xs py-1" onClick={onCancelAutoBuild} title="Cancel one queued auto-build project">
-                ⚙ {pendingCount > 1 ? `×${pendingCount}` : 'Queued'}
+                <span className="inline-flex items-center gap-1.5"><ThemedIcon icon="manufacturing" size={12} tone="#a78bfa" interactive />{pendingCount > 1 ? `×${pendingCount}` : 'Queued'}</span>
               </button>
             )}
             {!canAfford && onAutoBuild && !autoCapReached && (
               <button className="btn-violet text-xs py-1" onClick={onAutoBuild} title="Auto-queue manufacturing to build this">
-                ⚡ Auto
+                <span className="inline-flex items-center gap-1.5"><ThemedIcon icon="skills" size={12} tone="#c4b5fd" interactive />Auto</span>
               </button>
             )}
             <button

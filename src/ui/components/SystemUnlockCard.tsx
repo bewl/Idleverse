@@ -4,6 +4,7 @@ import { useUiStore, type PanelId } from '@/stores/uiStore';
 import { getTrainingEtaToLevel } from '@/game/progression/specializationAdvisor';
 import { SKILL_DEFINITIONS } from '@/game/systems/skills/skills.config';
 import { formatTrainingEta } from '@/game/systems/skills/skills.logic';
+import { ThemedIcon } from '@/ui/components/ThemedIcon';
 
 import type { GameState } from '@/types/game.types';
 
@@ -53,7 +54,7 @@ export function SystemUnlockCard({
           className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl text-2xl"
           style={{ background: `${accentColor}14`, border: `1px solid ${accentColor}33` }}
         >
-          {icon}
+          <ThemedIcon icon={icon} size={28} tone={accentColor} interactive />
         </div>
         <div className="min-w-0 flex-1">
           <div className="text-[10px] font-bold uppercase tracking-widest" style={{ color: accentColor }}>

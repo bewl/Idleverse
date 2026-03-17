@@ -151,6 +151,7 @@ Refresh the manufacturing panel with the same higher-effort treatment as the rep
 - The jobs view can become noisy if research/copy telemetry is surfaced too aggressively; density has to stay scan-friendly.
 - Keeping tabs while reducing fragmentation is lower risk, but a future pass may still want a single-scroll manufacturing surface.
 - The current panel already has strong T2 mechanics; the main risk is UX regression from over-condensing controls.
+- The new themed icon pass should replace player-facing emoji consistently across nav, headers, alerts, and status chips so the UI does not end up with two conflicting visual languages.
 
 ## Files Likely Affected
 

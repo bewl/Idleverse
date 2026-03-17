@@ -673,7 +673,7 @@ export function ReprocessingPanel() {
     return (
       <div className="py-10">
         <SystemUnlockCard
-          icon="⚗️"
+          icon="reprocessing"
           title="Reprocessing Facility"
           skillId="reprocessing"
           summary="Convert ore into minerals for higher-value sales or for manufacturing inputs. Reprocessing is the bridge between a raw mining loop and a more deliberate industrial economy."

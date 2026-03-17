@@ -19,6 +19,7 @@ import { computeFleetCargoCapacity } from '@/game/systems/fleet/fleet.logic';
 import { getFleetStoredCargo, getFleetStorageCapacity, getHaulingWings, getOperationalFleetShipIds, getWingCurrentSystemId, hasActiveEscortWing } from '@/game/systems/fleet/wings.logic';
 import { ActivityBar } from '@/ui/effects/ActivityBar';
 import { describeFleetActivity } from '@/ui/utils/fleetActivity';
+import { ThemedIcon } from '@/ui/components/ThemedIcon';
 
 import type { AnomalyType, GameState, WingType } from '@/types/game.types';
 
@@ -560,7 +561,7 @@ function ProgressionShellCard() {
               onClick={() => navigate(item.panelId, item.focusTarget ?? undefined)}
             >
               <div className="flex items-start gap-3">
-                <span className="text-base leading-none mt-0.5">{item.icon}</span>
+                <span className="inline-flex items-center justify-center mt-0.5"><ThemedIcon icon={item.icon} size={18} tone={item.accentColor} interactive /></span>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-[11px] font-semibold text-slate-100">{item.title}</span>
@@ -1317,7 +1318,7 @@ function AlertsCard() {
 
   if (alerts.length === 0) return null;
 
-  const iconMap = { cargo: '📦', hull: '🛡️', idle: '💤', escort: '⚔️' };
+  const iconMap = { cargo: 'cargo', hull: 'shield', idle: 'idle', escort: 'combat' } as const;
   const colorMap = { cargo: 'text-amber-400', hull: 'text-rose-400', idle: 'text-slate-500', escort: 'text-rose-300' };
 
   return (
@@ -1325,10 +1326,10 @@ function AlertsCard() {
       className="rounded-xl p-4 flex flex-col gap-2"
       style={{ background: 'rgba(3,8,20,0.7)', border: '1px solid rgba(251,146,60,0.2)' }}
     >
-      <div className="text-[10px] text-amber-400 uppercase tracking-widest font-bold">⚠️ Alerts</div>
+      <div className="text-[10px] text-amber-400 uppercase tracking-widest font-bold flex items-center gap-2"><ThemedIcon icon="warning" size={14} tone="#fbbf24" interactive />Alerts</div>
       {alerts.slice(0, 6).map((alert, i) => (
         <div key={i} className="flex items-center gap-2 text-xs">
-          <span className={colorMap[alert.type]}>{iconMap[alert.type]}</span>
+          <span className={colorMap[alert.type]}><ThemedIcon icon={iconMap[alert.type]} size={14} tone={alert.type === 'cargo' ? '#f59e0b' : alert.type === 'hull' ? '#fb7185' : alert.type === 'escort' ? '#f87171' : '#64748b'} interactive /></span>
           <NavTag entityType="fleet" entityId={alert.fleetId} label={alert.fleetName} />
           <span className="text-slate-400">— {alert.detail}</span>
         </div>
@@ -1385,6 +1386,7 @@ function ActiveSkillCard() {
           <div className="text-slate-600 text-[10px]">{(pct * 100).toFixed(1)}%</div>
         </div>
       </div>
+      <div className="flex items-center gap-2 text-[9px] text-cyan-400 uppercase tracking-widest font-bold"><ThemedIcon icon="skills" size={13} tone="#22d3ee" interactive />Corp Research</div>
       <FlairProgressBar value={pct} color="cyan" label="Training progress" valueLabel={`${(pct * 100).toFixed(1)}%`} />
       {skillsState.queue.length > 0 && (
         <div className="text-slate-600 text-xs">
@@ -1418,7 +1420,7 @@ function ManufacturingCard() {
         className="rounded-xl p-4 flex flex-col gap-2"
         style={{ background: 'rgba(3,8,20,0.7)', border: '1px solid rgba(255,255,255,0.07)', opacity: 0.5 }}
       >
-        <div className="text-[10px] text-slate-500 uppercase tracking-widest">🏭 Manufacturing</div>
+        <div className="text-[10px] text-slate-500 uppercase tracking-widest flex items-center gap-2"><ThemedIcon icon="manufacturing" size={13} tone="#fbbf24" interactive />Manufacturing</div>
         <p className="text-slate-600 text-xs italic">Locked — train Industry I to unlock.</p>
       </button>
     );
@@ -1434,7 +1436,7 @@ function ManufacturingCard() {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${researchLoad + copyLoad > 0 ? 'bg-cyan-400 animate-pulse' : 'bg-slate-600'}`} />
-            <div className="text-[10px] text-slate-500 uppercase tracking-widest">🏭 Manufacturing</div>
+            <div className="text-[10px] text-slate-500 uppercase tracking-widest flex items-center gap-2"><ThemedIcon icon="manufacturing" size={13} tone="#fbbf24" interactive />Manufacturing</div>
           </div>
           <div className="flex items-center gap-2">
             <span className="text-[9px] px-1.5 py-0.5 rounded border border-violet-700/30 bg-violet-950/15 text-violet-300 font-mono">grade {speedGrade}</span>
@@ -1474,7 +1476,7 @@ function ManufacturingCard() {
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
           <span className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse shrink-0" />
-          <div className="text-[10px] text-slate-500 uppercase tracking-widest">🏭 Manufacturing</div>
+          <div className="text-[10px] text-slate-500 uppercase tracking-widest flex items-center gap-2"><ThemedIcon icon="manufacturing" size={13} tone="#a78bfa" interactive />Manufacturing</div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <span className="text-[9px] px-1.5 py-0.5 rounded border border-violet-700/30 bg-violet-950/15 text-violet-300 font-mono">grade {speedGrade}</span>
@@ -1621,7 +1623,7 @@ function CombatLogCard() {
 
   return (
     <div className="panel-card">
-      <h3 className="text-[10px] uppercase tracking-widest text-slate-500 mb-2">⚔ Recent Combat</h3>
+      <h3 className="text-[10px] uppercase tracking-widest text-slate-500 mb-2 flex items-center gap-2"><ThemedIcon icon="combat" size={13} tone="#f87171" interactive />Recent Combat</h3>
       <div className="flex flex-col gap-1.5">
         {recent.map(entry => (
           <div key={entry.id} className="flex items-start gap-2 py-1 border-b border-slate-800/50 last:border-0">
@@ -1673,7 +1675,7 @@ function FleetStatusCard() {
       style={{ background: 'rgba(3,8,20,0.7)', border: '1px solid rgba(255,255,255,0.07)' }}
     >
       <div className="flex items-center justify-between mb-1">
-        <div className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">🚀 Fleets</div>
+        <div className="text-[10px] text-slate-500 uppercase tracking-widest font-bold flex items-center gap-2"><ThemedIcon icon="fleet" size={13} tone="#22d3ee" interactive />Fleets</div>
         <span className="text-[9px] font-mono text-slate-600">{fleets.length} fleet{fleets.length !== 1 ? 's' : ''}</span>
       </div>
       {fleets.map(fleet => {
@@ -1782,7 +1784,7 @@ export function OverviewPanel() {
 
   return (
     <div className="flex flex-col gap-4">
-      <h2 className="panel-header">📊 Corp Command Center</h2>
+      <h2 className="panel-header"><ThemedIcon icon="overview" size={18} tone="#22d3ee" interactive />Corp Command Center</h2>
       <OverviewModeTabs />
 
       {mode === 'operations' ? (

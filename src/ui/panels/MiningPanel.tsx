@@ -9,6 +9,7 @@ import { getFleetStorageCapacity, getFleetStoredCargo, getHaulingWings, getOpera
 import { useUiStore } from '@/stores/uiStore';
 import { ActivityBar } from '@/ui/effects/ActivityBar';
 import { describeFleetActivity, describeWingActivity } from '@/ui/utils/fleetActivity';
+import { ThemedIcon } from '@/ui/components/ThemedIcon';
 
 // ─── Tier color helper ───────────────────────────────────────────────────────
 
@@ -380,7 +381,7 @@ export function MiningPanel() {
     <div className="flex flex-col gap-4">
       {/* Header */}
       <div>
-        <h2 className="panel-header">⛏ Fleet Mining Operations</h2>
+        <h2 className="panel-header"><ThemedIcon icon="mining" size={18} tone="#22d3ee" interactive />Fleet Mining Operations</h2>
         <p className="text-slate-500 text-xs">
           {miningFleets.length === 0
             ? 'No fleets are currently mining. Open Fleet and assign ships to ore belts.'

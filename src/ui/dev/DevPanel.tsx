@@ -37,6 +37,7 @@ import { useUiStore } from '@/stores/uiStore';
 import { FACTION_DEFINITIONS, FACTION_ORDER } from '@/game/systems/factions/faction.config';
 import { generateGalaxy } from '@/game/galaxy/galaxy.gen';
 import { GameDropdown, type DropdownOption } from '@/ui/components/GameDropdown';
+import { ThemedIcon } from '@/ui/components/ThemedIcon';
 import type { GameState, SkillsState, ShipInstance, AnomalyType, Anomaly } from '@/types/game.types';
 import type { FactionId } from '@/types/faction.types';
 
@@ -289,7 +290,7 @@ function ResourcesTab() {
           background: 'rgba(120,53,15,0.3)', color: '#fbbf24', cursor: 'pointer', marginBottom: 2,
         }}
       >
-        ⚡ INJECT +50K ALL RESOURCES + 10M ISK
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><ThemedIcon icon="skills" size={12} tone="#fbbf24" interactive />INJECT +50K ALL RESOURCES + 10M ISK</span>
       </button>
 
       <div style={{ fontSize: 8, color: '#44403c', fontFamily: 'monospace', marginBottom: 4 }}>
@@ -388,7 +389,7 @@ function SkillsTab() {
             background: 'rgba(120,53,15,0.3)', color: '#fbbf24', cursor: 'pointer',
           }}
         >
-          ⚡ MAX ALL (Lv5)
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><ThemedIcon icon="skills" size={12} tone="#fbbf24" interactive />MAX ALL (Lv5)</span>
         </button>
         <button
           onClick={resetAll}
@@ -586,7 +587,7 @@ function ScenariosTab() {
                   cursor: 'pointer', transition: 'all 0.15s',
                 }}
               >
-                {isApplied ? '✓ Applied' : 'Apply'}
+                {isApplied ? 'Applied' : 'Apply'}
               </button>
             </div>
             <p style={{ fontSize: 9, color: '#78716c', margin: 0, lineHeight: 1.4 }}>{scenario.desc}</p>
@@ -601,7 +602,7 @@ function ScenariosTab() {
         background: 'rgba(69,10,10,0.15)',
       }}>
         <span style={{ fontSize: 9, fontWeight: 700, color: '#f87171', letterSpacing: '0.1em', fontFamily: 'monospace' }}>
-          ⚠ DANGER ZONE
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><ThemedIcon icon="warning" size={12} tone="#f87171" interactive />DANGER ZONE</span>
         </span>
         <p style={{ fontSize: 9, color: '#78716c', margin: '4px 0 8px', lineHeight: 1.4 }}>
           Wipes the save file and resets game state to a fresh new game. Cannot be undone.
@@ -645,7 +646,7 @@ function ScenariosTab() {
               cursor: 'pointer',
             }}
           >
-            🗑 Wipe Save
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><ThemedIcon icon="warning" size={12} tone="#f87171" interactive />Wipe Save</span>
           </button>
         )}
       </div>
@@ -823,7 +824,7 @@ function FleetTab() {
           background: 'rgba(120,53,15,0.3)', color: '#fbbf24', cursor: 'pointer', marginBottom: 8,
         }}
       >
-        ⚡ SPAWN ONE OF EACH HULL
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><ThemedIcon icon="fleet" size={12} tone="#fbbf24" interactive />SPAWN ONE OF EACH HULL</span>
       </button>
 
       {/* Per-hull buttons */}
@@ -844,7 +845,7 @@ function FleetTab() {
             <div style={{ minWidth: 0 }}>
               <div style={{ fontSize: 10, fontWeight: 600, color: isSpawned ? '#22d3ee' : '#cbd5e1' }}>{hull.name}</div>
               <div style={{ fontSize: 8, color: '#475569', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 180 }}>
-                ⚔ {hull.baseCombatRating}  ⛏ {hull.baseMiningBonus}  ▣ {hull.moduleSlots.high}H/{hull.moduleSlots.mid}M/{hull.moduleSlots.low}L
+                DPS {hull.baseCombatRating}  MIN {hull.baseMiningBonus}  FIT {hull.moduleSlots.high}H/{hull.moduleSlots.mid}M/{hull.moduleSlots.low}L
               </div>
             </div>
             <button
@@ -857,7 +858,7 @@ function FleetTab() {
                 color: '#22d3ee', cursor: 'pointer', transition: 'all 0.15s',
               }}
             >
-              {isSpawned ? '✓' : 'SPAWN'}
+              {isSpawned ? 'DONE' : 'SPAWN'}
             </button>
           </div>
         );
@@ -1084,7 +1085,7 @@ function GalaxyTab() {
             background: 'rgba(88,28,135,0.25)', color: '#c084fc', cursor: 'pointer',
           }}
         >
-          ◎ Reveal System
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><ThemedIcon icon="scan" size={12} tone="#c084fc" interactive />Reveal System</span>
         </button>
       </div>
 
@@ -1128,7 +1129,7 @@ function FactionsTab() {
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
       }}>
         <span style={{ fontSize: 9, fontFamily: 'monospace', color: docked ? '#4ade80' : '#475569' }}>
-          {docked ? `⬡ DOCKED: ${docked}` : '⬡ UNDOCKED'}
+          {docked ? `DOCKED: ${docked}` : 'UNDOCKED'}
         </span>
         {docked && (
           <button
@@ -1246,7 +1247,7 @@ function StateTab() {
         {unlocks.length === 0
           ? <div style={{ color: '#44403c', padding: '4px 0' }}>No unlocks active</div>
           : unlocks.map(k => (
-            <div key={k} style={{ color: '#4ade80', padding: '1px 0' }}>✓ {k}</div>
+            <div key={k} style={{ color: '#4ade80', padding: '1px 0', display: 'flex', alignItems: 'center', gap: 6 }}><ThemedIcon icon="success" size={10} tone="#4ade80" />{k}</div>
           ))
         }
       </div>

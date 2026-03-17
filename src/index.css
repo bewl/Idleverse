@@ -45,6 +45,17 @@
   50%       { opacity: 1; }
 }
 
+@keyframes icon-halo-pulse {
+  0%, 100% { opacity: 0.18; transform: scale(0.92); }
+  50% { opacity: 0.42; transform: scale(1.08); }
+}
+
+@keyframes icon-particle-drift {
+  0% { opacity: 0; transform: translate3d(0, 0, 0) scale(0.4); }
+  25% { opacity: 0.9; }
+  100% { opacity: 0; transform: translate3d(var(--particle-x), var(--particle-y), 0) scale(1); }
+}
+
 /* ── Card glow pulses ────────────────────────────────────────── */
 @keyframes glow-pulse-cyan {
   0%, 100% { box-shadow: 0 0 6px rgba(34,211,238,0.10), inset 0 0 18px rgba(34,211,238,0.03); }
@@ -256,6 +267,159 @@ button:focus-visible { outline: none; }
 
 .resource-chip:hover { border-color: rgba(100, 116, 139, 0.65); }
 .nav-btn:active      { transform: scale(0.97); }
+
+.idleverse-icon {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--icon-size, 16px);
+  height: var(--icon-size, 16px);
+  isolation: isolate;
+  flex-shrink: 0;
+}
+
+.idleverse-icon__svg {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  z-index: 2;
+  filter:
+    drop-shadow(0 0 3px color-mix(in srgb, var(--icon-glow, #38bdf8) 22%, transparent))
+    drop-shadow(0 0 8px color-mix(in srgb, var(--icon-glow, #38bdf8) 18%, transparent));
+  transition: transform 180ms ease, filter 180ms ease, opacity 180ms ease;
+}
+
+.idleverse-icon__stroke-primary,
+.idleverse-icon__stroke-secondary,
+.idleverse-icon__stroke-accent {
+  fill: none;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.idleverse-icon__stroke-primary { stroke: var(--icon-primary, #67e8f9); }
+.idleverse-icon__stroke-secondary { stroke: var(--icon-secondary, #a78bfa); }
+.idleverse-icon__stroke-accent { stroke: var(--icon-accent, #f8fafc); }
+
+.idleverse-icon__fill-primary,
+.idleverse-icon__fill-secondary,
+.idleverse-icon__fill-accent {
+  stroke: none;
+}
+
+.idleverse-icon__fill-primary { fill: var(--icon-primary, #67e8f9); }
+.idleverse-icon__fill-secondary { fill: var(--icon-secondary, #a78bfa); }
+.idleverse-icon__fill-accent { fill: var(--icon-accent, #f8fafc); }
+
+.idleverse-icon__glow {
+  position: absolute;
+  inset: 10%;
+  border-radius: 999px;
+  background: radial-gradient(circle, color-mix(in srgb, var(--icon-glow, #38bdf8) 18%, transparent) 0%, transparent 72%);
+  opacity: 0.12;
+  z-index: 0;
+  animation: icon-halo-pulse 3.8s ease-in-out infinite;
+}
+
+.idleverse-icon__particles {
+  position: absolute;
+  inset: -20%;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.idleverse-icon__particle {
+  position: absolute;
+  width: max(2px, calc(var(--icon-size, 16px) * 0.12));
+  height: max(2px, calc(var(--icon-size, 16px) * 0.12));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--icon-secondary, #a78bfa) 76%, white 24%);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--icon-glow, #38bdf8) 35%, transparent);
+  opacity: 0;
+}
+
+.idleverse-icon__particle--a { left: 58%; top: 14%; --particle-x: 5px; --particle-y: -8px; }
+.idleverse-icon__particle--b { left: 22%; top: 56%; --particle-x: -7px; --particle-y: 6px; }
+.idleverse-icon__particle--c { left: 76%; top: 62%; --particle-x: 8px; --particle-y: 5px; }
+
+.idleverse-icon--interactive:hover .idleverse-icon__svg,
+.idleverse-icon--interactive:focus-visible .idleverse-icon__svg,
+button:hover .idleverse-icon--interactive .idleverse-icon__svg,
+a:hover .idleverse-icon--interactive .idleverse-icon__svg,
+.group:hover .idleverse-icon--interactive .idleverse-icon__svg,
+.nav-btn:hover .idleverse-icon--interactive .idleverse-icon__svg,
+.nav-btn-active .idleverse-icon--interactive .idleverse-icon__svg,
+.mob-nav-btn:hover .idleverse-icon--interactive .idleverse-icon__svg,
+.mob-nav-active .idleverse-icon--interactive .idleverse-icon__svg,
+.status-pill:hover .idleverse-icon--interactive .idleverse-icon__svg {
+  transform: translateY(-1px) scale(1.06);
+  filter:
+    drop-shadow(0 0 4px color-mix(in srgb, var(--icon-accent, #f8fafc) 12%, transparent))
+    drop-shadow(0 0 12px color-mix(in srgb, var(--icon-glow, #38bdf8) 32%, transparent));
+}
+
+.idleverse-icon--interactive:hover .idleverse-icon__glow,
+.idleverse-icon--interactive:focus-visible .idleverse-icon__glow,
+button:hover .idleverse-icon--interactive .idleverse-icon__glow,
+a:hover .idleverse-icon--interactive .idleverse-icon__glow,
+.group:hover .idleverse-icon--interactive .idleverse-icon__glow,
+.nav-btn:hover .idleverse-icon--interactive .idleverse-icon__glow,
+.nav-btn-active .idleverse-icon--interactive .idleverse-icon__glow,
+.mob-nav-btn:hover .idleverse-icon--interactive .idleverse-icon__glow,
+.mob-nav-active .idleverse-icon--interactive .idleverse-icon__glow,
+.status-pill:hover .idleverse-icon--interactive .idleverse-icon__glow {
+  opacity: 0.28;
+}
+
+.idleverse-icon--interactive:hover .idleverse-icon__particle,
+.idleverse-icon--interactive:focus-visible .idleverse-icon__particle,
+button:hover .idleverse-icon--interactive .idleverse-icon__particle,
+a:hover .idleverse-icon--interactive .idleverse-icon__particle,
+.group:hover .idleverse-icon--interactive .idleverse-icon__particle,
+.nav-btn:hover .idleverse-icon--interactive .idleverse-icon__particle,
+.nav-btn-active .idleverse-icon--interactive .idleverse-icon__particle,
+.mob-nav-btn:hover .idleverse-icon--interactive .idleverse-icon__particle,
+.mob-nav-active .idleverse-icon--interactive .idleverse-icon__particle,
+.status-pill:hover .idleverse-icon--interactive .idleverse-icon__particle {
+  animation: icon-particle-drift 700ms ease-out forwards;
+}
+
+.idleverse-icon--interactive:hover .idleverse-icon__particle--b,
+.idleverse-icon--interactive:focus-visible .idleverse-icon__particle--b,
+button:hover .idleverse-icon--interactive .idleverse-icon__particle--b,
+a:hover .idleverse-icon--interactive .idleverse-icon__particle--b,
+.group:hover .idleverse-icon--interactive .idleverse-icon__particle--b,
+.nav-btn:hover .idleverse-icon--interactive .idleverse-icon__particle--b,
+.nav-btn-active .idleverse-icon--interactive .idleverse-icon__particle--b,
+.mob-nav-btn:hover .idleverse-icon--interactive .idleverse-icon__particle--b,
+.mob-nav-active .idleverse-icon--interactive .idleverse-icon__particle--b,
+.status-pill:hover .idleverse-icon--interactive .idleverse-icon__particle--b {
+  animation-delay: 70ms;
+}
+
+.idleverse-icon--interactive:hover .idleverse-icon__particle--c,
+.idleverse-icon--interactive:focus-visible .idleverse-icon__particle--c,
+button:hover .idleverse-icon--interactive .idleverse-icon__particle--c,
+a:hover .idleverse-icon--interactive .idleverse-icon__particle--c,
+.group:hover .idleverse-icon--interactive .idleverse-icon__particle--c,
+.nav-btn:hover .idleverse-icon--interactive .idleverse-icon__particle--c,
+.nav-btn-active .idleverse-icon--interactive .idleverse-icon__particle--c,
+.mob-nav-btn:hover .idleverse-icon--interactive .idleverse-icon__particle--c,
+.mob-nav-active .idleverse-icon--interactive .idleverse-icon__particle--c,
+.status-pill:hover .idleverse-icon--interactive .idleverse-icon__particle--c {
+  animation-delay: 130ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .idleverse-icon__glow,
+  .idleverse-icon__particle,
+  .idleverse-icon__svg {
+    animation: none !important;
+    transition: none !important;
+  }
+}
 
 /* ── Status pills (clickable status bar items) ───────────────── */
 .status-pill {
