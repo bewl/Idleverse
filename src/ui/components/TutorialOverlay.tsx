@@ -111,6 +111,10 @@ export function TutorialOverlay({
 
   const handleDragStart = (event: React.PointerEvent<HTMLDivElement>) => {
     if (event.pointerType === 'mouse' && event.button !== 0) return;
+    const target = event.target as HTMLElement | null;
+    if (target?.closest('button, a, input, select, textarea, [role="button"], [data-tutorial-no-drag="true"]')) {
+      return;
+    }
     dragStateRef.current = {
       pointerId: event.pointerId,
       startX: event.clientX,
@@ -198,6 +202,7 @@ export function TutorialOverlay({
                 </div>
               </div>
               <button
+                data-tutorial-no-drag="true"
                 className="rounded-lg border border-white/10 bg-[rgba(2,6,23,0.98)] px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.22em] text-slate-400 transition-colors hover:border-red-400/30 hover:text-red-200"
                 onClick={onSkip}
               >
