@@ -1,7 +1,3 @@
-| **Fleet wings (hauling + escort)** | **⚡ FC-3 ACTIVE** | **Core wing model, escort-aware haul routing, and detached escort skirmish response shipped; richer combat-response follow-ons remain** |
-| **Now** | **FC-3 follow-ons** | Core wings, escort-aware haul routing, and detached escort skirmishes are live, but richer convoy-defense behaviors still need to land on top of the shipped wing model. |
-- Hauling wings now choose routes based on escort cover: escorted trips prefer direct routing, while unescorted trips automatically prefer the safest available path and only fall back to riskier routes when necessary.
-- Escorted hauling wings now auto-resolve detached skirmishes against hostile NPC groups encountered during convoy travel, rewarding loot/bounties and applying hull damage to the dispatched wing ships without pulling the rest of the fleet off station.
 # Idleverse – Feature Design Plan
 
 ## Purpose
@@ -26,22 +22,499 @@ impact. Each phase is independently shippable and leaves the game in a playable,
 
 ---
 
+## Planning Log Usage
+
+This file is also the canonical home for long-lived plans created during discussion.
+
+Use these rules whenever a new plan is discussed:
+
+1. Add the plan here in the same session it is created.
+2. Update the existing section when the plan evolves; do not leave conflicting versions in chat or append stale duplicates.
+3. Keep the section implementation-facing: scope, dependencies, milestones, risks, and follow-up slices.
+4. If the plan changes architecture, formulas, or resources, update the matching docs alongside this file.
+
+### Planning Section Template
+
+```markdown
+# Phase / Feature / Initiative — Name
+> **Status:** Proposed | Active | Blocked | Deferred
+> **Last updated:** March 2026
+> **Depends on:** list prerequisites or `None`
+
+## Goal
+
+One paragraph describing what this plan is trying to achieve and why it matters.
+
+## Scope
+
+- In scope item
+- In scope item
+- Explicitly out of scope item
+
+## Implementation Outline
+
+1. First concrete slice.
+2. Second concrete slice.
+3. Validation and follow-up slice.
+
+## Risks / Open Questions
+
+- Risk or unresolved design question.
+- Balance or UX question to revisit.
+
+## Files Likely Affected
+
+- `src/...`
+- `docs/...`
+```
+
+### Recommended Status Meanings
+
+- `Proposed` — discussed and documented, but not being implemented yet.
+- `Active` — current working plan and expected implementation track.
+- `Blocked` — valid plan, but waiting on another dependency or decision.
+- `Deferred` — intentionally paused; kept for future reference.
+
+---
+
+# Initiative — Layered Content Expansion
+> **Status:** Active
+> **Last updated:** March 2026
+> **Depends on:** Manufacturing queue, fleet fitting, timed fleet travel, current T1/T2 ship pipeline
+
+## Goal
+
+Broaden the midgame industrial ladder so progression does not stall at destroyer-era hulls and a thin fitting catalog. The approved direction is foundation-first: make modules real manufactured inventory, add one new ore-to-mineral branch, add shared cruiser-support components, and use that base to unlock the first cruiser-class hull and its supporting module family.
+
+## Scope
+
+- Convert all current T1 modules into manufactured inventory items with starter blueprints, market pricing, and save-safe migration support.
+- Add the Ionite → Fluxite lowsec resource branch to widen midgame mineral sourcing.
+- Add shared Tier 3 industrial parts: Armor Honeycomb, Reactor Lattice, and Targeting Bus.
+- Add the first cruiser-support module family via Tracking Computer I/II.
+- Add the first cruiser-class hull and its manufacturing recipe.
+- Explicitly out of scope: T2 cruisers, faction cruiser variants, exploration-loot content chains, and a full second module balance pass.
+
+## Implementation Outline
+
+1. Ship the fitting foundation: module resources, module recipes, starter BPOs, and module consumption/return rules for fitting, removal, recall, and save migration.
+2. Ship the new industrial branch: Ionite belt, Fluxite mineral, and the shared cruiser-support components that feed modules and hulls.
+3. Ship the first visible payoff: Tracking Computers, Cruiser hull manufacturing, market visibility, and doc/balance sync.
+
+## Risks / Open Questions
+
+- Market, dev, and utility surfaces must read canonical registry exports rather than stale hardcoded item lists or future content waves will drift again.
+- Module recipes are now broad, but a later pass should decide which modules deserve skill gating or T2 upgrade paths.
+- Cruiser content currently lands as a single broad combat hull; specialized cruiser branches remain a follow-up wave.
+
+## Files Likely Affected
+
+- `src/game/resources/resourceRegistry.ts`
+- `src/game/systems/manufacturing/manufacturing.config.ts`
+- `src/game/systems/fleet/fleet.config.ts`
+- `src/game/systems/fleet/fleet.logic.ts`
+- `src/game/systems/mining/mining.config.ts`
+- `src/game/systems/reprocessing/reprocessing.config.ts`
+- `src/stores/initialState.ts`
+- `src/stores/gameStore.ts`
+- `docs/Idleverse_RESOURCE_REGISTRY.md`
+- `docs/Idleverse_SYSTEM_BLUEPRINTS.md`
+- `docs/Idleverse_BALANCE_FORMULAS.md`
+
+---
+
+# Initiative — Manufacturing Panel Overhaul
+> **Status:** Active
+> **Last updated:** March 2026
+> **Depends on:** Existing manufacturing queue, blueprint research/copy systems, current UI primitives
+
+## Goal
+
+Refresh the manufacturing panel with the same higher-effort treatment as the reprocessing tab, but tuned for Idleverse's preferred UI flavor: dense, compact, data-forward, and only subtly animated. The panel should reduce jobs-versus-blueprints fragmentation without changing the underlying manufacturing, research, or copy mechanics.
+
+## Scope
+
+- Keep the existing `jobs` and `blueprints` tabs for now.
+- Make the `jobs` view operationally complete by surfacing production queue state, research/copy activity, and T2 BPC readiness in one place.
+- Tighten queued-job presentation into expandable compact rows with stronger hierarchy and better ETA surfacing.
+- Make T2 recipe blockers visible before queue attempts.
+- Explicitly out of scope: manufacturing logic changes, blueprint system redesign, or fully merging both tabs into one monolithic panel.
+
+## Implementation Outline
+
+1. Add a compact manufacturing command header with queue load, lab load, speed grade, and a subtle activity indicator.
+2. Integrate research/copy telemetry and T2 readiness into the jobs view so common production work no longer requires constant tab switching.
+3. Replace flat queued-job rows with expandable dense operational rows and tighten recipe cards for faster scanning.
+
+## Risks / Open Questions
+
+- The jobs view can become noisy if research/copy telemetry is surfaced too aggressively; density has to stay scan-friendly.
+- Keeping tabs while reducing fragmentation is lower risk, but a future pass may still want a single-scroll manufacturing surface.
+- The current panel already has strong T2 mechanics; the main risk is UX regression from over-condensing controls.
+
+## Files Likely Affected
+
+- `src/ui/panels/ManufacturingPanel.tsx`
+- `src/ui/components/PanelInfoSection.tsx`
+- `src/ui/effects/ActivityBar.tsx`
+- `src/ui/components/FlairProgressBar.tsx`
+
+---
+
+# Initiative — Reprocessing Panel Overhaul
+> **Status:** Active
+> **Last updated:** March 2026
+> **Depends on:** Existing reprocessing queue, auto-reprocessing thresholds, current UI primitives
+
+## Goal
+
+Refresh the reprocessing panel with the same higher-effort treatment as manufacturing: dense, operational, subtly animated, and easier to scan as a live refinery console rather than a flat form plus queue. The underlying reprocessing mechanics remain unchanged.
+
+## Scope
+
+- Add a compact command deck with queue load, efficiency, auto-line status, and live refinery activity.
+- Tighten auto-refinery cards so they expose surplus, ready batches, queued batches, and line state at a glance.
+- Replace flat queued-job rows with expandable compact refinery rows.
+- Keep the current mechanics and controls, but make the panel feel more alive and more operationally legible.
+- Explicitly out of scope: reprocessing logic changes or any new industrial mechanics.
+
+## Implementation Outline
+
+1. Add the command deck and refinery activity strip at the top of the panel.
+2. Enrich auto-refinery cards with denser telemetry and semantic status treatment.
+3. Upgrade the manual queue section with stronger active-job presentation and expandable queued-batch rows.
+
+## Risks / Open Questions
+
+- Reprocessing is simpler than manufacturing, so added telemetry has to stay compact enough to avoid feeling ornamental.
+- Auto-refinery lines need to feel alive without obscuring the manual queue flow.
+- If the panel becomes too tall, a later pass may need more aggressive progressive-disclosure defaults.
+
+## Files Likely Affected
+
+- `src/ui/panels/ReprocessingPanel.tsx`
+- `src/ui/components/PanelInfoSection.tsx`
+- `src/ui/effects/ActivityBar.tsx`
+- `src/ui/components/FlairProgressBar.tsx`
+
+---
+
+# Initiative — Overview Operations Deck Refresh
+> **Status:** Active
+> **Last updated:** March 2026
+> **Depends on:** Existing Overview operations mode, UI navigation store, current industrial panel language
+
+## Goal
+
+Tighten the Overview operations mode so it behaves like a real command deck: dense, read-only, and better aligned with the newer manufacturing and reprocessing panel treatment. The overview should stay a summary surface, but it should expose live tempo and industrial posture faster.
+
+## Scope
+
+- Add a compact operations command deck that summarizes corp training, industry, refinery load, and fleet tempo.
+- Upgrade the overview manufacturing card so it carries the denser industrial language used in the full manufacturing panel.
+- Keep the overview read-only and drill-down oriented; no queue-management controls are added here.
+- Explicitly out of scope: rewriting the full overview layout or moving system-panel controls into the dashboard.
+
+## Implementation Outline
+
+1. Add a top-level command deck with normalized activity feedback and drill-down navigation.
+2. Refresh the manufacturing summary card with richer queue, lab, and blueprint telemetry.
+3. Validate that operations mode still reads as a summary surface rather than a second full system panel.
+
+## Risks / Open Questions
+
+- The overview already has many cards, so added density must improve scan speed rather than just add noise.
+- Click targets need to stay clearly navigational and not imply direct system control from the dashboard.
+- If future system cards adopt the same density, the overview may need stronger grouping or collapsible sections.
+
+## Files Likely Affected
+
+- `src/ui/panels/OverviewPanel.tsx`
+- `src/ui/effects/ActivityBar.tsx`
+- `docs/Idleverse_DESIGN_PLAN.md`
+
+---
+
+# Initiative — Market Panel Overhaul
+> **Status:** Active
+> **Last updated:** March 2026
+> **Depends on:** Existing market listings, auto-sell settings, trade route automation, current UI primitives
+
+## Goal
+
+Refresh the market panel so it reads like an economic operations surface instead of a flat listings table plus route form. The focus is denser telemetry, clearer route posture, and better scan speed while keeping the existing market and trade-route mechanics intact.
+
+## Scope
+
+- Add a compact command deck with price bonus, lifetime sales, auto-sell posture, and route activity.
+- Tighten listings rows so auto-sell surplus, keep thresholds, and stock state are easier to scan.
+- Replace flat trade-route cards with expandable compact operational rows.
+- Keep the market panel interactive, but do not change pricing or route automation logic.
+- Explicitly out of scope: economy rebalance, trade-route simulation changes, or new market mechanics.
+
+## Implementation Outline
+
+1. Add a top-level market command deck and per-tab activity summaries.
+2. Enrich listings rows with stronger stock, surplus, and auto-sell state treatment.
+3. Convert trade routes into denser expandable rows with clearer live status and profit telemetry.
+
+## Risks / Open Questions
+
+- Listings density can become noisy because the market spans many resources; telemetry has to stay compact.
+- Trade routes need stronger operational context without turning the market panel into a second fleet panel.
+- If route count grows substantially later, the tab may need stronger filtering or grouping.
+
+## Files Likely Affected
+
+- `src/ui/panels/MarketPanel.tsx`
+- `src/ui/effects/ActivityBar.tsx`
+- `docs/Idleverse_DESIGN_PLAN.md`
+
+---
+
+# Initiative — Mining Panel Overhaul
+> **Status:** Active
+> **Last updated:** March 2026
+> **Depends on:** Existing fleet mining view, hauling wing storage model, current UI primitives
+
+## Goal
+
+Refresh the mining panel so it reads as a live extraction console rather than a stack of static fleet cards. The target is denser telemetry around ore flow, storage pressure, and hauling posture while keeping the underlying mining and hauling loop unchanged.
+
+## Scope
+
+- Add a compact mining command deck with fleet count, ore flow, cargo pressure, and hauling status.
+- Tighten mining fleet cards so ore throughput, storage state, hauling posture, and belt security are easier to scan.
+- Preserve the current drill-down shape and haul dispatch control.
+- Explicitly out of scope: mining balance changes, hauling logic changes, or wing-behaviour redesign.
+
+## Implementation Outline
+
+1. Add a panel-level command deck with normalized activity feedback.
+2. Enrich fleet cards with denser metrics and stronger operational status treatment.
+3. Validate that the panel remains readable with multiple fleets active at once.
+
+## Risks / Open Questions
+
+- Mining surfaces can get repetitive when several fleets mirror the same structure, so the denser cards still need strong scan hierarchy.
+- Cargo and hauling telemetry should clarify pressure without overshadowing the ore-output view.
+- Mining-panel haul controls must call haul-aware fleet actions rather than generic move orders, otherwise HQ unload-and-return state is skipped for whole-fleet haul trips.
+- Fleet and mining surfaces should describe concrete activity states like heading to a named system, returning to HQ, or mining on a named belt instead of generic labels like transit or active, and fleet-level summaries must aggregate wing state rather than assuming one fleet-wide mining posture. Wing rows should surface their own activity detail directly in the wing section, including fleet-level movement or combat posture when that wing is participating.
+- A later pass may still want progressive disclosure if mining fleet counts grow significantly.
+
+## Files Likely Affected
+
+- `src/ui/panels/MiningPanel.tsx`
+- `src/ui/effects/ActivityBar.tsx`
+- `docs/Idleverse_DESIGN_PLAN.md`
+
+---
+
+# Initiative — Fleet Operations Tab Refresh
+> **Status:** Active
+> **Last updated:** March 2026
+> **Depends on:** Existing FleetPanel operations tab, recruitment offers, hangar deployment, current UI primitives
+
+## Goal
+
+Refresh the Fleet operations tab so it reads like a compact staffing and deployment console rather than a flat list of deploy buttons plus candidate cards. The mechanics stay the same; the change is density, hierarchy, and operational scan speed.
+
+## Scope
+
+- Add a fleet-operations command deck covering hangar readiness, recruitment pressure, affordable hires, and payroll runway.
+- Tighten deployable-hull rows so hangar actions read like operational launch lines.
+- Enrich recruitment cards with stronger status treatment and clearer payroll impact.
+- Explicitly out of scope: fleet-combat logic, fleet-tab redesign, or pilot/ship data model changes.
+
+## Implementation Outline
+
+1. Add a top command deck with normalized activity feedback.
+2. Tighten hangar deployment rows around availability and deploy posture.
+3. Improve recruitment card hierarchy with clearer milestone and affordability state.
+
+## Risks / Open Questions
+
+- The fleet panel is already large, so operations-only changes need to avoid leaking a new style mismatch into the other tabs.
+- Recruitment cards can become noisy if recommendation text and preview skills dominate the compact layout.
+- A later pass may still want a broader fleet-panel consistency sweep after the operations tab lands.
+
+## Files Likely Affected
+
+- `src/ui/panels/FleetPanel.tsx`
+- `src/ui/effects/ActivityBar.tsx`
+- `docs/Idleverse_DESIGN_PLAN.md`
+
+---
+
+# Initiative — System Panel Refresh
+> **Status:** Active
+> **Last updated:** March 2026
+> **Depends on:** Existing SystemPanel orrery, anomaly tab, station/outpost controls, current UI primitives
+
+## Goal
+
+Refresh the SystemPanel so the command layer around the orrery feels as deliberate as the newer operations surfaces. The orrery and system logic stay intact; the focus is clearer system-level telemetry, better control hierarchy, and a stronger sidebar intel frame.
+
+## Scope
+
+- Add a compact system command deck covering fleets, mining-belt activity, anomaly presence, and corp foothold in the current system.
+- Tighten the sidebar with a clearer selected-body or system-intel summary.
+- Preserve the current orrery, body selection, station controls, and anomaly interactions.
+- Explicitly out of scope: orrery rendering changes, mining logic changes, or anomaly-system redesign.
+
+## Implementation Outline
+
+1. Add a top system command deck with normalized activity feedback.
+2. Add a compact sidebar intel summary to improve orientation when switching between bodies and tabs.
+3. Validate that the panel remains readable while keeping the existing inline-style structure stable.
+
+## Risks / Open Questions
+
+- The SystemPanel is still largely inline-styled, so targeted improvements need to avoid turning the file into a half-migrated styling mix.
+- The command deck must not crowd the header and warp banners when several system-state banners are visible at once.
+- A later pass may still want a deeper cleanup of the body-detail section for consistency with newer panel patterns.
+
+## Files Likely Affected
+
+- `src/ui/panels/SystemPanel.tsx`
+- `src/ui/effects/ActivityBar.tsx`
+- `docs/Idleverse_DESIGN_PLAN.md`
+
+---
+
+# Initiative — Fleet Panel Consistency Sweep
+> **Status:** Active
+> **Last updated:** March 2026
+> **Depends on:** Existing FleetPanel fleet/pilot/ship tabs, prior Fleet Operations tab refresh, current UI primitives
+
+## Goal
+
+Bring the remaining FleetPanel tabs into the same compact operational-console language now used by the operations tab. The underlying fleet, pilot, and ship mechanics stay unchanged; the work is about scan speed, denser telemetry, and clearer command posture.
+
+## Scope
+
+- Add compact command decks for the fleets, pilots, and ships tabs.
+- Tighten fleet, pilot, and ship cards so readiness, staffing, fitting, morale, and posture are easier to scan before expanding.
+- Preserve the existing interaction model, command actions, and detailed drill-down controls.
+- Explicitly out of scope: fleet balance changes, new fleet mechanics, or ship/pilot progression redesign.
+
+## Implementation Outline
+
+1. Reuse the fleet-operations command-deck language in the other FleetPanel tabs.
+2. Enrich fleet cards with readiness, commander, wing, and cargo telemetry.
+3. Enrich pilot and ship cards with compact assignment, training, integrity, and fitting posture summaries.
+
+## Risks / Open Questions
+
+- Fleet cards already carry a large amount of control density, so the new telemetry layer must not bury existing actions.
+- Pilot and ship tabs can become repetitive at higher counts, so scan hierarchy matters more than raw data quantity.
+- If the panel continues growing, a later pass may still want filtering or grouping rather than more inline telemetry.
+
+## Files Likely Affected
+
+- `src/ui/panels/FleetPanel.tsx`
+- `docs/Idleverse_DESIGN_PLAN.md`
+
+---
+
+# Initiative — Cross-Panel UI Polish Pass
+> **Status:** Active
+> **Last updated:** March 2026
+> **Depends on:** Prior manufacturing, reprocessing, overview, fleet, market, mining, and system panel refresh work
+
+## Goal
+
+Smooth the remaining presentation drift between recently refreshed panels so the command-deck language feels intentional across the UI instead of panel-by-panel. This pass is about spacing, section rhythm, shell treatment, and clearer mode framing rather than adding new systems or mechanics.
+
+## Scope
+
+- Normalize section rhythm and shell treatment in refreshed panels where headers or mode switches still feel flatter than the newer command decks.
+- Tighten idle states and section summaries so players can scan what each section is for before opening detailed controls.
+- Improve progress-bar readability with always-on semantic labels and a normalized vocabulary so animated bars explain the metric they represent instead of relying on nearby context alone.
+- Repair any stale or malformed design-plan text created while multiple UI initiatives landed back-to-back.
+- Explicitly out of scope: gameplay changes, new telemetry surfaces, or deeper component architecture refactors.
+
+## Implementation Outline
+
+1. Audit recently refreshed panels for spacing, shell, and section-header drift.
+2. Patch the most visible inconsistencies in overview, manufacturing, and reprocessing without expanding scope into new system work.
+3. Add always-on semantic labels to shared animated progress bars and normalize them around `Progress`, `Load`, `Status`, and `Rate`.
+4. Correct the design-plan ordering so shipped UI initiatives remain coherent and searchable.
+
+## Risks / Open Questions
+
+- A polish pass can easily become a stealth redesign if the scope is not constrained to presentation rhythm.
+- Some remaining inconsistency comes from older file structure, so deeper unification may still want shared panel-shell primitives later.
+- The design docs now carry many UI initiatives, so keeping ordering and section boundaries clean matters as much as the code patch itself.
+
+## Files Likely Affected
+
+- `src/ui/panels/OverviewPanel.tsx`
+- `src/ui/panels/ManufacturingPanel.tsx`
+- `src/ui/panels/ReprocessingPanel.tsx`
+- `docs/Idleverse_DESIGN_PLAN.md`
+
+---
+
+# Initiative — Market And Reprocessing Width Pass
+> **Status:** Active
+> **Last updated:** March 2026
+> **Depends on:** Existing MarketPanel and ReprocessingPanel refresh work, local-price market logic, reprocessing yield logic
+
+## Goal
+
+Use the newly widened panel real estate in Market and Reprocessing for actual decision support rather than larger shells. The player should gain better regional trade awareness and refinery throughput awareness without changing any of the underlying mechanics.
+
+## Scope
+
+- Expand the Market listings view with live regional analytics built from real local-price and pressure data.
+- Expand the Market trade-routes view with route-command analytics so the widened layout adds margin and fleet-coverage context instead of empty space.
+- Surface a stock-market-style market board using current regional quotes, spread comparisons, sales mix, and auto-sell readiness rather than fabricated time-series history.
+- Expand Reprocessing with throughput analytics built from queue state, auto-threshold surplus, ore security mix, and projected mineral yield value.
+- Keep the Reprocessing control surface and analytics surface visually distinct so actionable refinery lanes do not blur together with read-only forecast cards.
+- Give the auto-refinery cards a stronger interactive module treatment than the analytics cards so the actionable lane controls feel like the primary surface.
+- Tune column ratios on ultrawide layouts so the refreshed left/right rails feel intentional rather than simply uncapped.
+- Preserve all existing sell, auto-sell, route, queue, and auto-refinery interactions.
+- Explicitly out of scope: new market mechanics, persisted market-history storage, reprocessing balance changes, or queue-rule changes.
+
+## Implementation Outline
+
+1. Add a Market analytics rail with a focus-resource price tape, live spread board, sales mix, and auto-sell watch list.
+2. Add a Trade Routes analytics rail with route-command, live margin, and realized-profit context.
+3. Widen the Reprocessing layout with a refinery analytics rail showing mineral forecast, ore security mix, and hot-lane readiness.
+4. Keep the existing operational controls in place while using the extra width for scan-speed and planning clarity.
+
+## Risks / Open Questions
+
+- The market currently does not store historical quotes, so any stock-market styling must be derived from live regional price snapshots and pressure rather than fake history.
+- Analytics density can compete with listings and queue controls if the side rails become too visually loud.
+- Future persistence work may eventually want real quote history, but this pass should not invent a second market state model prematurely.
+- Performance guardrail: wide analytics and route/fleet rows should reuse shared galaxy/system lookup caches at the panel level rather than regenerating the 400-system map per row or per card.
+
+## Files Likely Affected
+
+- `src/ui/panels/MarketPanel.tsx`
+- `src/ui/panels/ReprocessingPanel.tsx`
+- `docs/Idleverse_DESIGN_PLAN.md`
+
+---
+
 ## Current Implementation Status
 
 | System | Status | Notes |
 |---|---|---|
-| Mining (ore belts, pools, auto-haul) | ✅ Complete | 9 belts, security-gated, pool depletion |
+| Mining (ore belts, pools, auto-haul) | ✅ Complete | 10 belts, security-gated, pool depletion |
 | Reprocessing (ore → minerals, auto-queue) | ✅ Complete | Efficiency skill-scaled |
-| Manufacturing (recipe queue, 12 recipes) | ✅ Complete | Speed skill-scaled |
-| Skills (34 skills, prerequisites, training queue) | ✅ Complete | Full prerequisite chains |
+| Manufacturing (recipe queue, components, modules, ships) | ✅ Complete | Speed skill-scaled; craftable module inventory and cruiser-tier production now live |
+| Skills (35 skills, prerequisites, training queue) | ✅ Complete | Full prerequisite chains; Navigation now adds corp and pilot warp-speed progression |
 | Market (NPC sell, auto-sell, lifetime tracking) | ✅ Complete | Prices static — dynamic pricing in Phase 1 |
 | Galaxy (400 systems, procedural, jump lanes) | ✅ Complete | BFS + Dijkstra routing |
-| Fleet movement (player fleets, orders, warp) | ✅ Complete | Per-hop tick advancement; route dispatch now validates against live fleet range and reports acceptance/failure inline |
+| Fleet movement (player fleets, orders, warp) | ✅ Complete | Timed warp-leg advancement with fleet/wing ETA + progress; travel speed now composes corp skill, pilot skill, hull, module, and commander bonuses |
 | Fleet ship roles & doctrines | ✅ Complete | ShipRole, FleetDoctrine, FleetPanel Fleets tab, StarMapPanel Intel\|Route |
 | Fleet combat | ✅ Complete | NPC groups, patrol/raid orders, hull damage, bounty/loot, combat log |
 | Blueprint research & T2 manufacturing | ✅ Complete | Phase 3 shipped — research queue, BPC copies, T2 recipes |
 | Exploration & anomalies | ✅ Complete | Phase 4 shipped — anomaly scanning, discovery feed, Astrometrics/Archaeology/Hacking skills |
-| UI Overhaul — navigation, tooltips, data density | ✅ Complete | GameTooltip + NavTag + useUiStore + DevPanel overhaul + 8-panel renovation (Stream D); March 2026 follow-up adds Overview progression shell + richer lock previews |
+| UI Overhaul — navigation, tooltips, data density | ✅ Complete | GameTooltip + NavTag + useUiStore + DevPanel overhaul + 8-panel renovation (Stream D); March 2026 follow-up adds Overview progression shell, richer lock previews, and first-pass procedural audio cues |
 | Fleet-centric remodel — cargo hold + auto-haul (FC-1b/c/d/e) | ✅ Complete | oreDeltas wired to fleet cargoHold; auto-haul to Corp HQ; HQ dump on arrival |
 | Corp identity migration (FC-1G partial) | ✅ Complete | state.pilot → state.corp; OverviewPanel → corp command center (CorpCard + CorpHQCard) |
 | Fleet-centric foundation (FC-1: cargo holds, auto-haul, corp identity, richness wiring) | ✅ Complete | All FC-1 steps shipped |
@@ -558,6 +1031,8 @@ All 8 targeted panels renovated with NavTag entity links, data density additions
 - `FleetPanel` movement controls now explain route posture directly where fleet orders are issued, making travel choice a visible speed-versus-safety decision
 - `StarMapPanel` route summaries now show estimated total travel time, average hop time, and route exposure, while `FleetPanel` ship cards now surface hull identity and aggregate fitting bonuses to make travel and fitting tradeoffs legible before deeper balance work lands
 - Locked `ManufacturingPanel`, `ReprocessingPanel`, and `MarketPanel` states now explain requirement, ETA, payoff, and next action instead of showing only a denial message
+- `GameLayout` now exposes a lightweight top-bar audio control (`audioEnabled` + `masterVolume`) and the runtime plays subtle procedural sci-fi SFX for navigation, save confirmation, manufacturing completion, and skill advancement without introducing an asset pipeline
+- The procedural audio layer now supports multiple "takes" per cue with slight timing, detune, filter, and gain variation so repeat interactions sound dynamic while keeping the ship-console tone restrained
 - The current goal is onboarding clarity without a forced questline; outcome-first SkillsPanel framing and travel/fitting visibility remain the next follow-up slices
 
 | Panel | Key Data Additions | Notable NavTags |
@@ -651,7 +1126,7 @@ All 8 targeted panels renovated with NavTag entity links, data density additions
 
 - Any pilot in a fleet can be designated **Fleet Commander** via a new UI section in FleetPanel above the Doctrine selector.
 - Commanders have a separate `commandSkills: CommanderSkillState` queue trained independently of corp skills.
-- Five command skill trees (5 levels each): `mining-command` (+4%/lvl yield), `combat-command` (+5%/lvl DPS +3%/lvl tank), `logistics-command` (+8%/lvl cargo −5%/lvl haul), `industrial-command` (+6%/lvl on-site refining), `recon-command` (+10%/lvl scan −8%/lvl sig).
+- Five command skill trees (5 levels each): `mining-command` (+4%/lvl yield), `combat-command` (+5%/lvl DPS +3%/lvl tank), `logistics-command` (+8%/lvl cargo, −5%/lvl haul, +2%/lvl warp), `industrial-command` (+6%/lvl on-site refining), `recon-command` (+10%/lvl scan −8%/lvl sig).
 - Training times: 2h / 4h / 8h / 16h / 48h per level. Active fleets train 1.5× faster.
 - Commander mining bonus wired directly into `fleet.tick.ts` yield per ship.
 - Old saves are patched on load (`saveLoad.ts` migration) to add `commandSkills` and `commanderId` defaults.

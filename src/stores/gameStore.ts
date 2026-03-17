@@ -17,6 +17,7 @@ import {
 import { upgradeCost } from '@/game/balance/constants';
 import { saveGame, loadGame, deleteSave } from '@/game/persistence/saveLoad';
 import { processOfflineProgress } from '@/game/offline/offlineCalc';
+import { playManufacturingComplete, playSkillAdvance } from '@/game/audio/soundEvents';
 import { getTriggeredRecruitmentDirectives } from '@/game/progression/recruitmentAdvisor';
 import { calculateSellValue } from '@/game/systems/market/market.logic';
 import type { TradeRoute } from '@/types/game.types';
@@ -58,7 +59,7 @@ import {
 } from '@/game/systems/fleet/pilot.logic';
 import { generatePilot, generateRecruitmentOffers } from '@/game/systems/fleet/fleet.gen';
 import { COMMANDER_SKILL_DEFINITIONS } from '@/game/systems/fleet/commander.config';
-import { assignWingToMiningBelt, dispatchHaulerWing, getOperationalFleetShipIds, hasDispatchedHaulingWing } from '@/game/systems/fleet/wings.logic';
+import { assignWingToMiningBelt, dispatchHaulerWing, getFleetStoredCargo, getHaulingWings, getOperationalFleetShipIds, hasDispatchedHaulingWing } from '@/game/systems/fleet/wings.logic';
 
 // ─── Store interface ───────────────────────────────────────────────────────
 
@@ -107,6 +108,8 @@ interface GameStore {
   renamePilot: (name: string) => void;
   /** Rename the corp. Preferred over the legacy renamePilot. */
   renameCorpName: (name: string) => void;
+  setAudioEnabled: (enabled: boolean) => void;
+  setMasterVolume: (volume: number) => void;
 
   // Fleet
   deployShip: (hullId: string, customName?: string) => boolean;
@@ -132,6 +135,7 @@ interface GameStore {
   movePlayerFleet: (fleetId: string, direction: 'up' | 'down') => void;
   issueFleetGroupOrder: (fleetId: string, destinationId: string, securityFilter?: RouteSecurityFilter, pauseOnArrival?: boolean) => boolean;
   cancelFleetGroupOrder: (fleetId: string) => boolean;
+  haulFleetToHQ: (fleetId: string) => boolean;
   dispatchHaulingWingToHQ: (fleetId: string, wingId?: string) => boolean;
   setShipRole: (shipId: string, role: import('@/types/game.types').ShipRole) => boolean;
   setFleetDoctrine: (fleetId: string, doctrine: import('@/types/game.types').FleetDoctrine) => boolean;
@@ -210,7 +214,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
   tick: (deltaSeconds) => {
     const previousState = get().state;
-    let { newState } = runTick(previousState, deltaSeconds);
+    let { newState, completedManufacturing, skillsAdvanced } = runTick(previousState, deltaSeconds);
 
     const directives = getTriggeredRecruitmentDirectives(previousState, newState);
     if (directives.length > 0) {
@@ -247,6 +251,14 @@ export const useGameStore = create<GameStore>((set, get) => ({
     }
 
     set({ state: newState });
+
+    const completedManufacturingCount = Object.values(completedManufacturing).reduce((sum, qty) => sum + qty, 0);
+    if (completedManufacturingCount > 0) {
+      playManufacturingComplete(completedManufacturingCount);
+    }
+    if (skillsAdvanced.length > 0) {
+      playSkillAdvance(skillsAdvanced.length);
+    }
   },
 
   // ── Mining ───────────────────────────────────────────────────────────────
@@ -839,6 +851,32 @@ export const useGameStore = create<GameStore>((set, get) => ({
     set({ state: { ...state, corp: { ...state.corp, name: trimmed } } });
   },
 
+  setAudioEnabled: (enabled) => {
+    const { state } = get();
+    set({
+      state: {
+        ...state,
+        settings: {
+          ...state.settings,
+          audioEnabled: enabled,
+        },
+      },
+    });
+  },
+
+  setMasterVolume: (volume) => {
+    const { state } = get();
+    set({
+      state: {
+        ...state,
+        settings: {
+          ...state.settings,
+          masterVolume: Math.max(0, Math.min(1, volume)),
+        },
+      },
+    });
+  },
+
   // ── Fleet ────────────────────────────────────────────────────────────────
 
   deployShip: (hullId, customName) => {
@@ -1095,6 +1133,41 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const fleet = state.systems.fleet.fleets[fleetId];
     if (!fleet || hasDispatchedHaulingWing(fleet)) return false;
     const newState = issueFleetGroupOrder(state, fleetId, destinationId, securityFilter, pauseOnArrival);
+    if (!newState) return false;
+    set({ state: newState });
+    return true;
+  },
+
+  haulFleetToHQ: (fleetId) => {
+    const { state } = get();
+    const homeSystemId = state.systems.factions.homeStationSystemId;
+    if (!homeSystemId) return false;
+
+    const fleet = state.systems.fleet.fleets[fleetId];
+    if (!fleet || hasDispatchedHaulingWing(fleet)) return false;
+    if (fleet.fleetOrder) return false;
+    if (getHaulingWings(fleet).length > 0) return false;
+    if (fleet.currentSystemId === homeSystemId) return false;
+    if (getFleetStoredCargo(fleet) <= 0) return false;
+
+    const stagedState: GameState = {
+      ...state,
+      systems: {
+        ...state.systems,
+        fleet: {
+          ...state.systems.fleet,
+          fleets: {
+            ...state.systems.fleet.fleets,
+            [fleetId]: {
+              ...fleet,
+              miningOriginSystemId: fleet.currentSystemId,
+            },
+          },
+        },
+      },
+    };
+
+    const newState = issueFleetGroupOrder(stagedState, fleetId, homeSystemId);
     if (!newState) return false;
     set({ state: newState });
     return true;
@@ -1915,6 +1988,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const defaults      = createInitialState();
     const patchedSystems = { ...defaults.systems, ...save.state.systems };
     const patchedUnlocks = { ...defaults.unlocks,  ...save.state.unlocks };
+    const patchedSettings = { ...defaults.settings, ...save.state.settings };
+    const patchedResources = { ...defaults.resources, ...save.state.resources };
 
     // Patch fleet — ensure pilots + recruitmentOffers exist (added after initial release)
     if (!patchedSystems.fleet.pilots) {
@@ -1974,6 +2049,22 @@ export const useGameStore = create<GameStore>((set, get) => ({
     if (!patchedSystems.manufacturing.copyJobs) {
       patchedSystems.manufacturing = { ...patchedSystems.manufacturing, copyJobs: [] };
     }
+    const existingBlueprintItemIds = new Set(
+      (patchedSystems.manufacturing.blueprints ?? []).map(bp => bp.itemId),
+    );
+    const missingStarterBlueprints = defaults.systems.manufacturing.blueprints.filter(
+      bp => !existingBlueprintItemIds.has(bp.itemId),
+    );
+    if (missingStarterBlueprints.length > 0) {
+      patchedSystems.manufacturing = {
+        ...patchedSystems.manufacturing,
+        blueprints: [...patchedSystems.manufacturing.blueprints, ...missingStarterBlueprints],
+      };
+    }
+    patchedSystems.market = {
+      ...patchedSystems.market,
+      prices: { ...defaults.systems.market.prices, ...(patchedSystems.market.prices ?? {}) },
+    };
 
     // Patch fleet Phase 4 — discoveries feed, isScanning flag on every fleet; FC-1b cargoHold; FC-3 wings
     if (!patchedSystems.fleet.discoveries) {
@@ -2007,6 +2098,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const patchedState: GameState = {
       ...save.state,
       corp:      migratedCorp,
+      resources: patchedResources,
+      settings:  patchedSettings,
       systems:   patchedSystems,
       unlocks:   { ...patchedUnlocks,  ...recomputedUnlocks },
       modifiers: { ...save.state.modifiers, ...recomputedModifiers },

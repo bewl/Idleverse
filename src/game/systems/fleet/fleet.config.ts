@@ -58,6 +58,17 @@ export const HULL_DEFINITIONS: Record<string, HullDefinition> = {
     baseSensorStrength: 5,
   },
 
+  'cruiser': {
+    id: 'cruiser', name: 'Cruiser', shipClass: 'cruiser',
+    description: 'A medium combat hull with durable armor bands and cruiser-grade fire-control systems.',
+    resourceId: 'ship-cruiser',
+    baseMiningBonus: 0.6, baseCombatRating: 5.2,
+    baseCargoMultiplier: 1.4, warpSpeedBonus: 0.12,
+    moduleSlots: { high: 3, mid: 4, low: 3 },
+    requiredPilotSkill: { skillId: 'cruiser', minLevel: 1 },
+    baseSensorStrength: 7,
+  },
+
   'exhumer': {
     id: 'exhumer', name: 'Exhumer', shipClass: 'exhumer',
     description: 'Capital-class mining barge. Strips entire asteroid fields single-handedly.',
@@ -183,6 +194,30 @@ export const MODULE_DEFINITIONS: Record<string, ModuleDefinition> = {
     buildCost: { 'vexirite': 120, 'sensor-cluster': 2 },
   },
 
+  'tracking-computer-i': {
+    id: 'tracking-computer-i', name: 'Tracking Computer I',
+    description: 'Cruiser-grade targeting computer that sharpens firing solutions across the whole battery.',
+    slotType: 'mid',
+    effects: { 'combat-rating': 0.12 },
+    buildCost: { 'isorium': 80, 'targeting-bus': 1, 'reactor-lattice': 1 },
+  },
+
+  'tracking-computer-ii': {
+    id: 'tracking-computer-ii', name: 'Tracking Computer II',
+    description: 'Overclocked fire-control array with heavier signal routing and reactor demands.',
+    slotType: 'mid',
+    effects: { 'combat-rating': 0.20 },
+    buildCost: { 'fluxite': 45, 'targeting-bus': 2, 'reactor-lattice': 2 },
+  },
+
+  'warp-tuner-i': {
+    id: 'warp-tuner-i', name: 'Warp Tuner I',
+    description: 'Field-stability tuning package that shortens spool and transit time for long-haul navigation.',
+    slotType: 'mid',
+    effects: { 'warp-speed': 0.08 },
+    buildCost: { 'silite': 120, 'thruster-node': 2, 'sensor-cluster': 1 },
+  },
+
   // Low-slot modules
   'cargo-expander-i': {
     id: 'cargo-expander-i', name: 'Cargo Expander I',
@@ -222,10 +257,10 @@ export const MODULE_DEFINITIONS: Record<string, ModuleDefinition> = {
 
 export const PILOT_SKILL_FOCUS_TREES: Record<PilotTrainingFocus, string[]> = {
   mining:      ['mining', 'astrogeology', 'mining-frigate', 'mining-barge', 'drone-interfacing', 'advanced-mining'],
-  combat:      ['spaceship-command', 'frigate', 'destroyer', 'cruiser', 'gunnery', 'military-operations', 'electronics', 'ladar-sensing'],
-  hauling:     ['spaceship-command', 'industrial', 'frigate', 'cpu-management'],
-  exploration: ['astrometrics', 'survey', 'electronics', 'ladar-sensing', 'spaceship-command', 'frigate', 'archaeology', 'hacking'],
-  balanced:    ['spaceship-command', 'mining', 'frigate', 'survey', 'electronics'],
+  combat:      ['spaceship-command', 'navigation', 'frigate', 'destroyer', 'cruiser', 'gunnery', 'military-operations', 'electronics', 'ladar-sensing'],
+  hauling:     ['spaceship-command', 'navigation', 'industrial', 'frigate', 'cpu-management'],
+  exploration: ['astrometrics', 'survey', 'electronics', 'ladar-sensing', 'spaceship-command', 'navigation', 'frigate', 'archaeology', 'hacking'],
+  balanced:    ['spaceship-command', 'navigation', 'mining', 'frigate', 'survey', 'electronics'],
 };
 
 // ─── Doctrine definitions ─────────────────────────────────────────────────

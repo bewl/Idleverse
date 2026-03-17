@@ -65,7 +65,7 @@ const STAR_TYPE_POOL: Array<{ value: StarType; weight: number }> = [
 // ─── Ore belts by security tier ───────────────────────────────────────────
 
 const HIGHSEC_BELTS  = ['belt-ferrock', 'belt-corite', 'belt-silisite', 'belt-platonite'];
-const LOWSEC_BELTS   = ['belt-darkstone', 'belt-hematite', 'belt-voidite'];
+const LOWSEC_BELTS   = ['belt-darkstone', 'belt-hematite', 'belt-voidite', 'belt-ionite'];
 const NULLSEC_BELTS  = ['belt-arkonite', 'belt-crokitite'];
 
 /** Returns which ore belt IDs are available in a system of a given security tier. */

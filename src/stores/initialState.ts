@@ -2,16 +2,9 @@
 import { RESOURCE_IDS } from '@/game/resources/resourceRegistry';
 import { SAVE_VERSION } from '@/game/balance/constants';
 import { generateFoundingPilot } from '@/game/systems/fleet/fleet.gen';
+import { STARTER_BLUEPRINT_RECIPE_IDS } from '@/game/systems/manufacturing/manufacturing.config';
 
-// T1 recipe IDs that every player starts with as unlocked BPOs
-const T1_RECIPE_IDS = [
-  'craft-hull-plate', 'craft-thruster-node', 'craft-condenser-coil',
-  'craft-sensor-cluster', 'craft-mining-laser', 'craft-shield-emitter',
-  'recipe-ship-shuttle', 'recipe-ship-frigate', 'recipe-ship-mining-frigate',
-  'recipe-ship-hauler', 'recipe-ship-destroyer', 'recipe-ship-exhumer',
-];
-
-const INITIAL_BLUEPRINTS: Blueprint[] = T1_RECIPE_IDS.map(recipeId => ({
+const INITIAL_BLUEPRINTS: Blueprint[] = STARTER_BLUEPRINT_RECIPE_IDS.map(recipeId => ({
   id: `bpo-${recipeId}`,
   itemId: recipeId,
   tier: 1,
@@ -99,6 +92,7 @@ export function createInitialState(): GameState {
           'darkstone': 25,
           'hematite':  20,
           'voidite':   100,
+          'ionite':    135,
           'arkonite':  500,
           'crokitite': 5000,
           // Components (manufactured)
@@ -108,9 +102,30 @@ export function createInitialState(): GameState {
           'sensor-cluster': 4000,
           'mining-laser':   3500,
           'shield-emitter': 2800,
+          'armor-honeycomb': 4200,
+          'reactor-lattice': 6800,
+          'targeting-bus':   6200,
+          // Modules
+          'mining-laser-i':      9000,
+          'mining-laser-ii':     18000,
+          'salvager-i':          7000,
+          'missile-launcher-i':  11000,
+          'shield-extender-i':   9500,
+          'warp-scrambler-i':    8000,
+          'survey-scanner-i':    6500,
+          'cargo-scanner-i':     6000,
+          'scan-pinpointing-i':  12000,
+          'warp-tuner-i':        14500,
+          'tracking-computer-i': 16500,
+          'tracking-computer-ii': 28000,
+          'cargo-expander-i':    7500,
+          'cargo-expander-ii':   13000,
+          'mining-upgrade-i':    8000,
+          'hull-reinforcement-i': 9800,
           // NPC buy prices for advanced minerals
           'morphite':  45000,
           'zydrine':   12000,
+          'fluxite':   900,
           // Datacores (not directly sold — used for research — but priced for market display)
           'datacore-mechanical':  250000,
           'datacore-electronic':  400000,
@@ -129,6 +144,7 @@ export function createInitialState(): GameState {
           'ship-mining-frigate':  80000,
           'ship-hauler':          38000,
           'ship-destroyer':       110000,
+          'ship-cruiser':         420000,
           'ship-exhumer':         320000,
         },
         lastTickAt:    Date.now(),
@@ -228,6 +244,8 @@ export function createInitialState(): GameState {
     settings: {
       autoSave: true,
       autoSaveInterval: 30_000,
+      audioEnabled: true,
+      masterVolume: 0.55,
     },
 
     galaxy: {

@@ -164,6 +164,16 @@ export const MODIFIER_REGISTRY: Record<string, ModifierMeta> = {
     formula: 'Σ(level × bonus)',
   },
 
+  'warp-speed': {
+    key: 'warp-speed',
+    label: 'Warp Speed',
+    description: 'Reduces inter-system warp duration for manual travel, fleet orders, and detached wing convoys.',
+    unit: 'percent',
+    baseValue: 0,
+    affectedSystems: ['Manual warp duration', 'Fleet and wing transit ETA', 'Route travel-time estimates'],
+    formula: 'Time = Distance ÷ (Base speed × (1 + bonus) × ship profile)',
+  },
+
   'destroyer-bonus': {
     key: 'destroyer-bonus',
     label: 'Destroyer Bonus',

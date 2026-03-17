@@ -69,6 +69,13 @@ export const ORE_YIELD_TABLE: Record<string, Record<string, number>> = {
     'zyridium': 25,
   },
 
+  'ionite': {
+    // "Charged ore for reactor-conductor supply chains"
+    'isorium': 18,
+    'noxium':  14,
+    'fluxite': 20,
+  },
+
   // ── Nullsec ───────────────────────────────────────────────────────────────
 
   'arkonite': {

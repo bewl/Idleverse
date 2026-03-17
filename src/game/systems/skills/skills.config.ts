@@ -75,6 +75,14 @@ export const SKILL_DEFINITIONS: Record<string, SkillDefinition> = {
     pilotTrainable: true,
   },
 
+  'navigation': {
+    id: 'navigation', name: 'Navigation', description: 'Improves fleet warp execution and reduces time spent in transit between systems.',
+    category: 'spaceship', rank: 2,
+    effects: [{ modifier: 'warp-speed', valuePerLevel: 0.03 }],
+    prerequisiteSkills: { 'spaceship-command': 1 },
+    pilotTrainable: true,
+  },
+
   'frigate': {
     id: 'frigate', name: 'Frigate', description: 'Allows piloting of all standard frigate hulls. Each level improves frigate performance.',
     category: 'spaceship', rank: 2,
@@ -119,6 +127,7 @@ export const SKILL_DEFINITIONS: Record<string, SkillDefinition> = {
     category: 'spaceship', rank: 5,
     effects: [{ modifier: 'cruiser-bonus', valuePerLevel: 0.05 }],
     prerequisiteSkills: { 'destroyer': 3 },
+    unlocks: ['recipe-ship-cruiser'],
     pilotTrainable: true,
   },
 

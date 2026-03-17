@@ -107,6 +107,11 @@ export interface FleetOrder {
    * between route[currentLeg] and route[currentLeg+1].
    */
   legDepartedAt: number;
+  /**
+   * Duration in seconds for the current leg.
+   * Optional for backward compatibility with older saves; computed on demand if absent.
+   */
+  legDurationSeconds?: number;
 }
 
 // ─── Runtime reputation state ──────────────────────────────────────────────

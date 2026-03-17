@@ -508,6 +508,9 @@ export type PilotState = CorpState;
 export interface GameSettings {
   autoSave: boolean;
   autoSaveInterval: number;
+  audioEnabled: boolean;
+  /** Master audio volume in the range 0..1. */
+  masterVolume: number;
 }
 
 // ─── Unlocks ───────────────────────────────────────────────────────────────

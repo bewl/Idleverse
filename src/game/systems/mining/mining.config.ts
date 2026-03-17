@@ -84,6 +84,17 @@ export const ORE_BELTS: Record<string, OreBeltDefinition> = {
     respawnSeconds: 28_800,
   },
 
+  'belt-ionite': {
+    id: 'belt-ionite',
+    name: 'Ionite Storm Belt',
+    description: 'Electrostatic Ionite veins found in storm-torn lowsec systems. Primary Fluxite source.',
+    securityTier: 'lowsec',
+    outputs: [{ resourceId: 'ionite', baseRate: 0.75 }],
+    requiredSkill: { skillId: 'advanced-mining', minLevel: 2 },
+    poolSize: 42_000,
+    respawnSeconds: 28_800,
+  },
+
   // ── NullSec Belts (require Mining Barge certification) ───────────────────
 
   'belt-arkonite': {
@@ -111,7 +122,7 @@ export const ORE_BELTS: Record<string, OreBeltDefinition> = {
 
 export const BELT_ORDER = [
   'belt-ferrock', 'belt-corite', 'belt-silisite', 'belt-platonite',
-  'belt-darkstone', 'belt-hematite', 'belt-voidite',
+  'belt-darkstone', 'belt-hematite', 'belt-voidite', 'belt-ionite',
   'belt-arkonite', 'belt-crokitite',
 ];
 

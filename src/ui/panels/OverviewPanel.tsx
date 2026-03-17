@@ -17,6 +17,8 @@ import { getSystemById } from '@/game/galaxy/galaxy.gen';
 import { getAliveNpcGroupsInSystem } from '@/game/systems/combat/combat.logic';
 import { computeFleetCargoCapacity } from '@/game/systems/fleet/fleet.logic';
 import { getFleetStoredCargo, getFleetStorageCapacity, getHaulingWings, getOperationalFleetShipIds, getWingCurrentSystemId, hasActiveEscortWing } from '@/game/systems/fleet/wings.logic';
+import { ActivityBar } from '@/ui/effects/ActivityBar';
+import { describeFleetActivity } from '@/ui/utils/fleetActivity';
 
 import type { AnomalyType, GameState, WingType } from '@/types/game.types';
 
@@ -667,7 +669,12 @@ function ProgressionGuideSection() {
 function OverviewModeTabs() {
   const overviewState = useUiStore(s => s.panelStates.overview);
   const setPanelState = useUiStore(s => s.setPanelState);
+  const state = useGameStore(s => s.state);
   const mode = overviewState.mode ?? 'operations';
+  const promptCount = buildProgressPrompts(state).length;
+  const manufacturingQueue = state.systems.manufacturing.queue.length;
+  const reprocessingQueue = state.systems.reprocessing.queue.length;
+  const liveSignals = [manufacturingQueue > 0, reprocessingQueue > 0, state.systems.skills.activeSkillId !== null, promptCount > 0].filter(Boolean).length;
 
   const tabs: Array<{
     id: 'operations' | 'guidance';
@@ -691,7 +698,20 @@ function OverviewModeTabs() {
       className="rounded-xl border p-3 flex flex-col gap-2"
       style={{ background: 'rgba(3,8,20,0.55)', borderColor: 'rgba(255,255,255,0.06)' }}
     >
-      <div className="text-[9px] text-slate-500 uppercase tracking-widest">Command View</div>
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-[9px] text-slate-500 uppercase tracking-widest">Command View</div>
+          <div className="text-xs text-slate-400 mt-0.5">Switch between immediate operations and longer-horizon guidance without leaving the overview shell.</div>
+        </div>
+        <div className="flex gap-2 shrink-0">
+          <span className="text-[9px] px-1.5 py-0.5 rounded border border-cyan-700/30 bg-cyan-950/15 text-cyan-300 font-mono">
+            live {liveSignals}
+          </span>
+          <span className="text-[9px] px-1.5 py-0.5 rounded border border-violet-700/30 bg-violet-950/15 text-violet-300 font-mono">
+            prompts {promptCount}
+          </span>
+        </div>
+      </div>
       <div className="flex gap-1 border-b border-slate-800/60 pb-1" role="tablist" aria-label="Overview view modes">
         {tabs.map(tab => {
           const active = tab.id === mode;
@@ -721,6 +741,7 @@ function OverviewModeTabs() {
           {tabs.find(tab => tab.id === mode)?.summary}
         </div>
       </div>
+      <ActivityBar active={liveSignals > 0} rate={Math.min(1, Math.max(liveSignals / 4, promptCount > 0 ? 0.55 : 0))} color={mode === 'guidance' ? 'violet' : 'cyan'} label="View load" valueLabel={mode === 'guidance' ? `${promptCount} prompts` : `${liveSignals} live signals`} />
     </div>
   );
 }
@@ -770,6 +791,136 @@ function promptToneStyles(tone: ProgressPrompt['tone']): { border: string; backg
     title: '#fcd34d',
     action: '#fde68a',
   };
+}
+
+function CommandMetric({
+  label,
+  value,
+  meta,
+  tone = 'slate',
+  onClick,
+}: {
+  label: string;
+  value: string;
+  meta?: string;
+  tone?: 'cyan' | 'violet' | 'amber' | 'emerald' | 'slate';
+  onClick?: () => void;
+}) {
+  const toneClass =
+    tone === 'cyan'
+      ? 'text-cyan-300 border-cyan-700/30 bg-cyan-950/15'
+      : tone === 'violet'
+        ? 'text-violet-300 border-violet-700/30 bg-violet-950/15'
+        : tone === 'amber'
+          ? 'text-amber-300 border-amber-700/30 bg-amber-950/15'
+          : tone === 'emerald'
+            ? 'text-emerald-300 border-emerald-700/30 bg-emerald-950/15'
+            : 'text-slate-300 border-slate-700/30 bg-slate-900/50';
+
+  const content = (
+    <>
+      <div className="text-[8px] uppercase tracking-widest text-slate-500">{label}</div>
+      <div className="text-[12px] font-semibold font-mono mt-1">{value}</div>
+      {meta && <div className="text-[9px] text-slate-500 mt-0.5">{meta}</div>}
+    </>
+  );
+
+  if (onClick) {
+    return (
+      <button
+        onClick={onClick}
+        className={`rounded-lg border px-2.5 py-2 text-left transition-colors hover:bg-white/[0.04] ${toneClass}`}
+      >
+        {content}
+      </button>
+    );
+  }
+
+  return <div className={`rounded-lg border px-2.5 py-2 ${toneClass}`}>{content}</div>;
+}
+
+function OperationsCommandDeck() {
+  const state = useGameStore(s => s.state);
+  const navigate = useUiStore(s => s.navigate);
+  const rates = useResourceRates();
+  const fleets = Object.values(state.systems.fleet.fleets ?? {});
+  const activeSkillId = state.systems.skills.activeSkillId;
+  const manufacturingQueue = state.systems.manufacturing.queue.length;
+  const researchLoad = state.systems.manufacturing.researchJobs.length + state.systems.manufacturing.copyJobs.length;
+  const reprocessingQueue = state.systems.reprocessing.queue.length;
+  const movingFleets = fleets.filter(fleet => fleet.fleetOrder !== null).length;
+  const combatFleets = fleets.filter(fleet => fleet.combatOrder !== null).length;
+  const haulingFleets = fleets.filter(fleet => getHaulingWings(fleet).some(wing => wing.isDispatched)).length;
+  const activeSignals = [manufacturingQueue > 0, reprocessingQueue > 0, activeSkillId !== null, movingFleets > 0, combatFleets > 0].filter(Boolean).length;
+  const idleSignals = [manufacturingQueue === 0, reprocessingQueue === 0, activeSkillId === null, movingFleets === 0, combatFleets === 0].filter(Boolean).length;
+  const creditsRate = rates['credits'] ?? 0;
+  const oreRate = Object.entries(rates)
+    .filter(([id, rate]) => id !== 'credits' && rate > 0 && RESOURCE_REGISTRY[id]?.category === 'ore')
+    .reduce((sum, [, rate]) => sum + rate, 0);
+  const activityRate = Math.min(1, Math.max(
+    activeSignals / 5,
+    Math.min(1, manufacturingQueue / 4),
+    Math.min(1, reprocessingQueue / 4),
+    Math.min(1, movingFleets / Math.max(1, fleets.length)),
+  ));
+
+  return (
+    <div
+      className="rounded-xl border p-3 flex flex-col gap-3"
+      style={{
+        background: 'linear-gradient(135deg, rgba(3,8,20,0.96) 0%, rgba(34,211,238,0.04) 100%)',
+        borderColor: 'rgba(34,211,238,0.14)',
+      }}
+    >
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-[9px] text-cyan-400 uppercase tracking-widest font-bold">Operations Deck</div>
+          <div className="text-xs text-slate-300 mt-0.5">Read-only command snapshot across corp training, industry, and fleet tempo.</div>
+        </div>
+        <div className="flex gap-2 shrink-0">
+          <span className="text-[9px] px-1.5 py-0.5 rounded border border-cyan-700/30 bg-cyan-950/15 text-cyan-300 font-mono">
+            ore {oreRate.toFixed(2)}/s
+          </span>
+          <span className="text-[9px] px-1.5 py-0.5 rounded border border-amber-700/30 bg-amber-950/15 text-amber-300 font-mono">
+            cash {formatCredits(creditsRate)}/s
+          </span>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 xl:grid-cols-4 gap-2">
+        <CommandMetric
+          label="Corp Training"
+          value={activeSkillId ? 'live' : 'idle'}
+          meta={activeSkillId ? `${SKILL_DEFINITIONS[activeSkillId]?.name ?? activeSkillId} in queue` : `${state.systems.skills.queue.length} queued`}
+          tone={activeSkillId ? 'cyan' : state.systems.skills.queue.length > 0 ? 'amber' : 'slate'}
+          onClick={() => navigate('skills')}
+        />
+        <CommandMetric
+          label="Industry"
+          value={`${manufacturingQueue}`}
+          meta={researchLoad > 0 ? `${researchLoad} lab jobs active` : manufacturingQueue > 0 ? 'fabrication live' : 'queue empty'}
+          tone={manufacturingQueue > 0 ? 'violet' : researchLoad > 0 ? 'cyan' : 'slate'}
+          onClick={() => navigate('manufacturing', { entityType: 'panel', entityId: 'manufacturing-jobs', panelSection: 'jobs' })}
+        />
+        <CommandMetric
+          label="Refinery"
+          value={`${reprocessingQueue}`}
+          meta={reprocessingQueue > 0 ? 'batches staged' : 'facility idle'}
+          tone={reprocessingQueue > 0 ? 'amber' : 'slate'}
+          onClick={() => navigate('reprocessing')}
+        />
+        <CommandMetric
+          label="Fleet Tempo"
+          value={`${movingFleets + combatFleets}`}
+          meta={combatFleets > 0 ? `${combatFleets} combat · ${movingFleets} transit` : haulingFleets > 0 ? `${haulingFleets} hauling lines` : `${idleSignals} idle systems`}
+          tone={combatFleets > 0 ? 'amber' : movingFleets > 0 ? 'cyan' : 'slate'}
+          onClick={() => navigate('fleet', { entityType: 'panel', entityId: 'fleet-operations', panelSection: 'operations' })}
+        />
+      </div>
+
+      <ActivityBar active={activeSignals > 0} rate={activityRate} color={manufacturingQueue > 0 ? 'violet' : movingFleets > 0 ? 'cyan' : 'amber'} label="Operations load" valueLabel={manufacturingQueue > 0 ? `${manufacturingQueue} fabrication` : movingFleets > 0 ? `${movingFleets} in transit` : `${activeSignals} active`} />
+    </div>
+  );
 }
 
 function ProgressPromptStrip() {
@@ -1234,7 +1385,7 @@ function ActiveSkillCard() {
           <div className="text-slate-600 text-[10px]">{(pct * 100).toFixed(1)}%</div>
         </div>
       </div>
-      <FlairProgressBar value={pct} color="cyan" />
+      <FlairProgressBar value={pct} color="cyan" label="Training progress" valueLabel={`${(pct * 100).toFixed(1)}%`} />
       {skillsState.queue.length > 0 && (
         <div className="text-slate-600 text-xs">
           +{skillsState.queue.length} skill{skillsState.queue.length !== 1 ? 's' : ''} queued
@@ -1248,40 +1399,65 @@ function ActiveSkillCard() {
 
 function ManufacturingCard() {
   const state      = useGameStore(s => s.state);
+  const navigate   = useUiStore(s => s.navigate);
   const slowMult   = getManufacturingSpeedMultiplier(state);
   const { queue }  = state.systems.manufacturing;
   const job        = queue[0];
   const recipe     = job ? MANUFACTURING_RECIPES[job.recipeId] : null;
+  const researchLoad = state.systems.manufacturing.researchJobs.length;
+  const copyLoad = state.systems.manufacturing.copyJobs.length;
+  const blueprintCount = state.systems.manufacturing.blueprints.length;
 
   const totalCompleted = Object.values(state.systems.manufacturing.completedCount).reduce((a, b) => a + b, 0);
+  const speedGrade = slowMult >= 1.8 ? 'S' : slowMult >= 1.45 ? 'A' : slowMult >= 1.15 ? 'B' : slowMult >= 1 ? 'C' : 'D';
 
   if (!state.unlocks['system-manufacturing']) {
     return (
-      <div
+      <button
+        onClick={() => navigate('skills', { entityType: 'skill', entityId: 'industry' })}
         className="rounded-xl p-4 flex flex-col gap-2"
         style={{ background: 'rgba(3,8,20,0.7)', border: '1px solid rgba(255,255,255,0.07)', opacity: 0.5 }}
       >
         <div className="text-[10px] text-slate-500 uppercase tracking-widest">🏭 Manufacturing</div>
         <p className="text-slate-600 text-xs italic">Locked — train Industry I to unlock.</p>
-      </div>
+      </button>
     );
   }
 
   if (!job || !recipe) {
     return (
-      <div
-        className="rounded-xl p-4 flex flex-col gap-2"
+      <button
+        onClick={() => navigate('manufacturing', { entityType: 'panel', entityId: 'manufacturing-jobs', panelSection: 'jobs' })}
+        className="rounded-xl p-4 flex flex-col gap-3 text-left hover:bg-white/[0.03] transition-colors"
         style={{ background: 'rgba(3,8,20,0.7)', border: '1px solid rgba(255,255,255,0.07)' }}
       >
         <div className="flex items-center justify-between">
-          <div className="text-[10px] text-slate-500 uppercase tracking-widest">🏭 Manufacturing</div>
-          <span className="text-xs font-mono text-violet-400">×{slowMult.toFixed(2)} speed</span>
+          <div className="flex items-center gap-2">
+            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${researchLoad + copyLoad > 0 ? 'bg-cyan-400 animate-pulse' : 'bg-slate-600'}`} />
+            <div className="text-[10px] text-slate-500 uppercase tracking-widest">🏭 Manufacturing</div>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[9px] px-1.5 py-0.5 rounded border border-violet-700/30 bg-violet-950/15 text-violet-300 font-mono">grade {speedGrade}</span>
+            <span className="text-xs font-mono text-violet-400">×{slowMult.toFixed(2)} speed</span>
+          </div>
         </div>
-        <p className="text-slate-600 text-xs italic">Queue is empty.</p>
+        <div className="grid grid-cols-3 gap-2 text-[9px]">
+          <div className="rounded border border-slate-700/20 bg-slate-950/20 px-2 py-1.5 text-slate-500">
+            Queue <span className="text-slate-300 font-mono ml-1">0</span>
+          </div>
+          <div className="rounded border border-slate-700/20 bg-slate-950/20 px-2 py-1.5 text-slate-500">
+            Lab <span className="text-cyan-300 font-mono ml-1">{researchLoad + copyLoad}</span>
+          </div>
+          <div className="rounded border border-slate-700/20 bg-slate-950/20 px-2 py-1.5 text-slate-500">
+            BPs <span className="text-amber-300 font-mono ml-1">{blueprintCount}</span>
+          </div>
+        </div>
+        <p className="text-slate-600 text-xs italic">Fabrication queue is empty. Blueprint work can keep the industrial line moving.</p>
+        <ActivityBar active={researchLoad + copyLoad > 0} rate={Math.min(1, (researchLoad + copyLoad) / 3)} color={researchLoad + copyLoad > 0 ? 'cyan' : 'violet'} label="Lab load" valueLabel={researchLoad + copyLoad > 0 ? `${researchLoad + copyLoad} lab jobs` : 'idle'} />
         {totalCompleted > 0 && (
           <div className="text-[10px] text-slate-600">{totalCompleted} items produced all time</div>
         )}
-      </div>
+      </button>
     );
   }
 
@@ -1290,26 +1466,50 @@ function ManufacturingCard() {
   const remaining   = Math.max(0, totalTime - job.progress) / Math.max(slowMult, 0.001);
 
   return (
-    <div
-      className="rounded-xl p-4 flex flex-col gap-3"
+    <button
+      onClick={() => navigate('manufacturing', { entityType: 'panel', entityId: 'manufacturing-jobs', panelSection: 'jobs' })}
+      className="rounded-xl p-4 flex flex-col gap-3 text-left hover:bg-white/[0.03] transition-colors"
       style={{ background: 'rgba(3,8,20,0.7)', border: '1px solid rgba(167,139,250,0.15)' }}
     >
-      <div className="flex items-center justify-between">
-        <div className="text-[10px] text-slate-500 uppercase tracking-widest">🏭 Manufacturing</div>
-        <span className="text-xs font-mono text-violet-400">{queue.length} job{queue.length !== 1 ? 's' : ''}</span>
-      </div>
-      <div className="flex items-center justify-between text-xs gap-2">
-        <div>
-          <div className="text-white font-bold">{recipe.name}</div>
-          <div className="text-slate-500">×{job.quantity} batch</div>
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse shrink-0" />
+          <div className="text-[10px] text-slate-500 uppercase tracking-widest">🏭 Manufacturing</div>
         </div>
-        <span className="text-violet-300 font-mono">{fmtSec(remaining)}</span>
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="text-[9px] px-1.5 py-0.5 rounded border border-violet-700/30 bg-violet-950/15 text-violet-300 font-mono">grade {speedGrade}</span>
+          <span className="text-xs font-mono text-violet-400">{queue.length} job{queue.length !== 1 ? 's' : ''}</span>
+        </div>
       </div>
-      <FlairProgressBar value={progressPct} color="violet" />
-      {totalCompleted > 0 && (
-        <div className="text-[10px] text-slate-600">{totalCompleted} items produced all time</div>
-      )}
-    </div>
+
+      <div className="grid grid-cols-3 gap-2 text-[9px]">
+        <div className="rounded border border-slate-700/20 bg-slate-950/20 px-2 py-1.5 text-slate-500">
+          Queue <span className="text-violet-300 font-mono ml-1">{queue.length}</span>
+        </div>
+        <div className="rounded border border-slate-700/20 bg-slate-950/20 px-2 py-1.5 text-slate-500">
+          Lab <span className="text-cyan-300 font-mono ml-1">{researchLoad + copyLoad}</span>
+        </div>
+        <div className="rounded border border-slate-700/20 bg-slate-950/20 px-2 py-1.5 text-slate-500">
+          BPs <span className="text-amber-300 font-mono ml-1">{blueprintCount}</span>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between text-xs gap-2">
+        <div className="min-w-0">
+          <div className="text-white font-bold truncate">{recipe.name}</div>
+          <div className="text-slate-500">×{job.quantity} batch · {totalCompleted} lifetime output</div>
+        </div>
+        <span className="text-violet-300 font-mono shrink-0">{fmtSec(remaining)}</span>
+      </div>
+
+      <FlairProgressBar value={progressPct} color="violet" label="Fabrication progress" valueLabel={`${Math.round(progressPct * 100)}%`} />
+      <ActivityBar active rate={Math.min(1, Math.max(progressPct, slowMult / 2))} color="violet" label="Production rate" valueLabel={`x${slowMult.toFixed(2)} speed`} />
+      <div className="text-[10px] text-slate-500">
+        {researchLoad + copyLoad > 0
+          ? `${researchLoad} research and ${copyLoad} copy jobs are running alongside fabrication.`
+          : 'No lab work running. Blueprint operations are available from the full manufacturing panel.'}
+      </div>
+    </button>
   );
 }
 
@@ -1467,14 +1667,6 @@ function FleetStatusCard() {
   const galaxy = state.galaxy;
   const ships = state.systems.fleet.ships;
 
-  function activityLabel(fleet: typeof fleets[0]) {
-    if (fleet.fleetOrder !== null)                         return { text: 'In Transit', color: '#22d3ee', dot: 'bg-cyan-400 animate-pulse' };
-    if (getHaulingWings(fleet).some(wing => wing.isDispatched)) return { text: 'Wing Haul', color: '#f59e0b', dot: 'bg-amber-400 animate-pulse' };
-    if (fleet.combatOrder?.type === 'patrol')              return { text: 'Patrol',    color: '#f43f5e', dot: 'bg-rose-400 animate-pulse' };
-    if (fleet.combatOrder?.type === 'raid')                return { text: 'Raid',      color: '#f43f5e', dot: 'bg-rose-400 animate-pulse' };
-    return                                                        { text: 'Idle',      color: '#475569', dot: 'bg-slate-600' };
-  }
-
   return (
     <div
       className="rounded-xl p-4 flex flex-col gap-2"
@@ -1488,7 +1680,10 @@ function FleetStatusCard() {
         const sysName = galaxy ? (() => {
           try { return getSystemById(galaxy.seed, fleet.currentSystemId).name; } catch { return fleet.currentSystemId; }
         })() : fleet.currentSystemId;
-        const status = activityLabel(fleet);
+        const status = describeFleetActivity(state, fleet, systemId => {
+          if (!galaxy) return systemId;
+          try { return getSystemById(galaxy.seed, systemId).name; } catch { return systemId; }
+        });
         const dispatchedHaulingWings = getHaulingWings(fleet).filter(wing => wing.isDispatched);
         const escortedHaulingWings = dispatchedHaulingWings.filter(wing => hasActiveEscortWing(fleet, wing));
         const operationalShipIds = getOperationalFleetShipIds(fleet);
@@ -1506,9 +1701,10 @@ function FleetStatusCard() {
 
         return (
           <div key={fleet.id} className="flex items-center gap-2 py-1.5 px-2 rounded-lg" style={{ background: 'rgba(255,255,255,0.02)' }}>
-            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${status.dot}`} />
+            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${status.dotClass}`} />
             <NavTag entityType="fleet" entityId={fleet.id} label={fleet.name} />
-            <span className="text-[9px] font-mono shrink-0" style={{ color: status.color }}>{status.text}</span>
+            <span className="text-[9px] font-mono shrink-0" style={{ color: status.tone === 'cyan' ? '#22d3ee' : status.tone === 'amber' ? '#f59e0b' : status.tone === 'emerald' ? '#34d399' : status.tone === 'violet' ? '#a78bfa' : status.tone === 'rose' ? '#f43f5e' : '#475569' }}>{status.shortLabel}</span>
+            <span className="text-[8px] text-slate-500 truncate min-w-0">{status.detail}</span>
             {cargoFillPct > 0 && (
               <span className={`text-[8px] font-mono shrink-0 ${cargoFillPct >= 80 ? 'text-amber-400' : 'text-slate-600'}`}>
                 cargo {cargoFillPct}%
@@ -1591,6 +1787,7 @@ export function OverviewPanel() {
 
       {mode === 'operations' ? (
         <>
+          <OperationsCommandDeck />
           <CorpCard />
           <CorpHQCard />
           <ProgressPromptStrip />

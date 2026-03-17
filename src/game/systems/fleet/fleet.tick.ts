@@ -123,11 +123,14 @@ export function tickFleet(state: GameState, deltaSeconds: number): FleetTickResu
   // ── Iterate ships — calculate fleet mining contribution ────────────────
   for (const ship of Object.values(fleet.ships)) {
     if (ship.activity !== 'mining') continue;
+    if (ship.fleetOrder) continue;
     if (!ship.assignedPilotId) continue;
 
     const fleetGroupForShip = fleet.fleets[ship.fleetId ?? ''];
     const shipWing = fleetGroupForShip ? getWingByShipId(fleetGroupForShip, ship.id) : null;
     if (fleetGroupForShip && !shipWing) continue;
+    if (fleetGroupForShip?.fleetOrder) continue;
+    if (fleetGroupForShip && ship.systemId !== fleetGroupForShip.currentSystemId) continue;
 
     const hull = HULL_DEFINITIONS[ship.shipDefinitionId];
     if (!hull) continue;

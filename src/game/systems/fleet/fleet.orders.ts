@@ -1,23 +1,24 @@
 /**
  * Fleet order system — autonomous ship movement.
  *
- * Ships with a non-null `fleetOrder` advance one hop per call to
- * `advanceFleetOrder()`, which is called every tick cycle.
+ * Ships with a non-null `fleetOrder` advance along timed warp legs.
  *
  * Design notes:
  * - Routes are pre-computed by issueFleetOrder() and stored on the ship.
- * - Each tick the ship moves one leg (hop) forward on the route.
+ * - Each leg has a computed duration derived from the galaxy warp model.
  * - On arrival the order is cleared and the ship resumes its previous activity
  *   (or goes idle if pauseOnArrival was set).
  * - issueFleetOrder() uses the galaxy-wide BFS route planner with optional
  *   security filter.
  */
 
-import type { GameState, ShipInstance } from '@/types/game.types';
+import type { GameState, PlayerFleet, ShipInstance } from '@/types/game.types';
 import type { FleetOrder, RouteSecurityFilter } from '@/types/faction.types';
+import type { StarSystem } from '@/types/galaxy.types';
 import { findRoute } from '@/game/galaxy/route.logic';
 import { generateGalaxy } from '@/game/galaxy/galaxy.gen';
-import { computeFleetJumpRange } from './fleet.logic';
+import { calcWarpDuration } from '@/game/galaxy/travel.logic';
+import { computeFleetJumpRange, getFleetTransitWarpMultiplier, getShipTransitWarpMultiplier } from './fleet.logic';
 import { hasDispatchedHaulingWing } from './wings.logic';
 
 // ─── Jump range constant ──────────────────────────────────────────────────
@@ -29,6 +30,139 @@ export const FLEET_ORDER_JUMP_RANGE_LY = 20;
 
 function getShipById(state: GameState, shipId: string): ShipInstance | undefined {
   return state.systems.fleet.ships[shipId];
+}
+
+function getSystemById(systems: StarSystem[], systemId: string): StarSystem | undefined {
+  return systems.find(system => system.id === systemId);
+}
+
+function computeRouteLegDurationSeconds(
+  state: GameState,
+  route: string[],
+  legIndex: number,
+  systems: StarSystem[],
+  extraWarpSpeedMultiplier: number,
+): number {
+  const from = getSystemById(systems, route[legIndex]);
+  const to = getSystemById(systems, route[legIndex + 1]);
+  if (!from || !to) return 1;
+  return calcWarpDuration(state, from, to, extraWarpSpeedMultiplier);
+}
+
+export function getShipOrderLegDurationSeconds(
+  state: GameState,
+  ship: ShipInstance,
+  order: FleetOrder,
+  systems: StarSystem[],
+): number {
+  return order.legDurationSeconds
+    ?? computeRouteLegDurationSeconds(state, order.route, order.currentLeg, systems, getShipTransitWarpMultiplier(state, ship));
+}
+
+export function getFleetOrderLegDurationSeconds(
+  state: GameState,
+  fleet: PlayerFleet,
+  ships: Record<string, ShipInstance>,
+  order: FleetOrder,
+  systems: StarSystem[],
+): number {
+  return order.legDurationSeconds
+    ?? computeRouteLegDurationSeconds(state, order.route, order.currentLeg, systems, getFleetTransitWarpMultiplier(state, fleet.shipIds, fleet));
+}
+
+function getOrderProgress(order: FleetOrder, durationSeconds: number, nowMs: number): number {
+  if (durationSeconds <= 0) return 1;
+  const elapsedSeconds = Math.max(0, (nowMs - order.legDepartedAt) / 1000);
+  return Math.min(1, elapsedSeconds / durationSeconds);
+}
+
+export function getShipOrderProgress(
+  state: GameState,
+  ship: ShipInstance,
+  order: FleetOrder,
+  systems: StarSystem[],
+  nowMs: number,
+): number {
+  return getOrderProgress(order, getShipOrderLegDurationSeconds(state, ship, order, systems), nowMs);
+}
+
+export function getFleetOrderProgress(
+  state: GameState,
+  fleet: PlayerFleet,
+  ships: Record<string, ShipInstance>,
+  order: FleetOrder,
+  systems: StarSystem[],
+  nowMs: number,
+): number {
+  return getOrderProgress(order, getFleetOrderLegDurationSeconds(state, fleet, ships, order, systems), nowMs);
+}
+
+export function getShipOrderEtaSeconds(
+  state: GameState,
+  ship: ShipInstance,
+  order: FleetOrder,
+  systems: StarSystem[],
+  nowMs: number,
+): number {
+  const extraWarpSpeedMultiplier = getShipTransitWarpMultiplier(state, ship);
+  let remaining = Math.max(0, getShipOrderLegDurationSeconds(state, ship, order, systems) - ((nowMs - order.legDepartedAt) / 1000));
+  for (let legIndex = order.currentLeg + 1; legIndex < order.route.length - 1; legIndex += 1) {
+    remaining += computeRouteLegDurationSeconds(state, order.route, legIndex, systems, extraWarpSpeedMultiplier);
+  }
+  return remaining;
+}
+
+export function getFleetOrderEtaSeconds(
+  state: GameState,
+  fleet: PlayerFleet,
+  ships: Record<string, ShipInstance>,
+  order: FleetOrder,
+  systems: StarSystem[],
+  nowMs: number,
+): number {
+  const extraWarpSpeedMultiplier = getFleetTransitWarpMultiplier(state, fleet.shipIds, fleet);
+  let remaining = Math.max(0, getFleetOrderLegDurationSeconds(state, fleet, ships, order, systems) - ((nowMs - order.legDepartedAt) / 1000));
+  for (let legIndex = order.currentLeg + 1; legIndex < order.route.length - 1; legIndex += 1) {
+    remaining += computeRouteLegDurationSeconds(state, order.route, legIndex, systems, extraWarpSpeedMultiplier);
+  }
+  return remaining;
+}
+
+function advanceOrderByElapsedTime(
+  state: GameState,
+  order: FleetOrder,
+  systems: StarSystem[],
+  extraWarpSpeedMultiplier: number,
+  nowMs: number,
+): { nextOrder: FleetOrder | null; currentSystemId: string; arrived: boolean } {
+  let currentLeg = order.currentLeg;
+  let legDepartedAt = order.legDepartedAt;
+  let currentSystemId = order.route[currentLeg] ?? order.destinationSystemId;
+  let legDurationSeconds = order.legDurationSeconds
+    ?? computeRouteLegDurationSeconds(state, order.route, currentLeg, systems, extraWarpSpeedMultiplier);
+
+  while (currentLeg < order.route.length - 1) {
+    const arrivalAt = legDepartedAt + Math.round(legDurationSeconds * 1000);
+    if (nowMs < arrivalAt) {
+      return {
+        nextOrder: { ...order, currentLeg, legDepartedAt, legDurationSeconds },
+        currentSystemId,
+        arrived: false,
+      };
+    }
+
+    currentLeg += 1;
+    currentSystemId = order.route[currentLeg] ?? currentSystemId;
+
+    if (currentLeg >= order.route.length - 1) {
+      return { nextOrder: null, currentSystemId, arrived: true };
+    }
+
+    legDepartedAt = arrivalAt;
+    legDurationSeconds = computeRouteLegDurationSeconds(state, order.route, currentLeg, systems, extraWarpSpeedMultiplier);
+  }
+
+  return { nextOrder: null, currentSystemId, arrived: true };
 }
 
 // ─── Issue order ──────────────────────────────────────────────────────────
@@ -67,6 +201,7 @@ export function issueFleetOrder(
     securityFilter,
     pauseOnArrival,
     legDepartedAt: Date.now(),
+    legDurationSeconds: computeRouteLegDurationSeconds(state, route.path, 0, galaxy, getShipTransitWarpMultiplier(state, ship)),
   };
 
   return {
@@ -143,6 +278,7 @@ export function issueFleetGroupOrder(
     securityFilter,
     pauseOnArrival,
     legDepartedAt: Date.now(),
+    legDurationSeconds: computeRouteLegDurationSeconds(state, route.path, 0, galaxy, getFleetTransitWarpMultiplier(state, fleet.shipIds, fleet)),
   };
 
   // Update all ships in the fleet to 'transport' activity
@@ -216,52 +352,29 @@ export interface FleetOrderTickResult {
  */
 export function advanceFleetOrders(
   state: GameState,
+  nowMs: number,
 ): FleetOrderTickResult {
   let s = state;
   const arrivals: Array<{ shipId: string; systemId: string }> = [];
+  const galaxy = generateGalaxy(state.galaxy.seed);
 
   for (const [shipId, ship] of Object.entries(s.systems.fleet.ships)) {
     if (!ship.fleetOrder) continue;
 
     const order = ship.fleetOrder;
-    const nextLeg = order.currentLeg + 1;
-
-    if (nextLeg >= order.route.length) {
-      // Order complete — ship is already at destination; clear the order
-      const updatedShip: ShipInstance = {
-        ...ship,
-        fleetOrder: null,
-        activity: order.pauseOnArrival ? 'idle' : ship.activity === 'transport' ? 'idle' : ship.activity,
-      };
-      s = {
-        ...s,
-        systems: {
-          ...s.systems,
-          fleet: {
-            ...s.systems.fleet,
-            ships: { ...s.systems.fleet.ships, [shipId]: updatedShip },
-          },
-        },
-      };
-      continue;
-    }
-
-    // Advance one hop
-    const nextSystemId = order.route[nextLeg];
-
-    const updatedOrder: FleetOrder = {
-      ...order,
-      currentLeg: nextLeg,
-      legDepartedAt: Date.now(),
-    };
-
-    const didArrive = nextLeg === order.route.length - 1;
+    const advancedOrder = advanceOrderByElapsedTime(
+      s,
+      order,
+      galaxy,
+      getShipTransitWarpMultiplier(s, ship),
+      nowMs,
+    );
 
     const updatedShip: ShipInstance = {
       ...ship,
-      systemId: nextSystemId,
-      fleetOrder: didArrive ? null : updatedOrder,
-      activity: didArrive
+      systemId: advancedOrder.currentSystemId,
+      fleetOrder: advancedOrder.nextOrder,
+      activity: advancedOrder.arrived
         ? (order.pauseOnArrival ? 'idle' : 'idle')
         : 'transport',
     };
@@ -277,8 +390,8 @@ export function advanceFleetOrders(
       },
     };
 
-    if (didArrive) {
-      arrivals.push({ shipId, systemId: nextSystemId });
+    if (advancedOrder.arrived) {
+      arrivals.push({ shipId, systemId: advancedOrder.currentSystemId });
     }
   }
 
@@ -287,43 +400,15 @@ export function advanceFleetOrders(
     if (!fleet.fleetOrder) continue;
 
     const order = fleet.fleetOrder;
-    const nextLeg = order.currentLeg + 1;
+    const advancedOrder = advanceOrderByElapsedTime(
+      s,
+      order,
+      galaxy,
+      getFleetTransitWarpMultiplier(s, fleet.shipIds, fleet),
+      nowMs,
+    );
 
-    if (nextLeg >= order.route.length) {
-      // Already at destination — clear order
-      let newShips = { ...s.systems.fleet.ships };
-      for (const sid of fleet.shipIds) {
-        const ship = newShips[sid];
-        if (ship) newShips = { ...newShips, [sid]: { ...ship, activity: 'idle' } };
-      }
-      s = {
-        ...s,
-        systems: {
-          ...s.systems,
-          fleet: {
-            ...s.systems.fleet,
-            ships: newShips,
-            fleets: {
-              ...s.systems.fleet.fleets,
-              [fleetId]: { ...fleet, fleetOrder: null },
-            },
-          },
-        },
-      };
-      for (const sid of fleet.shipIds) arrivals.push({ shipId: sid, systemId: fleet.currentSystemId });
-      continue;
-    }
-
-    const nextSystemId = order.route[nextLeg];
-    const didArrive = nextLeg === order.route.length - 1;
-
-    const updatedOrder: FleetOrder = {
-      ...order,
-      currentLeg: nextLeg,
-      legDepartedAt: Date.now(),
-    };
-
-    // Move all ships in the fleet to the next system
+    // Move all ships in the fleet to the resolved system for this tick
     let newShips = { ...s.systems.fleet.ships };
     for (const sid of fleet.shipIds) {
       const ship = newShips[sid];
@@ -332,8 +417,8 @@ export function advanceFleetOrders(
           ...newShips,
           [sid]: {
             ...ship,
-            systemId: nextSystemId,
-            activity: didArrive ? 'idle' : 'transport',
+            systemId: advancedOrder.currentSystemId,
+            activity: advancedOrder.arrived ? 'idle' : 'transport',
           },
         };
       }
@@ -350,16 +435,16 @@ export function advanceFleetOrders(
             ...s.systems.fleet.fleets,
             [fleetId]: {
               ...fleet,
-              currentSystemId: nextSystemId,
-              fleetOrder: didArrive ? null : updatedOrder,
+              currentSystemId: advancedOrder.currentSystemId,
+              fleetOrder: advancedOrder.nextOrder,
             },
           },
         },
       },
     };
 
-    if (didArrive) {
-      for (const sid of fleet.shipIds) arrivals.push({ shipId: sid, systemId: nextSystemId });
+    if (advancedOrder.arrived) {
+      for (const sid of fleet.shipIds) arrivals.push({ shipId: sid, systemId: advancedOrder.currentSystemId });
     }
   }
 

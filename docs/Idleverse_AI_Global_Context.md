@@ -11,6 +11,7 @@ The design philosophy prioritizes:
 - Deep interconnected gameplay systems
 - Long-term progression layers
 - Clean, modern UI/UX
+- Gentle, easy-on-the-ears sci-fi audio cues
 - Strong sci-fi aesthetic
 - Strategic decision making rather than pure idle clicking
 
@@ -156,9 +157,9 @@ For detailed specs see `Idleverse_SYSTEM_BLUEPRINTS.md`. For the upcoming pipeli
 
 ### Implemented Systems
 
-- Asteroid Mining (9 ore belts, 3 security tiers, pool depletion)
+- Asteroid Mining (10 ore belts, 3 security tiers, pool depletion)
 - Ore Reprocessing (mineral yield, skill-scaled, auto-queue)
-- Manufacturing (12 T1 + 6 T2 recipes — components + ships, skill-gated, BPC system)
+- Manufacturing (components, craftable modules, T1/T2 ships, skill-gated, BPC system)
 - Skills (34+ corp-wide skills; pilots each have individual skill queues)
 - NPC Market (ISK income via sell orders, dynamic per-system pricing, auto-sell, trade routes)
 - Galaxy & Navigation (400 procedurally generated systems, BFS/Dijkstra routing)
@@ -170,6 +171,7 @@ For detailed specs see `Idleverse_SYSTEM_BLUEPRINTS.md`. For the upcoming pipeli
 - Pilots (individual crew with skills, morale, training focus, skill queue)
 - Blueprint Research & T2 Manufacturing (research levels 0–10, BPC copies, T2 recipes)
 - Exploration & Anomaly Scanning (scan progress, 5 anomaly types, discovery feed)
+- Procedural Audio Cues (top-bar audio toggle + master volume, soft navigation/save/completion SFX, browser-safe lazy unlock)
 
 ### Planned Systems (see Design Plan)
 

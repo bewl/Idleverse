@@ -1,6 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useGameStore } from '@/stores/gameStore';
 import { useUiStore, type NavigationHistoryEntry, type PanelId, type PanelStateMap } from '@/stores/uiStore';
+import { playUiConfirm, playUiNavigate, playUiSave, syncAudioSettings, unlockAudio } from '@/game/audio/soundEvents';
 import { StarField } from '@/ui/effects/StarField';
 import { ResourceBar } from '@/ui/panels/ResourceBar';
 import { MiningPanel } from '@/ui/panels/MiningPanel';
@@ -141,8 +142,13 @@ export function GameLayout() {
   const state               = useGameStore(s => s.state);
   const unlocks             = useGameStore(s => s.state.unlocks);
   const saveToStorage       = useGameStore(s => s.saveToStorage);
+  const audioEnabled        = useGameStore(s => s.state.settings.audioEnabled);
+  const masterVolume        = useGameStore(s => s.state.settings.masterVolume);
+  const setAudioEnabled     = useGameStore(s => s.setAudioEnabled);
+  const setMasterVolume     = useGameStore(s => s.setMasterVolume);
   const offlineSummary      = useGameStore(s => s.offlineSummary);
   const dismissOfflineSummary = useGameStore(s => s.dismissOfflineSummary);
+  const didRouteSoundMount = useRef(false);
 
   const visibleNav = NAV.filter(n => unlocks[n.unlockKey]);
   const breadcrumbs = useMemo(() => {
@@ -154,6 +160,35 @@ export function GameLayout() {
     };
     return [...navigationHistory.slice(-4), current];
   }, [activePanel, focusTarget, navigationHistory, panelStates]);
+
+  useEffect(() => {
+    if (!didRouteSoundMount.current) {
+      didRouteSoundMount.current = true;
+      return;
+    }
+    playUiNavigate();
+  }, [activePanel, focusTarget?.entityId, focusTarget?.entityType]);
+
+  const handleSave = async () => {
+    await unlockAudio();
+    playUiSave();
+    saveToStorage();
+  };
+
+  const handleToggleAudio = async () => {
+    const nextEnabled = !audioEnabled;
+    syncAudioSettings({ audioEnabled: nextEnabled, masterVolume });
+    setAudioEnabled(nextEnabled);
+    if (nextEnabled) {
+      await unlockAudio();
+      playUiConfirm();
+    }
+  };
+
+  const handleMasterVolumeChange = (nextVolume: number) => {
+    syncAudioSettings({ audioEnabled, masterVolume: nextVolume });
+    setMasterVolume(nextVolume);
+  };
 
   return (
     <div
@@ -190,6 +225,33 @@ export function GameLayout() {
           </span>
         </div>
         <div className="flex items-center gap-2">
+          <div className="hidden sm:flex items-center gap-2 rounded border border-slate-700/40 bg-slate-950/50 px-2 py-1">
+            <button
+              className={`text-xs font-semibold transition-colors ${audioEnabled ? 'text-cyan-300 hover:text-cyan-200' : 'text-slate-500 hover:text-slate-300'}`}
+              onClick={handleToggleAudio}
+              title={audioEnabled ? 'Mute audio' : 'Enable audio'}
+            >
+              {audioEnabled ? 'SFX ON' : 'SFX OFF'}
+            </button>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              step={1}
+              value={Math.round(masterVolume * 100)}
+              onChange={e => handleMasterVolumeChange(Number(e.target.value) / 100)}
+              onPointerDown={() => { void unlockAudio(); }}
+              className="h-1 w-20 accent-cyan-400"
+              title={`Master volume: ${Math.round(masterVolume * 100)}%`}
+            />
+          </div>
+          <button
+            className={`sm:hidden btn-secondary text-xs py-1 px-2 ${audioEnabled ? 'text-cyan-300' : 'text-slate-500'}`}
+            onClick={handleToggleAudio}
+            title={audioEnabled ? 'Mute audio' : 'Enable audio'}
+          >
+            {audioEnabled ? '🔊' : '🔇'}
+          </button>
           {import.meta.env.DEV && (
             <button
               onClick={() => setDevOpen(o => !o)}
@@ -199,7 +261,7 @@ export function GameLayout() {
               DEV
             </button>
           )}
-          <button className="btn-secondary text-xs py-1 px-3" onClick={saveToStorage}>
+          <button className="btn-secondary text-xs py-1 px-3" onClick={handleSave}>
             Save
           </button>
         </div>

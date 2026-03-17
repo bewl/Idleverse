@@ -86,9 +86,10 @@ src/
   App.tsx
   main.tsx
   game/
+    audio/          — procedural Web Audio manager + semantic sound event helpers
     balance/        — constants.ts (tick rates, upgrade growth rate, haul times)
     core/           — tick runner, game loop
-    galaxy/         — galaxy generation, system graph, NPC group seeding
+    galaxy/         — galaxy generation, system graph, NPC group seeding, warp timing helpers
     hooks/          — useResourceRates and other computed hooks
     offline/        — offline progress catch-up calculation
     persistence/    — save/load, migration, serialization
@@ -118,7 +119,7 @@ src/
   types/
     game.types.ts   — core GameState + all system state types
     galaxy.types.ts — GalaxyState, SystemNode, JumpLane
-    faction.types.ts — factions, FleetOrder
+    faction.types.ts — factions, FleetOrder timed-leg transit state
     combat.types.ts  — CombatOrder, NpcGroupDef, CombatLogEntry
   ui/
     components/     — shared UI primitives (GameTooltip, GameDropdown, NavTag, SystemUnlockCard)
@@ -150,6 +151,16 @@ Examples:
 - game loop helpers
 - global state interfaces
 - calculation helpers
+
+#### `game/audio`
+Client-only procedural audio runtime.
+
+Files:
+
+- `audioManager.ts` — lazy `AudioContext` bootstrap, master gain, muted-state handling, synth helpers for soft sci-fi cues
+- `soundEvents.ts` — semantic wrappers (`playUiNavigate`, `playUiSave`, `playManufacturingComplete`, `playSkillAdvance`) used by UI and store code
+
+Audio is intentionally generated in code for the first pass: no asset pipeline, no music system, and no per-action spam. The runtime now uses small per-event variant pools plus very tight micro-randomization (timing, detune, filter, gain) so repeat cues stay dynamic without sounding like obviously different alternate takes. Settings live in persistent `GameSettings` as `audioEnabled` and `masterVolume`.
 
 #### `game/resources`
 Resource definitions and helpers.

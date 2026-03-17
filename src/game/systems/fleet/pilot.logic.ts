@@ -65,6 +65,23 @@ export function getPilotHaulingBonus(pilot: PilotInstance): number {
 }
 
 /**
+ * Inter-system warp speed bonus from a pilot's personal navigation training.
+ */
+export function getPilotWarpSpeedBonus(pilot: PilotInstance): number {
+  let bonus = 0;
+  const level = pilot.skills.levels['navigation'] ?? 0;
+  if (level <= 0) return bonus;
+  const def = SKILL_DEFINITIONS['navigation'];
+  if (!def) return bonus;
+  for (const effect of def.effects) {
+    if (effect.modifier === 'warp-speed') {
+      bonus += effect.valuePerLevel * level;
+    }
+  }
+  return bonus;
+}
+
+/**
  * Morale multiplier. Range 0.5 (demoralised) to 1.2 (enthusiastic).
  */
 export function getPilotMoraleMultiplier(pilot: PilotInstance): number {

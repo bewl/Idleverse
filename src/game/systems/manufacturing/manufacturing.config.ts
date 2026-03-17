@@ -1,4 +1,5 @@
 import type { ManufacturingRecipeDefinition } from '@/types/game.types';
+import { MODULE_DEFINITIONS } from '@/game/systems/fleet/fleet.config';
 
 // ─── Research constants ────────────────────────────────────────────────────
 
@@ -22,6 +23,43 @@ export interface BlueprintDefinition {
   t2RecipeId: string | null;
 }
 
+function getModuleRecipeId(moduleId: string): string {
+  return `recipe-module-${moduleId}`;
+}
+
+const T1_MODULE_RECIPE_IDS = Object.keys(MODULE_DEFINITIONS).map(getModuleRecipeId);
+
+const MODULE_BLUEPRINT_DEFINITIONS: Record<string, BlueprintDefinition> = Object.fromEntries(
+  Object.values(MODULE_DEFINITIONS).map(module => [
+    getModuleRecipeId(module.id),
+    {
+      datacoreId: module.slotType === 'high' || module.slotType === 'low'
+        ? 'datacore-mechanical'
+        : 'datacore-electronic',
+      t2RecipeId: null,
+    },
+  ]),
+);
+
+const MODULE_RECIPES: Record<string, ManufacturingRecipeDefinition> = Object.fromEntries(
+  Object.values(MODULE_DEFINITIONS).map(module => {
+    const baseTime = module.slotType === 'high' ? 80 : module.slotType === 'mid' ? 70 : 60;
+    const timeCost = module.id.endsWith('-ii') ? baseTime + 35 : baseTime;
+    return [
+      getModuleRecipeId(module.id),
+      {
+        id: getModuleRecipeId(module.id),
+        name: module.name,
+        description: module.description,
+        inputs: module.buildCost,
+        outputs: { [module.id]: 1 },
+        timeCost,
+        category: 'module',
+      } satisfies ManufacturingRecipeDefinition,
+    ];
+  }),
+);
+
 export const BLUEPRINT_DEFINITIONS: Record<string, BlueprintDefinition> = {
   'craft-hull-plate':       { datacoreId: 'datacore-mechanical', t2RecipeId: 'craft-advanced-hull-plate' },
   'craft-thruster-node':    { datacoreId: 'datacore-mechanical', t2RecipeId: 'craft-advanced-thruster-node' },
@@ -29,12 +67,17 @@ export const BLUEPRINT_DEFINITIONS: Record<string, BlueprintDefinition> = {
   'craft-sensor-cluster':   { datacoreId: 'datacore-electronic', t2RecipeId: null },
   'craft-mining-laser':     { datacoreId: 'datacore-mechanical', t2RecipeId: null },
   'craft-shield-emitter':   { datacoreId: 'datacore-electronic', t2RecipeId: null },
+  'craft-armor-honeycomb':  { datacoreId: 'datacore-mechanical', t2RecipeId: null },
+  'craft-reactor-lattice':  { datacoreId: 'datacore-electronic', t2RecipeId: null },
+  'craft-targeting-bus':    { datacoreId: 'datacore-electronic', t2RecipeId: null },
   'recipe-ship-shuttle':    { datacoreId: 'datacore-mechanical', t2RecipeId: null },
   'recipe-ship-frigate':    { datacoreId: 'datacore-starship',   t2RecipeId: 'recipe-ship-assault-frigate' },
   'recipe-ship-mining-frigate': { datacoreId: 'datacore-mechanical', t2RecipeId: 'recipe-ship-covert-ops' },
   'recipe-ship-hauler':     { datacoreId: 'datacore-mechanical', t2RecipeId: null },
   'recipe-ship-destroyer':  { datacoreId: 'datacore-starship',   t2RecipeId: 'recipe-ship-command-destroyer' },
+  'recipe-ship-cruiser':    { datacoreId: 'datacore-starship',   t2RecipeId: null },
   'recipe-ship-exhumer':    { datacoreId: 'datacore-mechanical', t2RecipeId: null },
+  ...MODULE_BLUEPRINT_DEFINITIONS,
 };
 
 // ─── Component recipes ─────────────────────────────────────────────────────
@@ -97,6 +140,37 @@ export const MANUFACTURING_RECIPES: Record<string, ManufacturingRecipeDefinition
     requiredSkill: { skillId: 'electronics', minLevel: 1 },
   },
 
+  'craft-armor-honeycomb': {
+    id: 'craft-armor-honeycomb', name: 'Armor Honeycomb',
+    description: 'Layered armor mesh used in cruiser hull bands and reinforced combat fittings.',
+    inputs: { 'ferrite': 55, 'silite': 20, 'noxium': 10 },
+    outputs: { 'armor-honeycomb': 1 },
+    timeCost: 55,
+    category: 'component',
+  },
+
+  'craft-reactor-lattice': {
+    id: 'craft-reactor-lattice', name: 'Reactor Lattice',
+    description: 'Power-distribution frame for cruiser reactors and high-draw combat systems.',
+    inputs: { 'isorium': 35, 'noxium': 20, 'fluxite': 12 },
+    outputs: { 'reactor-lattice': 1 },
+    timeCost: 70,
+    category: 'component',
+    requiredSkill: { skillId: 'electronics', minLevel: 2 },
+  },
+
+  'craft-targeting-bus': {
+    id: 'craft-targeting-bus', name: 'Targeting Bus',
+    description: 'Signal-routing backbone for cruiser targeting computers and fire-control systems.',
+    inputs: { 'vexirite': 25, 'isorium': 20, 'fluxite': 10 },
+    outputs: { 'targeting-bus': 1 },
+    timeCost: 65,
+    category: 'component',
+    requiredSkill: { skillId: 'electronics', minLevel: 2 },
+  },
+
+  ...MODULE_RECIPES,
+
   // ─── Ship recipes ──────────────────────────────────────────────────────────
 
   'recipe-ship-shuttle': {
@@ -146,6 +220,24 @@ export const MANUFACTURING_RECIPES: Record<string, ManufacturingRecipeDefinition
     timeCost: 600,
     category: 'ship',
     requiredSkill: { skillId: 'destroyer', minLevel: 1 },
+  },
+
+  'recipe-ship-cruiser': {
+    id: 'recipe-ship-cruiser', name: 'Cruiser',
+    description: 'Medium combat hull with cruiser-grade armor, power routing, and targeting systems.',
+    inputs: {
+      'hull-plate': 24,
+      'thruster-node': 8,
+      'condenser-coil': 8,
+      'shield-emitter': 6,
+      'armor-honeycomb': 8,
+      'reactor-lattice': 5,
+      'targeting-bus': 5,
+    },
+    outputs: { 'ship-cruiser': 1 },
+    timeCost: 1200,
+    category: 'ship',
+    requiredSkill: { skillId: 'cruiser', minLevel: 1 },
   },
 
   'recipe-ship-exhumer': {
@@ -261,13 +353,25 @@ export const RECIPE_ORDER = [
   // T1 Components
   'craft-hull-plate', 'craft-thruster-node', 'craft-condenser-coil',
   'craft-sensor-cluster', 'craft-mining-laser', 'craft-shield-emitter',
+  'craft-armor-honeycomb', 'craft-reactor-lattice', 'craft-targeting-bus',
+  // T1 Modules
+  ...T1_MODULE_RECIPE_IDS,
   // T1 Ships
   'recipe-ship-shuttle', 'recipe-ship-frigate', 'recipe-ship-mining-frigate',
-  'recipe-ship-hauler', 'recipe-ship-destroyer', 'recipe-ship-exhumer',
+  'recipe-ship-hauler', 'recipe-ship-destroyer', 'recipe-ship-cruiser', 'recipe-ship-exhumer',
   // T2 Components
   'craft-advanced-hull-plate', 'craft-advanced-thruster-node', 'craft-advanced-condenser-coil', 'craft-pos-core',
   // T2 Ships
   'recipe-ship-assault-frigate', 'recipe-ship-covert-ops', 'recipe-ship-command-destroyer',
+];
+
+export const STARTER_BLUEPRINT_RECIPE_IDS = [
+  'craft-hull-plate', 'craft-thruster-node', 'craft-condenser-coil',
+  'craft-sensor-cluster', 'craft-mining-laser', 'craft-shield-emitter',
+  'craft-armor-honeycomb', 'craft-reactor-lattice', 'craft-targeting-bus',
+  ...T1_MODULE_RECIPE_IDS,
+  'recipe-ship-shuttle', 'recipe-ship-frigate', 'recipe-ship-mining-frigate',
+  'recipe-ship-hauler', 'recipe-ship-destroyer', 'recipe-ship-cruiser', 'recipe-ship-exhumer',
 ];
 
 

@@ -16,9 +16,10 @@ import { GameDropdown, type DropdownOption } from '@/ui/components/GameDropdown'
 import { PanelInfoSection } from '@/ui/components/PanelInfoSection';
 import { SystemUnlockCard } from '@/ui/components/SystemUnlockCard';
 import { useUiStore } from '@/stores/uiStore';
-import type { Blueprint, ResearchJob, CopyJob } from '@/types/game.types';
+import type { Blueprint, ResearchJob, CopyJob, ManufacturingJob } from '@/types/game.types';
 
 const QTY_PRESETS = [1, 5, 10, 25] as const;
+type ManufacturingTab = 'jobs' | 'blueprints';
 
 function ManufacturingHqBanner() {
   const state = useGameStore(s => s.state);
@@ -37,6 +38,45 @@ function ManufacturingHqBanner() {
   return (
     <div className="rounded-xl border border-cyan-700/20 bg-cyan-950/10 px-3 py-2 text-xs text-slate-400">
       Corp HQ anchored at <span className="text-cyan-300 font-semibold">{homeSystem.name}</span>. {homeOutpost ? 'Manufacturing and research jobs route through your outpost infrastructure.' : 'Manufacturing and research jobs route through this station network.'}
+    </div>
+  );
+}
+
+function manufacturingGrade(speedMult: number): { grade: string; color: string } {
+  if (speedMult >= 1.35) return { grade: 'S', color: '#22d3ee' };
+  if (speedMult >= 1.2) return { grade: 'A', color: '#34d399' };
+  if (speedMult >= 1.05) return { grade: 'B', color: '#fbbf24' };
+  if (speedMult >= 0.95) return { grade: 'C', color: '#fb923c' };
+  return { grade: 'D', color: '#f87171' };
+}
+
+function CommandMetric({
+  label,
+  value,
+  meta,
+  tone = 'slate',
+}: {
+  label: string;
+  value: string;
+  meta?: string;
+  tone?: 'cyan' | 'violet' | 'amber' | 'emerald' | 'slate';
+}) {
+  const toneClass =
+    tone === 'cyan'
+      ? 'text-cyan-300 border-cyan-700/30 bg-cyan-950/15'
+      : tone === 'violet'
+        ? 'text-violet-300 border-violet-700/30 bg-violet-950/15'
+        : tone === 'amber'
+          ? 'text-amber-300 border-amber-700/30 bg-amber-950/15'
+          : tone === 'emerald'
+            ? 'text-emerald-300 border-emerald-700/30 bg-emerald-950/15'
+            : 'text-slate-300 border-slate-700/30 bg-slate-900/50';
+
+  return (
+    <div className={`rounded-lg border px-2.5 py-2 ${toneClass}`}>
+      <div className="text-[8px] uppercase tracking-widest text-slate-500">{label}</div>
+      <div className="text-[12px] font-semibold font-mono mt-1">{value}</div>
+      {meta && <div className="text-[9px] text-slate-500 mt-0.5">{meta}</div>}
     </div>
   );
 }
@@ -136,7 +176,7 @@ function QtySelector({ qty, maxQty, onChange }: { qty: number; maxQty: number; o
 
 // --- Recipe card --------------------------------------------------------------
 
-function RecipeCard({ recipeId }: { recipeId: string }) {
+function RecipeCard({ recipeId, onOpenBlueprints }: { recipeId: string; onOpenBlueprints: () => void }) {
   const state              = useGameStore(s => s.state);
   const queueMfg           = useGameStore(s => s.queueManufacturing);
   const queueMfgWithBpc    = useGameStore(s => s.queueManufacturingWithBpc);
@@ -154,13 +194,22 @@ function RecipeCard({ recipeId }: { recipeId: string }) {
   const queueLen    = state.systems.manufacturing.queue.length;
   const isShip      = recipe.category === 'ship';
   const isTech2     = !!recipe.isTech2;
+  const mfg         = state.systems.manufacturing;
 
   // For T2 recipes find available BPCs
   const availableBpcs = isTech2
-    ? state.systems.manufacturing.blueprints.filter(
+    ? mfg.blueprints.filter(
         b => b.type === 'copy' && b.tier === 2 && b.itemId === recipeId && !b.isLocked && (b.copiesRemaining === null || b.copiesRemaining > 0),
       )
     : [];
+
+  const tech2Original = isTech2
+    ? mfg.blueprints.find(b => b.type === 'original' && b.tier === 2 && b.itemId === recipeId)
+    : null;
+  const activeCopyJob = tech2Original
+    ? mfg.copyJobs.find(job => job.blueprintId === tech2Original.id) ?? null
+    : null;
+  const totalBpcRunsReady = availableBpcs.reduce((sum, bpc) => sum + (bpc.copiesRemaining ?? 0), 0);
 
   const maxQty = isTech2 ? maxAffordable(recipeId, state.resources) : maxAffordable(recipeId, state.resources);
   const activeBpcId = isTech2 ? (selectedBpc || availableBpcs[0]?.id || '') : undefined;
@@ -198,7 +247,7 @@ function RecipeCard({ recipeId }: { recipeId: string }) {
         style={{ background: isTech2 ? 'rgba(249,115,22,0.05)' : isShip ? 'rgba(167,139,250,0.05)' : 'rgba(255,255,255,0.02)' }}
       >
         <div className="min-w-0">
-          <div className="flex items-center gap-2 mb-0.5">
+          <div className="flex items-center gap-2 mb-0.5 flex-wrap">
             {isTech2 && (
               <span className="text-[9px] px-1.5 py-0.5 rounded font-mono uppercase tracking-wider text-orange-400 bg-orange-900/20 border border-orange-700/30">T2</span>
             )}
@@ -212,6 +261,25 @@ function RecipeCard({ recipeId }: { recipeId: string }) {
                 {isLocked ? `?? ${recipe.requiredSkill.skillId} ${recipe.requiredSkill.minLevel}` : '? skill met'}
               </span>
             )}
+            {isTech2 && (
+              <span className={`text-[9px] px-1.5 py-0.5 rounded border font-mono ${
+                availableBpcs.length > 0
+                  ? 'text-emerald-300 border-emerald-700/30 bg-emerald-950/15'
+                  : activeCopyJob
+                    ? 'text-amber-300 border-amber-700/30 bg-amber-950/15'
+                    : tech2Original
+                      ? 'text-slate-300 border-slate-700/30 bg-slate-900/50'
+                      : 'text-rose-300 border-rose-700/30 bg-rose-950/15'
+              }`}>
+                {availableBpcs.length > 0
+                  ? `${availableBpcs.length} BPC ready`
+                  : activeCopyJob
+                    ? 'copy in flight'
+                    : tech2Original
+                      ? 'copy required'
+                      : 'unlock via research'}
+              </span>
+            )}
           </div>
           <span className="text-sm font-bold text-slate-100">{recipe.name}</span>
           <p className="text-xs text-slate-500 mt-0.5">{recipe.description}</p>
@@ -221,6 +289,7 @@ function RecipeCard({ recipeId }: { recipeId: string }) {
             <span key={r} className="block text-xs text-emerald-400 font-mono">+{formatResourceAmount(amt * qty, 0)} {RESOURCE_REGISTRY[r]?.name ?? r}</span>
           ))}
           <span className="text-[10px] text-slate-600 font-mono">? {fmtSeconds(batchTime)}</span>
+          <span className="block text-[9px] text-slate-600 font-mono mt-0.5">max {formatResourceAmount(maxQty, 0)}</span>
         </div>
       </div>
 
@@ -235,9 +304,23 @@ function RecipeCard({ recipeId }: { recipeId: string }) {
       {isTech2 && (
         <div className="px-3 py-2 border-t border-orange-900/20" style={{ background: 'rgba(249,115,22,0.03)' }}>
           {availableBpcs.length === 0 ? (
-            <p className="text-xs text-orange-400/70">? No T2 BPC available. Copy this blueprint in the Blueprints tab.</p>
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div className="text-xs text-orange-400/70">
+                {activeCopyJob
+                  ? `T2 copy in progress. Ready in about ${fmtSeconds(Math.max(0, activeCopyJob.totalTime - activeCopyJob.progress) / Math.max(getResearchSpeedMultiplier(state), 0.001))}.`
+                  : tech2Original
+                    ? 'No T2 BPC ready. Copy the blueprint in the Blueprints tab to start Tech II production.'
+                    : 'No T2 original unlocked yet. Research the parent blueprint to level 5, then make a copy.'}
+              </div>
+              <button
+                onClick={onOpenBlueprints}
+                className="px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wide border border-orange-700/30 bg-orange-950/20 text-orange-300 hover:bg-orange-900/30 transition-colors"
+              >
+                Open Blueprints
+              </button>
+            </div>
           ) : (
-            <div className="flex items-center gap-2">
+            <div className="flex items-start gap-2 flex-wrap">
               <span className="text-xs text-slate-500 shrink-0">T2 BPC:</span>
               <div className="flex-1 min-w-[220px]">
                 <GameDropdown
@@ -274,6 +357,9 @@ function RecipeCard({ recipeId }: { recipeId: string }) {
                   detailEmpty={<div className="text-[10px] text-slate-600">Pick the copy you want to consume for this Tech II run.</div>}
                 />
               </div>
+              <div className="text-[9px] text-emerald-300 font-mono shrink-0 mt-1">
+                {totalBpcRunsReady > 0 ? `${totalBpcRunsReady} runs ready` : 'copies ready'}
+              </div>
             </div>
           )}
         </div>
@@ -302,6 +388,116 @@ function RecipeCard({ recipeId }: { recipeId: string }) {
           {!hasCorpHq ? 'HQ Required' : isLocked ? 'Locked' : queueLen >= 50 ? 'Queue Full' : `Queue �${qty}`}
         </button>
       </div>
+    </div>
+  );
+}
+
+function QueueJobRow({
+  job,
+  queueIndex,
+  startsIn,
+  effectiveSpeed,
+  longestWait,
+  onPrioritize,
+  onCancel,
+}: {
+  job: ManufacturingJob;
+  queueIndex: number;
+  startsIn: number;
+  effectiveSpeed: number;
+  longestWait: number;
+  onPrioritize: () => void;
+  onCancel: () => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const recipe = MANUFACTURING_RECIPES[job.recipeId];
+  if (!recipe) return null;
+
+  const isTech2 = !!recipe.isTech2;
+  const jobTime = (recipe.timeCost * job.quantity) / effectiveSpeed;
+  const waitRatio = longestWait > 0 ? Math.max(0.1, 1 - startsIn / longestWait) : 1;
+
+  return (
+    <div className="rounded-md border overflow-hidden border-slate-700/20 bg-slate-950/25">
+      <div
+        className="flex items-center gap-1.5 px-2 py-1.5 cursor-pointer select-none hover:bg-white/[0.03] transition-colors"
+        onClick={() => setExpanded(value => !value)}
+      >
+        <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-amber-400/60" />
+        {isTech2 && (
+          <span className="text-[8px] px-1 py-0.5 rounded border border-orange-700/30 bg-orange-950/15 text-orange-300 font-mono uppercase tracking-widest shrink-0">
+            T2
+          </span>
+        )}
+        <span className="flex-1 min-w-0 truncate text-[11px] font-semibold text-slate-200">{recipe.name}</span>
+        <span className="text-[9px] font-mono text-slate-500 shrink-0">x{job.quantity}</span>
+        <span className="text-[9px] font-mono text-amber-300/80 shrink-0">starts {fmtSeconds(startsIn)}</span>
+        <span className="text-[10px] text-slate-600 shrink-0">{expanded ? '▴' : '▾'}</span>
+        <button
+          onClick={event => { event.stopPropagation(); onCancel(); }}
+          className="text-[10px] text-red-500/40 hover:text-red-300 transition-colors pl-1"
+          title="Cancel queued job"
+        >
+          ✕
+        </button>
+      </div>
+
+      {!expanded && (
+        <div className="px-2 pb-1.5 flex items-center gap-2">
+          <div className="flex-1 bg-slate-800/70 rounded-full h-1 overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all duration-500 ${isTech2 ? 'bg-orange-500/70' : 'bg-amber-600/60'}`}
+              style={{ width: `${waitRatio * 100}%` }}
+            />
+          </div>
+          <span className="text-[9px] font-mono text-slate-600 shrink-0">run {fmtSeconds(jobTime)}</span>
+        </div>
+      )}
+
+      {expanded && (
+        <div className="flex flex-col gap-1.5 px-2 pb-2 pt-1" style={{ borderTop: '1px solid rgba(30,41,59,0.5)' }}>
+          <div className="flex flex-wrap gap-1">
+            <span className="text-[8px] px-1.5 py-0.5 rounded border border-slate-700/40 bg-slate-900/50 text-slate-400 font-mono uppercase tracking-widest">
+              queue #{queueIndex + 1}
+            </span>
+            <span className="text-[8px] px-1.5 py-0.5 rounded border border-amber-700/30 bg-amber-950/15 text-amber-300 font-mono uppercase tracking-widest">
+              starts {fmtSeconds(startsIn)}
+            </span>
+            <span className="text-[8px] px-1.5 py-0.5 rounded border border-slate-700/40 bg-slate-900/50 text-slate-400 font-mono uppercase tracking-widest">
+              duration {fmtSeconds(jobTime)}
+            </span>
+            {job.blueprintId && (
+              <span className="text-[8px] px-1.5 py-0.5 rounded border border-orange-700/30 bg-orange-950/15 text-orange-300 font-mono uppercase tracking-widest">
+                consumes BPC
+              </span>
+            )}
+          </div>
+          <div className="text-[10px] text-slate-500 leading-relaxed">{recipe.description}</div>
+          <div className="flex flex-col gap-1 text-[10px] text-slate-400">
+            <div className="text-[9px] uppercase tracking-widest text-slate-600">Outputs</div>
+            {Object.entries(recipe.outputs).map(([resourceId, amount]) => (
+              <div key={resourceId} className="flex items-center justify-between gap-2">
+                <span>{RESOURCE_REGISTRY[resourceId]?.name ?? resourceId}</span>
+                <span className="font-mono text-emerald-300">+{formatResourceAmount(amount * job.quantity, 0)}</span>
+              </div>
+            ))}
+          </div>
+          <div className="flex items-center gap-2 pt-1">
+            <button
+              onClick={onPrioritize}
+              className="px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wide border border-cyan-700/30 bg-cyan-950/15 text-cyan-300 hover:bg-cyan-900/25 transition-colors"
+            >
+              Prioritize
+            </button>
+            <button
+              onClick={onCancel}
+              className="px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wide border border-red-700/30 bg-red-950/15 text-red-300 hover:bg-red-900/25 transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -362,8 +558,8 @@ function ActiveJobCard({
           BPC: {MANUFACTURING_RECIPES[bpcName.itemId]?.name ?? bpcName.itemId} ({bpcName.copiesRemaining === null ? '8' : bpcName.copiesRemaining} runs left)
         </div>
       )}
-      <FlairProgressBar value={progressPct} color={isTech2 ? 'amber' : 'cyan'} />
-      <ActivityBar active rate={Math.min(1, effectiveSpeed)} color={isTech2 ? 'amber' : 'cyan'} />
+      <FlairProgressBar value={progressPct} color={isTech2 ? 'amber' : 'cyan'} label="Production progress" valueLabel={`${Math.round(progressPct * 100)}%`} />
+      <ActivityBar active rate={Math.min(1, effectiveSpeed)} color={isTech2 ? 'amber' : 'cyan'} label="Production rate" valueLabel={`x${effectiveSpeed.toFixed(2)} speed`} />
       <div className="flex items-center justify-between text-xs">
         <div className="flex flex-wrap gap-1">
           {Object.entries(recipe.outputs).map(([r, amt]) => (
@@ -408,7 +604,7 @@ function ResearchJobCard({ job, researchSpeed }: { job: ResearchJob; researchSpe
           className="text-xs text-red-400/50 hover:text-red-400 px-1.5 py-0.5 rounded border border-transparent hover:border-red-800/40 transition-colors shrink-0"
         >?</button>
       </div>
-      <FlairProgressBar value={pct} color="violet" />
+      <FlairProgressBar value={pct} color="violet" label="Research progress" valueLabel={`${Math.round(pct * 100)}%`} />
       <div className="flex justify-between text-[10px] text-slate-500 font-mono">
         <span>{Math.round(pct * 100)}%</span>
         <span>{fmtSeconds(remaining)} left</span>
@@ -447,7 +643,7 @@ function CopyJobCard({ job, researchSpeed }: { job: CopyJob; researchSpeed: numb
           className="text-xs text-red-400/50 hover:text-red-400 px-1.5 py-0.5 rounded border border-transparent hover:border-red-800/40 transition-colors shrink-0"
         >?</button>
       </div>
-      <FlairProgressBar value={pct} color="green" />
+      <FlairProgressBar value={pct} color="green" label="Copy progress" valueLabel={`${Math.round(pct * 100)}%`} />
       <div className="flex justify-between text-[10px] text-slate-500 font-mono">
         <span>{Math.round(pct * 100)}%</span>
         <span>{fmtSeconds(remaining)} left</span>
@@ -459,6 +655,7 @@ function CopyJobCard({ job, researchSpeed }: { job: CopyJob; researchSpeed: numb
 // --- Blueprint card -----------------------------------------------------------
 
 function BlueprintCard({ blueprint }: { blueprint: Blueprint }) {
+  const [expanded, setExpanded] = useState(false);
   const state           = useGameStore(s => s.state);
   const researchBp      = useGameStore(s => s.researchBlueprint);
   const copyBp          = useGameStore(s => s.copyBlueprint);
@@ -490,39 +687,110 @@ function BlueprintCard({ blueprint }: { blueprint: Blueprint }) {
     ? mfg.blueprints.some(b => b.itemId === def.t2RecipeId && b.tier === 2)
     : false;
 
+  const hasActiveLabWork = !!researchingThis || !!copyingThis;
+  const statusDotClass = hasActiveLabWork
+    ? researchingThis
+      ? 'bg-cyan-400 animate-pulse'
+      : 'bg-amber-400/60 animate-pulse'
+    : blueprint.isLocked
+      ? 'bg-amber-400/60'
+      : isOriginal
+        ? 'bg-emerald-400'
+        : 'bg-slate-600';
+
+  const collapsedHint = researchingThis
+    ? Math.round((researchingThis.progress / researchingThis.totalTime) * 100)
+    : copyingThis
+      ? Math.round((copyingThis.progress / copyingThis.totalTime) * 100)
+      : Math.min(100, blueprint.researchLevel * 10);
+
+  const collapsedHintColor = researchingThis
+    ? 'bg-cyan-500/70'
+    : copyingThis
+      ? 'bg-amber-600/60'
+      : isTech2
+        ? 'bg-orange-500/70'
+        : 'bg-violet-500/70';
+
   return (
     <div
-      className="rounded-xl overflow-hidden"
+      className="rounded-md border overflow-hidden border-slate-700/20 bg-slate-950/25"
       style={{
-        background: 'rgba(3,8,20,0.8)',
-        border: isTech2
-          ? '1px solid rgba(249,115,22,0.2)'
-          : '1px solid rgba(255,255,255,0.07)',
+        borderColor: isTech2 ? 'rgba(249,115,22,0.2)' : 'rgba(255,255,255,0.07)',
       }}
     >
-      {/* Header */}
       <div
-        className="px-3 py-2.5 flex items-start justify-between gap-2"
-        style={{ background: isTech2 ? 'rgba(249,115,22,0.04)' : 'rgba(255,255,255,0.02)' }}
+        className="flex items-center gap-1.5 px-2 py-1.5 cursor-pointer select-none hover:bg-white/[0.03] transition-colors"
+        onClick={() => setExpanded(value => !value)}
+        style={{ background: expanded ? (isTech2 ? 'rgba(249,115,22,0.04)' : 'rgba(255,255,255,0.02)') : undefined }}
       >
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 mb-1">
-            <span className={`text-[9px] px-1.5 py-0.5 rounded font-mono uppercase tracking-wider font-bold ${
-              isTech2 ? 'text-orange-300 bg-orange-900/20 border border-orange-700/30' : 'text-cyan-400 bg-cyan-900/20 border border-cyan-800/30'
-            }`}>{isTech2 ? 'T2' : 'T1'}</span>
-            <span className={`text-[9px] px-1.5 py-0.5 rounded font-mono uppercase tracking-wider ${
-              isOriginal ? 'text-violet-400 bg-violet-900/20 border border-violet-800/30' : 'text-teal-400 bg-teal-900/20 border border-teal-800/30'
-            }`}>{isOriginal ? 'BPO' : 'BPC'}</span>
+        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${statusDotClass}`} />
+        <span className={`text-[8px] px-1.5 py-0.5 rounded border font-mono uppercase tracking-wider font-bold shrink-0 ${
+          isTech2 ? 'text-orange-300 bg-orange-900/20 border-orange-700/30' : 'text-cyan-400 bg-cyan-900/20 border-cyan-800/30'
+        }`}>{isTech2 ? 'T2' : 'T1'}</span>
+        <span className={`text-[8px] px-1.5 py-0.5 rounded border font-mono uppercase tracking-wider shrink-0 ${
+          isOriginal ? 'text-violet-400 bg-violet-900/20 border-violet-800/30' : 'text-teal-400 bg-teal-900/20 border-teal-800/30'
+        }`}>{isOriginal ? 'BPO' : 'BPC'}</span>
+        <span className="flex-1 min-w-0 truncate text-[11px] font-semibold text-slate-200">{name}</span>
+        {isOriginal ? (
+          <span className="text-[9px] font-mono text-slate-500 shrink-0">Lv {blueprint.researchLevel}/10</span>
+        ) : blueprint.copiesRemaining !== null ? (
+          <span className="text-[9px] font-mono text-slate-500 shrink-0">{blueprint.copiesRemaining} runs</span>
+        ) : null}
+        <span className={`text-[9px] font-mono shrink-0 ${hasActiveLabWork ? 'text-cyan-300/80' : t2Unlocked ? 'text-emerald-300/80' : 'text-slate-500'}`}>
+          {researchingThis
+            ? 'researching'
+            : copyingThis
+              ? 'copying'
+              : t2Unlocked
+                ? 'ready'
+                : blueprint.isLocked
+                  ? 'in use'
+                  : 'standby'}
+        </span>
+        <span className="text-[10px] text-slate-600 shrink-0">{expanded ? '▴' : '▾'}</span>
+      </div>
+
+      {!expanded && (
+        <div className="px-2 pb-1.5 flex items-center gap-2">
+          <div className="flex-1 bg-slate-800/70 rounded-full h-1 overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all duration-500 ${collapsedHintColor}`}
+              style={{ width: `${collapsedHint}%` }}
+            />
+          </div>
+          <span className="text-[9px] font-mono text-slate-600 shrink-0">
+            {researchingThis
+              ? `${collapsedHint}%`
+              : copyingThis
+                ? `${collapsedHint}%`
+                : isOriginal
+                  ? `${blueprint.researchLevel}/10`
+                  : blueprint.copiesRemaining === null
+                    ? '∞'
+                    : `${blueprint.copiesRemaining}`}
+          </span>
+        </div>
+      )}
+
+      {expanded && (
+        <div className="flex flex-col gap-2 px-3 pb-3 pt-2" style={{ borderTop: '1px solid rgba(30,41,59,0.5)' }}>
+          <div className="flex flex-wrap items-center gap-2">
             {blueprint.isLocked && (
-              <span className="text-[9px] text-amber-400 bg-amber-900/20 border border-amber-700/30 rounded px-1.5 py-0.5 font-mono">?? In Use</span>
+              <span className="text-[9px] text-amber-400 bg-amber-900/20 border border-amber-700/30 rounded px-1.5 py-0.5 font-mono">In Use</span>
             )}
             {!isOriginal && blueprint.copiesRemaining !== null && (
               <span className="text-[9px] text-slate-400 font-mono">{blueprint.copiesRemaining} runs left</span>
             )}
+            {def?.t2RecipeId && (
+              <span className={`text-[9px] font-mono ${t2Unlocked ? 'text-emerald-400' : blueprint.researchLevel >= 5 ? 'text-amber-400' : 'text-slate-600'}`}>
+                {t2Unlocked ? 'T2 unlocked' : blueprint.researchLevel >= 5 ? 'T2 ready to copy' : 'T2 at Lv5'}
+              </span>
+            )}
           </div>
-          <div className="text-sm font-bold text-slate-100">{name}</div>
+
           {isOriginal && (
-            <div className="flex items-center gap-2 mt-1">
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="text-[10px] text-slate-500">Research Level:</span>
               <div className="flex gap-0.5">
                 {Array.from({ length: 10 }, (_, i) => (
@@ -541,93 +809,83 @@ function BlueprintCard({ blueprint }: { blueprint: Blueprint }) {
                 ))}
               </div>
               <span className="text-[10px] font-mono text-slate-400">{blueprint.researchLevel}/10</span>
-              {def?.t2RecipeId && (
-                <span className={`text-[9px] font-mono ${t2Unlocked ? 'text-emerald-400' : blueprint.researchLevel >= 5 ? 'text-amber-400' : 'text-slate-600'}`}>
-                  {t2Unlocked ? '? T2 unlocked' : blueprint.researchLevel >= 5 ? '? T2 ready' : `(T2 at Lv5)`}
-                </span>
+            </div>
+          )}
+
+          {(researchingThis || copyingThis) && (
+            <div className="flex flex-col gap-1 rounded-lg border border-slate-800/50 bg-slate-950/25 px-2.5 py-2">
+              {researchingThis && (
+                <div className="flex items-center gap-2 text-xs text-violet-300/70">
+                  <span className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse shrink-0" />
+                  <span className="font-mono">Research in progress · {Math.round((researchingThis.progress / researchingThis.totalTime) * 100)}%</span>
+                </div>
+              )}
+              {copyingThis && (
+                <div className="flex items-center gap-2 text-xs text-teal-300/70 mt-0.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-teal-400 animate-pulse shrink-0" />
+                  <span className="font-mono">Copy in progress · {Math.round((copyingThis.progress / copyingThis.totalTime) * 100)}%</span>
+                </div>
               )}
             </div>
           )}
-        </div>
-      </div>
 
-      {/* In-progress indicators */}
-      {(researchingThis || copyingThis) && (
-        <div className="px-3 py-1.5 border-t border-slate-800/50">
-          {researchingThis && (
-            <div className="flex items-center gap-2 text-xs text-violet-300/70">
-              <span className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse shrink-0" />
-              <span className="font-mono">Research in progress � {Math.round((researchingThis.progress / researchingThis.totalTime) * 100)}%</span>
-            </div>
-          )}
-          {copyingThis && (
-            <div className="flex items-center gap-2 text-xs text-teal-300/70 mt-0.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-teal-400 animate-pulse shrink-0" />
-              <span className="font-mono">Copy in progress � {Math.round((copyingThis.progress / copyingThis.totalTime) * 100)}%</span>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Actions � originals only */}
-      {isOriginal && (
-        <div className="px-3 py-2 flex items-center gap-2 flex-wrap" style={{ background: 'rgba(0,0,0,0.1)' }}>
-          {/* Research button */}
-          <div className="flex flex-col items-start gap-0.5">
-            <button
-              disabled={!canResearch}
-              onClick={() => researchBp(blueprint.id)}
-              title={
-                !hasCorpHq ? 'Corp HQ required' :
-                scienceLevel < 1 ? 'Science I required' :
-                !hasDatacore ? `Need 1� ${RESOURCE_REGISTRY[datacoreId ?? '']?.name ?? 'datacore'}` :
-                !hasSlot ? 'No research slot available' :
-                atMaxLevel ? 'Max research level reached' :
-                blueprint.isLocked ? 'Blueprint is locked' : ''
-              }
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all duration-150 ${
-                canResearch
-                  ? 'bg-violet-900/40 hover:bg-violet-800/50 border-violet-600/50 text-violet-200 hover:scale-[1.02]'
-                  : 'bg-slate-800/40 border-slate-700/40 text-slate-600 cursor-not-allowed'
-              }`}
-            >Research +1</button>
-            {datacoreId && (
-              <span className={`text-[9px] font-mono ml-0.5 ${hasDatacore ? 'text-slate-500' : 'text-amber-500'}`}>
-                Uses: {RESOURCE_REGISTRY[datacoreId]?.name ?? datacoreId} (have {state.resources[datacoreId] ?? 0})
-              </span>
-            )}
-          </div>
-          {/* Copy button */}
-          <button
-            disabled={!canCopy}
-            onClick={() => setShowCopyPicker(p => !p)}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all duration-150 ${
-              canCopy
-                ? 'bg-teal-900/40 hover:bg-teal-800/50 border-teal-600/50 text-teal-200 hover:scale-[1.02]'
-                : 'bg-slate-800/40 border-slate-700/40 text-slate-600 cursor-not-allowed'
-            }`}
-          >Copy BPC</button>
-          {/* Copy run picker */}
-          {showCopyPicker && canCopy && (
-            <div className="flex items-center gap-2 w-full mt-1">
-              <span className="text-xs text-slate-400 shrink-0">Runs:</span>
-              <div className="flex gap-1 flex-wrap">
-                {[1,2,5,10].map(r => (
-                  <button
-                    key={r}
-                    onClick={() => setCopyRuns(r)}
-                    className={`px-2 py-1 rounded text-xs font-mono border transition-colors ${
-                      copyRuns === r
-                        ? 'bg-teal-800/60 border-teal-500/70 text-teal-200'
-                        : 'bg-slate-800 border-slate-600/50 text-slate-400 hover:border-teal-700/50'
-                    }`}
-                  >{r}</button>
-                ))}
+          {isOriginal && (
+            <div className="flex items-center gap-2 flex-wrap" style={{ background: 'rgba(0,0,0,0.1)' }}>
+              <div className="flex flex-col items-start gap-0.5">
+                <button
+                  disabled={!canResearch}
+                  onClick={() => researchBp(blueprint.id)}
+                  title={
+                    !hasCorpHq ? 'Corp HQ required' :
+                    scienceLevel < 1 ? 'Science I required' :
+                    !hasDatacore ? `Need 1 ${RESOURCE_REGISTRY[datacoreId ?? '']?.name ?? 'datacore'}` :
+                    !hasSlot ? 'No research slot available' :
+                    atMaxLevel ? 'Max research level reached' :
+                    blueprint.isLocked ? 'Blueprint is locked' : ''
+                  }
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all duration-150 ${
+                    canResearch
+                      ? 'bg-violet-900/40 hover:bg-violet-800/50 border-violet-600/50 text-violet-200 hover:scale-[1.02]'
+                      : 'bg-slate-800/40 border-slate-700/40 text-slate-600 cursor-not-allowed'
+                  }`}
+                >Research +1</button>
+                {datacoreId && (
+                  <span className={`text-[9px] font-mono ml-0.5 ${hasDatacore ? 'text-slate-500' : 'text-amber-500'}`}>
+                    Uses: {RESOURCE_REGISTRY[datacoreId]?.name ?? datacoreId} (have {state.resources[datacoreId] ?? 0})
+                  </span>
+                )}
               </div>
               <button
-                onClick={() => { copyBp(blueprint.id, copyRuns); setShowCopyPicker(false); }}
-                className="px-3 py-1 rounded-lg text-xs font-bold border bg-teal-900/50 border-teal-600/60 text-teal-200 hover:bg-teal-800/60 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              >Start Copy</button>
+                disabled={!canCopy}
+                onClick={() => setShowCopyPicker(p => !p)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all duration-150 ${
+                  canCopy
+                    ? 'bg-teal-900/40 hover:bg-teal-800/50 border-teal-600/50 text-teal-200 hover:scale-[1.02]'
+                    : 'bg-slate-800/40 border-slate-700/40 text-slate-600 cursor-not-allowed'
+                }`}
+              >Copy BPC</button>
+              {showCopyPicker && canCopy && (
+                <div className="flex items-center gap-2 w-full mt-1 flex-wrap">
+                  <span className="text-xs text-slate-400 shrink-0">Runs:</span>
+                  <div className="flex gap-1 flex-wrap">
+                    {[1, 2, 5, 10].map(r => (
+                      <button
+                        key={r}
+                        onClick={() => setCopyRuns(r)}
+                        className={`px-2 py-1 rounded text-xs font-mono border transition-colors ${
+                          copyRuns === r
+                            ? 'bg-teal-800/60 border-teal-500/70 text-teal-200'
+                            : 'bg-slate-800 border-slate-600/50 text-slate-400 hover:border-teal-700/50'
+                        }`}
+                      >{r}</button>
+                    ))}
+                  </div>
+                  <button
+                    onClick={() => { copyBp(blueprint.id, copyRuns); setShowCopyPicker(false); }}
+                    className="px-3 py-1 rounded-lg text-xs font-bold border bg-teal-900/50 border-teal-600/60 text-teal-200 hover:bg-teal-800/60 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  >Start Copy</button>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -638,7 +896,7 @@ function BlueprintCard({ blueprint }: { blueprint: Blueprint }) {
 
 // --- Jobs tab -----------------------------------------------------------------
 
-function JobsTab() {
+function JobsTab({ onOpenBlueprints }: { onOpenBlueprints: () => void }) {
   const state                  = useGameStore(s => s.state);
   const cancelManufacturingJob = useGameStore(s => s.cancelManufacturingJob);
   const prioritize             = useGameStore(s => s.prioritizeManufacturingJob);
@@ -647,6 +905,17 @@ function JobsTab() {
   const speedMult      = getManufacturingSpeedMultiplier(state);
   const effectiveSpeed = Math.max(speedMult, 0.001);
   const { queue }      = state.systems.manufacturing;
+  const { researchJobs, copyJobs, blueprints } = state.systems.manufacturing;
+  const maxSlots = getMaxResearchSlots(state);
+  const usedSlots = researchJobs.length + copyJobs.length;
+  const readyT2Copies = blueprints.filter(
+    blueprint => blueprint.type === 'copy' && blueprint.tier === 2 && !blueprint.isLocked && (blueprint.copiesRemaining === null || blueprint.copiesRemaining > 0),
+  );
+  const totalBpcCount = blueprints.filter(blueprint => blueprint.type === 'copy').length;
+  const totalBpoCount = blueprints.filter(blueprint => blueprint.type === 'original').length;
+  const activeSignal = queue.length > 0 || usedSlots > 0;
+  const activityRate = Math.min(1, Math.max(queue.length / 50, maxSlots > 0 ? usedSlots / maxSlots : 0, Math.max(0, speedMult - 1)));
+  const grade = manufacturingGrade(speedMult);
 
   const queueStartTimes: number[] = [];
   {
@@ -657,6 +926,7 @@ function JobsTab() {
       acc += r ? Math.max(0, r.timeCost * job.quantity - job.progress) / effectiveSpeed : 0;
     }
   }
+  const longestWait = queueStartTimes[queue.length - 1] ?? 0;
 
   const filteredRecipes = RECIPE_ORDER.filter(id => {
     const r = MANUFACTURING_RECIPES[id];
@@ -668,30 +938,109 @@ function JobsTab() {
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Stats */}
-      <div className="flex gap-2 flex-wrap">
-        <div className="flex flex-col items-center px-2.5 py-1.5 rounded border border-slate-700/40 bg-slate-900/80">
-          <StatTooltip modifierKey="manufacturing-speed">
-            <span className="text-xs font-bold font-mono text-cyan-300">×{speedMult.toFixed(2)}</span>
-          </StatTooltip>
-          <span className="text-[10px] text-slate-600">Speed</span>
-        </div>
-        <div className="flex flex-col items-center px-2.5 py-1.5 rounded border border-slate-700/40 bg-slate-900/80">
-          <span className="text-xs font-bold font-mono text-violet-300">{queue.length}/50</span>
-          <span className="text-[10px] text-slate-600">Queued</span>
-        </div>
-        {queue.length > 0 && (
-          <div className="flex-1 min-w-[80px] flex flex-col justify-center gap-1 px-2.5 py-1.5 rounded border border-slate-700/40 bg-slate-900/80">
-            <div className="flex items-center justify-between">
-              <span className="text-[9px] text-slate-600">Queue</span>
-              <span className="text-[9px] font-mono text-slate-500">{Math.round((queue.length / 50) * 100)}%</span>
+      <div className="rounded-xl border border-slate-700/30 bg-slate-900/40 p-3">
+        <div className="flex items-start justify-between gap-3 mb-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-[11px] font-semibold text-cyan-300">Production Command Deck</span>
+              <span
+                className="text-[10px] font-black px-2 py-0.5 rounded border font-mono"
+                style={{ color: grade.color, background: `${grade.color}18`, border: `1px solid ${grade.color}44` }}
+                title={`Manufacturing speed: x${speedMult.toFixed(2)}`}
+              >
+                {grade.grade}
+              </span>
             </div>
-            <div className="h-1 rounded-full bg-slate-800 overflow-hidden">
-              <div
-                className={`h-full rounded-full transition-all duration-500 ${queue.length >= 45 ? 'bg-rose-500' : queue.length >= 25 ? 'bg-amber-500' : 'bg-violet-500/70'}`}
-                style={{ width: `${(queue.length / 50) * 100}%` }}
-              />
+            <div className="text-[10px] text-slate-500 mt-1 leading-relaxed">
+              Live production telemetry for queue pressure, lab activity, and Tech II readiness.
             </div>
+          </div>
+          <div className="text-right shrink-0">
+            <div className="text-[8px] uppercase tracking-widest text-slate-600">State</div>
+            <div className={`text-[10px] font-mono mt-1 ${activeSignal ? 'text-cyan-300' : 'text-slate-500'}`}>
+              {queue.length > 0 ? 'fabricating' : usedSlots > 0 ? 'lab active' : 'idle'}
+            </div>
+          </div>
+        </div>
+        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+          <CommandMetric label="Production" value={`${queue.length}/50`} meta={queue.length > 0 ? `${Math.round((queue.length / 50) * 100)}% loaded` : 'No queued work'} tone={queue.length > 0 ? 'violet' : 'slate'} />
+          <CommandMetric label="Lab Slots" value={`${usedSlots}/${maxSlots}`} meta={usedSlots > 0 ? `${researchJobs.length} research / ${copyJobs.length} copy` : 'No lab work'} tone={usedSlots > 0 ? 'amber' : 'slate'} />
+          <CommandMetric label="T2 Copies" value={`${readyT2Copies.length}`} meta={readyT2Copies.length > 0 ? 'Tech II runs ready' : 'No T2 copies staged'} tone={readyT2Copies.length > 0 ? 'emerald' : 'slate'} />
+          <CommandMetric label="Blueprints" value={`${totalBpoCount}/${totalBpcCount}`} meta="BPO / BPC library" tone="cyan" />
+        </div>
+        <div className="mt-3">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-[9px] uppercase tracking-widest text-slate-600">Facility Activity</span>
+            <span className="text-[9px] font-mono text-slate-500">x{speedMult.toFixed(2)} speed</span>
+          </div>
+          <ActivityBar active={activeSignal} rate={activityRate} color={queue.length > 0 ? 'cyan' : usedSlots > 0 ? 'violet' : 'amber'} label="Queue load" valueLabel={queue.length > 0 ? `${queue.length} queued` : usedSlots > 0 ? `${usedSlots}/${maxSlots} lab slots` : 'idle'} />
+        </div>
+      </div>
+
+      <PanelInfoSection
+        sectionId="manufacturing-flow"
+        title="T2 Production Flow"
+        subtitle="Collapse the reminder when you know the path from research to copy to queued Tech II runs."
+        accentColor="#f59e0b"
+        defaultCollapsed
+      >
+        <div className="flex flex-col gap-2 text-[10px] text-slate-400">
+          <div className="grid gap-2 sm:grid-cols-3">
+            <div className="rounded-lg border border-slate-700/30 bg-slate-950/30 px-2.5 py-2">
+              <div className="text-[8px] uppercase tracking-widest text-slate-600">1. Research</div>
+              <div className="mt-1 leading-relaxed">Push the source blueprint to level 5 to unlock the T2 original.</div>
+            </div>
+            <div className="rounded-lg border border-slate-700/30 bg-slate-950/30 px-2.5 py-2">
+              <div className="text-[8px] uppercase tracking-widest text-slate-600">2. Copy</div>
+              <div className="mt-1 leading-relaxed">Make BPC runs from the T2 original before queueing Tech II production.</div>
+            </div>
+            <div className="rounded-lg border border-slate-700/30 bg-slate-950/30 px-2.5 py-2">
+              <div className="text-[8px] uppercase tracking-widest text-slate-600">3. Fabricate</div>
+              <div className="mt-1 leading-relaxed">T2 recipe cards now show whether copies are ready, in flight, or still locked.</div>
+            </div>
+          </div>
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-700/20 bg-amber-950/10 px-2.5 py-2">
+            <span className="text-[10px] text-slate-400">Need the full blueprint library or active lab management view?</span>
+            <button
+              onClick={onOpenBlueprints}
+              className="px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wide border border-violet-700/30 bg-violet-950/15 text-violet-300 hover:bg-violet-900/25 transition-colors"
+            >
+              Open Blueprints
+            </button>
+          </div>
+        </div>
+      </PanelInfoSection>
+
+      <div className="rounded-xl border border-slate-700/30 bg-slate-900/40 p-3">
+        <div className="flex items-center justify-between gap-3 mb-3">
+          <div>
+            <div className="text-[10px] text-slate-500 uppercase tracking-widest">Research & Copies</div>
+            <div className="text-[11px] text-slate-300 mt-1">Lab progress and T2 readiness without leaving the jobs view.</div>
+          </div>
+          <button
+            onClick={onOpenBlueprints}
+            className="px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wide border border-violet-700/30 bg-violet-950/15 text-violet-300 hover:bg-violet-900/25 transition-colors shrink-0"
+          >
+            Blueprint Lab
+          </button>
+        </div>
+        <div className="grid gap-2 sm:grid-cols-3 mb-3">
+          <CommandMetric label="Slots" value={`${usedSlots}/${maxSlots}`} meta={usedSlots > 0 ? 'lab running' : 'all slots open'} tone={usedSlots > 0 ? 'violet' : 'slate'} />
+          <CommandMetric label="Ready T2 BPC" value={`${readyT2Copies.length}`} meta={readyT2Copies.length > 0 ? 'queue Tech II now' : 'none staged'} tone={readyT2Copies.length > 0 ? 'emerald' : 'slate'} />
+          <CommandMetric label="Research Speed" value={`x${getResearchSpeedMultiplier(state).toFixed(2)}`} meta={`${researchJobs.length} research / ${copyJobs.length} copy`} tone={usedSlots > 0 ? 'amber' : 'slate'} />
+        </div>
+        {(researchJobs.length > 0 || copyJobs.length > 0) ? (
+          <div className="grid gap-2 xl:grid-cols-2">
+            {researchJobs.map(job => (
+              <ResearchJobCard key={job.id} job={job} researchSpeed={getResearchSpeedMultiplier(state)} />
+            ))}
+            {copyJobs.map(job => (
+              <CopyJobCard key={job.id} job={job} researchSpeed={getResearchSpeedMultiplier(state)} />
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-lg border border-slate-700/20 bg-slate-950/20 px-3 py-3 text-[10px] text-slate-500">
+            No research or copy jobs are in flight. The blueprint lab is idle and ready for T2 prep work.
           </div>
         )}
       </div>
@@ -711,35 +1060,18 @@ function JobsTab() {
           <div className="flex flex-col gap-1">
             {queue.slice(1).map((job, i) => {
               const qi      = i + 1;
-              const recipe  = MANUFACTURING_RECIPES[job.recipeId];
-              const jobTime = recipe ? recipe.timeCost * job.quantity / effectiveSpeed : 0;
               const startsIn = queueStartTimes[qi] ?? 0;
-              const isTech2  = !!recipe?.isTech2;
               return (
-                <div
+                <QueueJobRow
                   key={qi}
-                  className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs"
-                  style={{ background: 'rgba(255,255,255,0.02)', border: `1px solid ${isTech2 ? 'rgba(249,115,22,0.12)' : 'rgba(255,255,255,0.05)'}` }}
-                >
-                  <span className="text-slate-600 font-mono w-5 text-center">#{qi + 1}</span>
-                  {isTech2 && <span className="text-[8px] text-orange-400 bg-orange-900/20 border border-orange-700/25 rounded px-1 py-0.5 font-mono">T2</span>}
-                  <div className="flex-1 min-w-0">
-                    <span className="text-slate-300 font-bold">{recipe?.name ?? job.recipeId}</span>
-                    <span className="text-slate-600 font-mono ml-2">�{job.quantity}</span>
-                    <span className="text-slate-600 ml-2">? {fmtSeconds(jobTime)} � starts {fmtSeconds(startsIn)}</span>
-                  </div>
-                  <div className="flex gap-1 shrink-0">
-                    <button
-                      onClick={() => prioritize(qi)}
-                      className="px-1.5 py-0.5 rounded border border-slate-700/30 text-slate-500 hover:text-cyan-300 hover:border-cyan-700/40 transition-colors"
-                      title="Move to top"
-                    >?</button>
-                    <button
-                      onClick={() => cancelManufacturingJob(qi)}
-                      className="px-1.5 py-0.5 rounded border border-slate-700/30 text-slate-600 hover:text-red-400 hover:border-red-700/40 transition-colors"
-                    >?</button>
-                  </div>
-                </div>
+                  job={job}
+                  queueIndex={qi}
+                  startsIn={startsIn}
+                  effectiveSpeed={effectiveSpeed}
+                  longestWait={longestWait}
+                  onPrioritize={() => prioritize(qi)}
+                  onCancel={() => cancelManufacturingJob(qi)}
+                />
               );
             })}
           </div>
@@ -767,7 +1099,7 @@ function JobsTab() {
           </div>
         </div>
         <div className="flex flex-col gap-3">
-          {filteredRecipes.map(id => <RecipeCard key={id} recipeId={id} />)}
+          {filteredRecipes.map(id => <RecipeCard key={id} recipeId={id} onOpenBlueprints={onOpenBlueprints} />)}
         </div>
       </div>
 
@@ -791,6 +1123,12 @@ function BlueprintsTab() {
   const scienceLevel  = state.systems.skills.levels['science'] ?? 0;
   const maxSlots      = getMaxResearchSlots(state);
   const usedSlots     = mfg.researchJobs.length + mfg.copyJobs.length;
+  const activeLab = mfg.researchJobs.length > 0 || mfg.copyJobs.length > 0;
+  const libraryRate = Math.min(1, Math.max(activeLab ? usedSlots / Math.max(1, maxSlots) : 0, mfg.blueprints.length / 40));
+  const originalCount = mfg.blueprints.filter(bp => bp.type === 'original').length;
+  const copyCount = mfg.blueprints.filter(bp => bp.type === 'copy').length;
+  const readyT2Copies = mfg.blueprints.filter(bp => bp.type === 'copy' && bp.tier === 2 && !bp.isLocked && (bp.copiesRemaining === null || bp.copiesRemaining > 0)).length;
+  const lockedBlueprints = mfg.blueprints.filter(bp => bp.isLocked).length;
 
   const filteredBlueprints = mfg.blueprints.filter(bp => {
     if (bpFilter === 'bpo') return bp.type === 'original';
@@ -813,28 +1151,53 @@ function BlueprintsTab() {
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Research queue status */}
-      <div className="flex items-center justify-between px-3 py-2 rounded-lg" style={{ background: 'rgba(139,92,246,0.05)', border: '1px solid rgba(139,92,246,0.15)' }}>
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-violet-300 font-bold">Research Slots</span>
-          <div className="flex gap-1">
-            {Array.from({ length: maxSlots }, (_, i) => (
-              <div
-                key={i}
-                className="w-3 h-3 rounded-sm"
-                style={{
-                  background: i < usedSlots ? '#7c3aed' : 'rgba(255,255,255,0.05)',
-                  border: '1px solid rgba(139,92,246,0.3)',
-                }}
-              />
-            ))}
+      <div className="rounded-xl border border-slate-700/30 bg-slate-900/40 p-3">
+        <div className="flex items-start justify-between gap-3 mb-3">
+          <div className="min-w-0">
+            <div className="text-[11px] font-semibold text-violet-300">Blueprint Lab</div>
+            <div className="text-[10px] text-slate-500 mt-1 leading-relaxed">
+              Research originals, generate copy runs, and track Tech II readiness from one compact library view.
+            </div>
           </div>
-          <span className="text-[10px] text-slate-500 font-mono">{usedSlots}/{maxSlots} in use</span>
+          <StatTooltip modifierKey="blueprint-research-speed">
+            <span className="text-xs font-bold font-mono text-violet-300 shrink-0">×{researchSpeed.toFixed(2)} speed</span>
+          </StatTooltip>
         </div>
-        <StatTooltip modifierKey="blueprint-research-speed">
-          <span className="text-xs font-bold font-mono text-violet-300">�{researchSpeed.toFixed(2)} speed</span>
-        </StatTooltip>
+        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4 mb-3">
+          <CommandMetric label="Lab Slots" value={`${usedSlots}/${maxSlots}`} meta={activeLab ? 'research network active' : 'all slots open'} tone={activeLab ? 'violet' : 'slate'} />
+          <CommandMetric label="Originals" value={`${originalCount}`} meta="permanent library" tone="cyan" />
+          <CommandMetric label="Copies" value={`${copyCount}`} meta={`${readyT2Copies} T2 ready`} tone={copyCount > 0 ? 'amber' : 'slate'} />
+          <CommandMetric label="Locked" value={`${lockedBlueprints}`} meta={lockedBlueprints > 0 ? 'currently in use' : 'none locked'} tone={lockedBlueprints > 0 ? 'amber' : 'emerald'} />
+        </div>
+        <div className="flex items-center justify-between gap-3 mb-1">
+          <span className="text-[9px] uppercase tracking-widest text-slate-600">Library Activity</span>
+          <span className="text-[9px] font-mono text-slate-500">{filteredBlueprints.length} visible</span>
+        </div>
+        <ActivityBar active={activeLab} rate={libraryRate} color={activeLab ? 'violet' : 'amber'} label="Lab load" valueLabel={activeLab ? `${usedSlots}/${maxSlots} slots` : `${filteredBlueprints.length} visible`} />
       </div>
+
+      <PanelInfoSection
+        sectionId="manufacturing-blueprint-flow"
+        title="Blueprint Operations"
+        subtitle="Collapse the guidance once the research and copy loop is second nature."
+        accentColor="#8b5cf6"
+        defaultCollapsed
+      >
+        <div className="grid gap-2 sm:grid-cols-3 text-[10px] text-slate-400">
+          <div className="rounded-lg border border-slate-700/30 bg-slate-950/20 px-2.5 py-2">
+            <div className="text-[8px] uppercase tracking-widest text-slate-600">Research</div>
+            <div className="mt-1 leading-relaxed">Spend datacores to raise blueprint levels and unlock downstream Tech II originals.</div>
+          </div>
+          <div className="rounded-lg border border-slate-700/30 bg-slate-950/20 px-2.5 py-2">
+            <div className="text-[8px] uppercase tracking-widest text-slate-600">Copy</div>
+            <div className="mt-1 leading-relaxed">Use originals to stage consumable BPC runs for Tech II or batched production work.</div>
+          </div>
+          <div className="rounded-lg border border-slate-700/30 bg-slate-950/20 px-2.5 py-2">
+            <div className="text-[8px] uppercase tracking-widest text-slate-600">Library</div>
+            <div className="mt-1 leading-relaxed">Whole-card rows now collapse into progress hints so large blueprint libraries stay scannable.</div>
+          </div>
+        </div>
+      </PanelInfoSection>
 
       {/* Active research/copy jobs */}
       {(mfg.researchJobs.length > 0 || mfg.copyJobs.length > 0) && (
@@ -890,10 +1253,16 @@ export function ManufacturingPanel() {
   const state           = useGameStore(s => s.state);
   const savedPanelState = useUiStore(s => s.panelStates.manufacturing);
   const setPanelState = useUiStore(s => s.setPanelState);
-  const [tab, setTab]   = useState<'jobs' | 'blueprints'>(() => savedPanelState.tab ?? 'jobs');
+  const [tab, setTab]   = useState<ManufacturingTab>(() => savedPanelState.tab ?? 'jobs');
   const hasManufacturing = state.unlocks['system-manufacturing'];
   const focusTarget = useUiStore(s => s.focusTarget);
   const clearFocus = useUiStore(s => s.clearFocus);
+  const speedMult = getManufacturingSpeedMultiplier(state);
+  const queueLength = state.systems.manufacturing.queue.length;
+  const activeLabJobs = state.systems.manufacturing.researchJobs.length + state.systems.manufacturing.copyJobs.length;
+  const grade = manufacturingGrade(speedMult);
+  const headerActive = queueLength > 0 || activeLabJobs > 0;
+  const headerRate = Math.min(1, Math.max(queueLength / 50, activeLabJobs / Math.max(1, getMaxResearchSlots(state)), Math.max(0, speedMult - 1)));
 
   useEffect(() => {
     if (!focusTarget?.panelSection) return;
@@ -937,7 +1306,32 @@ export function ManufacturingPanel() {
     <div className="flex flex-col gap-4">
       {/* Header */}
       <div>
-        <h2 className="panel-header">?? Manufacturing Complex</h2>
+        <div className="flex items-center gap-3 mb-2">
+          <h2 className="panel-header">Manufacturing Complex</h2>
+          <span
+            className="text-sm font-black px-2 py-0.5 rounded border font-mono"
+            style={{ color: grade.color, background: `${grade.color}18`, border: `1px solid ${grade.color}44` }}
+            title={`Manufacturing speed: x${speedMult.toFixed(2)}`}
+          >
+            {grade.grade}
+          </span>
+        </div>
+        <div className="rounded-xl border border-slate-700/30 bg-slate-900/35 px-3 py-2.5">
+          <div className="flex items-center justify-between gap-3 mb-2">
+            <div className="text-[10px] text-slate-500 leading-relaxed">
+              Dense production control for components, modules, hulls, research, and Tech II staging.
+            </div>
+            <div className="flex gap-2 shrink-0">
+              <span className="text-[9px] px-1.5 py-0.5 rounded border border-cyan-700/30 bg-cyan-950/15 text-cyan-300 font-mono">
+                q {queueLength}/50
+              </span>
+              <span className="text-[9px] px-1.5 py-0.5 rounded border border-violet-700/30 bg-violet-950/15 text-violet-300 font-mono">
+                lab {activeLabJobs}/{getMaxResearchSlots(state)}
+              </span>
+            </div>
+          </div>
+          <ActivityBar active={headerActive} rate={headerRate} color={queueLength > 0 ? 'cyan' : activeLabJobs > 0 ? 'violet' : 'amber'} label="Complex load" valueLabel={queueLength > 0 ? `${queueLength} queued` : activeLabJobs > 0 ? `${activeLabJobs} lab jobs` : 'idle'} />
+        </div>
       </div>
 
       <PanelInfoSection
@@ -956,25 +1350,55 @@ export function ManufacturingPanel() {
       </PanelInfoSection>
 
       {/* Tab bar */}
-      <div className="flex gap-1 border-b border-slate-800/60 pb-1">
-        {(['jobs', 'blueprints'] as const).map(t => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`px-4 py-2 rounded-t-lg text-xs font-bold uppercase tracking-wide transition-all duration-150 ${
-              tab === t
-                ? t === 'blueprints'
-                  ? 'bg-violet-900/30 border border-violet-600/40 border-b-transparent text-violet-300'
-                  : 'bg-cyan-900/30 border border-cyan-600/40 border-b-transparent text-cyan-300'
-                : 'text-slate-500 hover:text-slate-300 border border-transparent'
-            }`}
-          >
-            {t === 'jobs' ? '? Jobs' : '?? Blueprints'}
-          </button>
-        ))}
+      <div className="rounded-xl border border-slate-700/30 bg-slate-900/35 px-3 py-2.5">
+        <div className="flex items-center justify-between gap-3 mb-2">
+          <div>
+            <div className="text-[9px] text-slate-500 uppercase tracking-widest font-bold">Control Focus</div>
+            <div className="text-xs text-slate-400 mt-0.5">Switch between live fabrication control and blueprint-library management without losing the command-deck context above.</div>
+          </div>
+          <div className="flex gap-2 shrink-0">
+            <span className="text-[9px] px-1.5 py-0.5 rounded border border-cyan-700/30 bg-cyan-950/15 text-cyan-300 font-mono">
+              jobs {state.systems.manufacturing.queue.length}
+            </span>
+            <span className="text-[9px] px-1.5 py-0.5 rounded border border-violet-700/30 bg-violet-950/15 text-violet-300 font-mono">
+              lab {state.systems.manufacturing.researchJobs.length + state.systems.manufacturing.copyJobs.length}
+            </span>
+          </div>
+        </div>
+        <div className="flex gap-1 border-b border-slate-800/60 pb-1">
+          {(['jobs', 'blueprints'] as const).map(t => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={`px-4 py-2 rounded-t-lg text-xs font-bold uppercase tracking-wide transition-all duration-150 ${
+                tab === t
+                  ? t === 'blueprints'
+                    ? 'bg-violet-900/30 border border-violet-600/40 border-b-transparent text-violet-300'
+                    : 'bg-cyan-900/30 border border-cyan-600/40 border-b-transparent text-cyan-300'
+                  : 'text-slate-500 hover:text-slate-300 border border-transparent'
+              }`}
+            >
+              <span className="inline-flex items-center gap-2">
+                <span>{t === 'jobs' ? 'Jobs' : 'Blueprints'}</span>
+                <span className="text-[9px] font-mono opacity-75">
+                  {t === 'jobs'
+                    ? `${state.systems.manufacturing.queue.length}`
+                    : `${state.systems.manufacturing.researchJobs.length + state.systems.manufacturing.copyJobs.length}`}
+                </span>
+              </span>
+            </button>
+          ))}
+        </div>
+        <div className="rounded-lg border border-slate-800/50 bg-slate-950/35 px-3 py-2 mt-2">
+          <div className="text-[10px] text-slate-400 leading-relaxed">
+            {tab === 'jobs'
+              ? 'Jobs keeps queue pressure, recipe staging, and lab activity close together for operational use.'
+              : 'Blueprints prioritizes research posture, copy throughput, and library readiness for future production.'}
+          </div>
+        </div>
       </div>
 
-      {tab === 'jobs' && <JobsTab />}
+      {tab === 'jobs' && <JobsTab onOpenBlueprints={() => setTab('blueprints')} />}
       {tab === 'blueprints' && <BlueprintsTab />}
     </div>
   );

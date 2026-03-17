@@ -22,6 +22,7 @@ import {
   GALAXY_WIDTH_LY,
 } from '@/game/galaxy/galaxy.gen';
 import { warpEtaSeconds, formatEta, getWarpProgress, calcWarpDuration } from '@/game/galaxy/travel.logic';
+import { getFleetTransitWarpMultiplier } from '@/game/systems/fleet/fleet.logic';
 import { findRoute, getReachableSystems, unitsToLy } from '@/game/galaxy/route.logic';
 import { HULL_DEFINITIONS } from '@/game/systems/fleet/fleet.config';
 import { FACTION_DEFINITIONS } from '@/game/systems/factions/faction.config';
@@ -768,7 +769,8 @@ const GalaxyGridView = forwardRef<GalaxyGridHandle, {
         const pb = project(...sysToWorld(toSys));
         if (!pa || !pb) return;
         anyInTransit = true;
-        const t  = Math.min(1, Math.max(0, (now - legDepartedAt) / 1000));
+        const legDurationMs = Math.max(1000, (fleet.fleetOrder.legDurationSeconds ?? 1) * 1000);
+        const t  = Math.min(1, Math.max(0, (now - legDepartedAt) / legDurationMs));
         const px = pa.sx + (pb.sx - pa.sx) * t;
         const py = pa.sy + (pb.sy - pa.sy) * t;
         const angle = Math.atan2(pb.sy - pa.sy, pb.sx - pa.sx);
@@ -824,7 +826,8 @@ const GalaxyGridView = forwardRef<GalaxyGridHandle, {
         const pb = project(...sysToWorld(toSys));
         if (!pa || !pb) return;
         anyInTransit = true;
-        const t  = Math.min(1, Math.max(0, (now - legDepartedAt) / 1000));
+        const legDurationMs = Math.max(1000, (order.legDurationSeconds ?? 1) * 1000);
+        const t  = Math.min(1, Math.max(0, (now - legDepartedAt) / legDurationMs));
         const px = pa.sx + (pb.sx - pa.sx) * t;
         const py = pa.sy + (pb.sy - pa.sy) * t;
         const angle = Math.atan2(pb.sy - pa.sy, pb.sx - pa.sx);
@@ -1509,15 +1512,18 @@ function RoutePlanner({
   } : null;
   const estimatedTravelSeconds = useMemo(() => {
     if (!activeRoute) return 0;
+    const routeWarpMultiplier = selectedFleet
+      ? getFleetTransitWarpMultiplier(gameState, selectedFleet.shipIds, selectedFleet)
+      : 1;
     let total = 0;
     for (let index = 0; index < activeRoute.path.length - 1; index += 1) {
       const from = allSystems.find(system => system.id === activeRoute.path[index]);
       const to = allSystems.find(system => system.id === activeRoute.path[index + 1]);
       if (!from || !to) continue;
-      total += calcWarpDuration(gameState, from, to);
+      total += calcWarpDuration(gameState, from, to, routeWarpMultiplier);
     }
     return total;
-  }, [activeRoute, allSystems, gameState]);
+  }, [activeRoute, allSystems, gameState, selectedFleet]);
   const averageJumpSeconds = activeRoute && activeRoute.hops > 0 ? estimatedTravelSeconds / activeRoute.hops : 0;
   const routeExposure = secCount
     ? secCount.nullsec > 0
@@ -1596,6 +1602,9 @@ function RoutePlanner({
           menuWidth={340}
           buttonStyle={selStyle}
         />
+        <div style={{ fontSize: 7, color: '#334155', marginTop: 4, lineHeight: 1.45 }}>
+          Tip: while the Route tab is open, click a system directly on the map to set the destination.
+        </div>
       </div>
 
       <div>
@@ -2158,9 +2167,18 @@ function StarMapPanelInner() {
   );
 
   const handleSystemSelect = useCallback((id: string) => {
+    if (rightTab === 'route') {
+      setSelectedId(id);
+      setRouteTo(id);
+      setActiveRoute(null);
+      setRouteComputed(false);
+      setDispatchFeedback(null);
+      return;
+    }
+
     setSelectedId(prev => prev === id ? null : id);
     setRightTab('intel');
-  }, []);
+  }, [rightTab]);
 
   const handleSetCourse = useCallback(() => {
     if (!selectedId || selectedId === galaxy.currentSystemId) return;
@@ -2448,8 +2466,8 @@ function StarMapPanelInner() {
                       isCurrent={selectedSys.id === galaxy.currentSystemId}
                       distLY={selectedDistLY}
                       onSetCourse={handleSetCourse}
-                      onSetRouteFrom={() => { setRouteFrom(selectedSys!.id); setRightTab('route'); }}
-                      onSetRouteTo={()   => { setRouteTo(selectedSys!.id);   setRightTab('route'); }}
+                      onSetRouteFrom={() => { setDispatchFeedback(null); setRouteFrom(selectedSys!.id); setActiveRoute(null); setRouteComputed(false); setRightTab('route'); }}
+                      onSetRouteTo={()   => { setDispatchFeedback(null); setRouteTo(selectedSys!.id); setActiveRoute(null); setRouteComputed(false); setRightTab('route'); }}
                     />
                   ) : (
                     <div style={{ fontSize: 9, color: '#475569', textAlign: 'left', padding: '12px 14px', border: '1px solid rgba(30,41,59,0.72)', borderRadius: 8, background: 'linear-gradient(180deg, rgba(8,12,28,0.94), rgba(4,6,18,0.9))', lineHeight: 1.5 }}>
@@ -2469,10 +2487,10 @@ function StarMapPanelInner() {
                   routeFilter={routeFilter}
                   activeRoute={activeRoute}
                   routeComputed={routeComputed}
-                  onSetFrom={(id) => { setDispatchFeedback(null); setRouteFrom(id); }}
-                  onSetTo={(id) => { setDispatchFeedback(null); setRouteTo(id); }}
+                  onSetFrom={(id) => { setDispatchFeedback(null); setRouteFrom(id); setActiveRoute(null); setRouteComputed(false); }}
+                  onSetTo={(id) => { setDispatchFeedback(null); setRouteTo(id); setActiveRoute(null); setRouteComputed(false); }}
                   onSetJumpRange={(ly) => { setDispatchFeedback(null); setJumpRangeLY(ly); }}
-                  onSetFilter={(filter) => { setDispatchFeedback(null); setRouteFilter(filter); }}
+                  onSetFilter={(filter) => { setDispatchFeedback(null); setRouteFilter(filter); setActiveRoute(null); setRouteComputed(false); }}
                   onComputeRoute={handleComputeRoute}
                   onClearRoute={handleClearRoute}
                   fleetJumpRangeLY={fleetJumpRangeLY}

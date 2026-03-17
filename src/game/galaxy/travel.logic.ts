@@ -32,9 +32,10 @@ export function calcWarpDuration(
   state: GameState,
   from: StarSystem,
   to: StarSystem,
+  extraWarpSpeedMultiplier = 1,
 ): number {
   const dist     = systemDistance(from, to);
-  const speed    = BASE_WARP_SPEED * getWarpSpeedMultiplier(state);
+  const speed    = BASE_WARP_SPEED * getWarpSpeedMultiplier(state) * extraWarpSpeedMultiplier;
   const raw      = dist / speed;
   return Math.max(MIN_WARP_SECONDS, Math.min(MAX_WARP_SECONDS, raw));
 }

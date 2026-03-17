@@ -94,6 +94,17 @@ Avoid vague names like:
 - Resource Builder
 - Idle Generator
 
+## UI Progress Labels
+
+Animated progress labels should use a consistent vocabulary across the UI.
+
+- Use `Progress` for completion bars that show percent-done work.
+- Use `Load` for aggregate panel or system bars that summarize operational intensity.
+- Use `Status` for single-entity bars that summarize the current live posture of one thing.
+- Use `Rate` for bars whose companion value is throughput or speed rather than completion.
+
+Avoid mixing near-synonyms like `tempo`, `pressure`, `activity`, and `throughput` unless they are the exact gameplay term the player already sees elsewhere.
+
 ---
 
 ## Resources

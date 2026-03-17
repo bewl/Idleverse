@@ -8,6 +8,14 @@ applyTo: "**"
 
 Every code change **must** be accompanied by the relevant documentation update in the same session. This is not optional — treating docs as a separate follow-up is forbidden.
 
+## Rule: Plans Must Be Documented When They Are Created
+
+Any meaningful plan created during discussion — feature plan, system design, phased rollout, balance plan, content expansion plan, refactor plan, or implementation roadmap — **must be written into the documentation during the same session**.
+
+Do not leave plans only in chat, memory, or temporary notes. If a plan is important enough to guide future work, it must be captured in `/docs/` so it can be updated, referenced later, and not lost.
+
+If a plan changes later, update the documented version immediately rather than creating a second conflicting plan in chat.
+
 ---
 
 ## What to Update and When
@@ -24,7 +32,23 @@ Every code change **must** be accompanied by the relevant documentation update i
 | Folder structure changes | `Idleverse_AI_Architecture.md` — update project structure section |
 | Phase or feature completed | `Idleverse_DESIGN_PLAN.md` — mark phase `✅ COMPLETED` with date and files changed |
 | New phase or feature designed | `Idleverse_DESIGN_PLAN.md` — add phase section with full spec |
+| New implementation plan or roadmap discussed | `Idleverse_DESIGN_PLAN.md` — add or update the relevant phase/feature plan section in the same session |
 | New terminology or naming convention | `Idleverse_AI_Content_Guidelines.md` — add to relevant section |
+
+---
+
+## Planning Documentation Rules
+
+When a plan is created, documented it using these rules:
+
+1. Put long-lived feature, system, or rollout plans in `Idleverse_DESIGN_PLAN.md`.
+2. If the plan changes the architecture or state model, also update `Idleverse_AI_Architecture.md`.
+3. If the plan introduces formulas, pacing targets, or progression constants, also update `Idleverse_BALANCE_FORMULAS.md`.
+4. If the plan introduces new resources, item families, or production chains, also update `Idleverse_RESOURCE_REGISTRY.md`.
+5. Replace stale plan text instead of appending contradictory versions.
+6. Chat-only planning is not sufficient for repo memory; the docs are the source of truth.
+
+Use temporary memory notes only as working scratch space. Once the plan is real, the docs must carry it.
 
 ---
 

@@ -4,8 +4,9 @@ import { HULL_DEFINITIONS } from '@/game/systems/fleet/fleet.config';
 import { BASE_SHIP_CARGO_M3 } from '@/game/balance/constants';
 import { findRoute } from '@/game/galaxy/route.logic';
 import { generateGalaxy } from '@/game/galaxy/galaxy.gen';
+import { calcWarpDuration } from '@/game/galaxy/travel.logic';
 import { getCombinedCommanderBonus } from './commander.logic';
-import { setShipActivity } from './fleet.logic';
+import { getShipTransitWarpMultiplier, setShipActivity } from './fleet.logic';
 
 // ─── Cargo capacity ────────────────────────────────────────────────────────
 
@@ -195,6 +196,20 @@ function findHaulingWingRoute(
   return null;
 }
 
+function getShipLegDurationSeconds(
+  state: GameState,
+  fleet: PlayerFleet,
+  ship: ShipInstance,
+  route: string[],
+  currentLeg: number,
+  galaxy: ReturnType<typeof generateGalaxy>,
+): number {
+  const fromSystem = galaxy.find(system => system.id === route[currentLeg]);
+  const toSystem = galaxy.find(system => system.id === route[currentLeg + 1]);
+  if (!fromSystem || !toSystem) return 1;
+  return calcWarpDuration(state, fromSystem, toSystem, getShipTransitWarpMultiplier(state, ship, fleet, getWingByShipId(fleet, ship.id)));
+}
+
 // ─── Dispatch ──────────────────────────────────────────────────────────────
 
 /**
@@ -244,7 +259,18 @@ export function dispatchHaulerWing(
   let newShips = { ...state.systems.fleet.ships };
   for (const sid of shipIds) {
     const ship = newShips[sid];
-    if (ship) newShips = { ...newShips, [sid]: { ...ship, fleetOrder: order, activity: 'transport' } };
+    if (!ship) continue;
+    newShips = {
+      ...newShips,
+      [sid]: {
+        ...ship,
+        fleetOrder: {
+          ...order,
+          legDurationSeconds: getShipLegDurationSeconds(state, fleet, ship, route.path, 0, galaxy),
+        },
+        activity: 'transport',
+      },
+    };
   }
 
   const updatedWings = fleet.wings.map(w =>
@@ -342,7 +368,17 @@ export function processWingArrivalAtHQ(
         pauseOnArrival: false,
         legDepartedAt: Date.now(),
       };
-      newShips = { ...newShips, [sid]: { ...ship, fleetOrder: order, activity: 'transport' } };
+      newShips = {
+        ...newShips,
+        [sid]: {
+          ...ship,
+          fleetOrder: {
+            ...order,
+            legDurationSeconds: getShipLegDurationSeconds(s, updatedFleet, ship, route.path, 0, galaxy),
+          },
+          activity: 'transport',
+        },
+      };
     }
   }
 

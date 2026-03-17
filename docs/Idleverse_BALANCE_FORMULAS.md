@@ -50,10 +50,31 @@ Where:
 
 ```
 OreYield = belt.baseRate
-         × (1 + modifiers['mining-yield'])    // from Mining, Astrogeology skills
-         × miningLaserModuleMultiplier
-         × assignedPilotMiningBonus
+         × (hull.baseMiningBonus + moduleMiningBonus + pilotMiningBonus)
+         × moraleMultiplier
+         × (1 + modifiers['mining-yield'])
+         × beltRichnessMultiplier
+         × deepOreMultiplier
+         × commanderMultiplier
 ```
+
+Ionite midgame branch constants:
+
+- `belt-ionite.baseRate = 0.75 ore/s`
+- `ionite → { isorium: 18, noxium: 14, fluxite: 20 }` per 100-ore batch at 1.0 reprocessing efficiency
+- `Fluxite` is priced below nullsec rares but above standard lowsec minerals to create a cruiser-era bottleneck rather than a nullsec wall
+
+Module manufacturing timing bands:
+
+- Low-slot modules: base `60s`
+- Mid-slot modules: base `70s`
+- High-slot modules: base `80s`
+- `-ii` module variants add `35s` over the slot baseline
+
+Cruiser baseline manufacturing target:
+
+- `recipe-ship-cruiser.timeCost = 1200s`
+- Inputs combine legacy hull parts with `Armor Honeycomb`, `Reactor Lattice`, and `Targeting Bus` so cruiser production stresses both lowsec mineral sourcing and midgame electronics throughput
 
 ---
 
@@ -286,6 +307,48 @@ totalReduction = min(0.70, modifiers['haul-speed'] + haulingShipBonus)
 haulingShipBonus = Σ (0.05 × hull.baseCargoMultiplier) per piloted hauling ship
 haulInterval = max(MIN_HAUL_SECONDS, floor(BASE_HAUL_SECONDS × (1 - totalReduction)))
 ```
+
+---
+
+# Warp Travel Formula
+
+Manual warp and autonomous fleet travel now share one duration model.
+
+```
+corpWarpMultiplier = 1 + modifiers['warp-speed']
+pilotWarpBonus = assignedPilotNavigationBonus
+moduleWarpBonus = Σ fittedModules['warp-speed']
+commanderWarpBonus = activeFleetOrWingCommander['warp-speed']
+
+shipWarpMultiplier = 1 + hull.warpSpeedBonus + pilotWarpBonus + moduleWarpBonus + commanderWarpBonus
+fleetWarpMultiplier = 1 + average(
+  hull.warpSpeedBonus + pilotWarpBonus + moduleWarpBonus + commanderWarpBonus
+  across fleet ships
+)
+
+warpDurationSeconds = clamp(
+  systemDistance(from, to) / (BASE_WARP_SPEED × corpWarpMultiplier × extraWarpSpeedMultiplier),
+  MIN_WARP_SECONDS,
+  MAX_WARP_SECONDS,
+)
+```
+
+Where:
+
+- `BASE_WARP_SPEED = 0.020` galaxy units/sec
+- `MIN_WARP_SECONDS = 6`
+- `MAX_WARP_SECONDS = 120`
+- `extraWarpSpeedMultiplier` is the ship's live travel profile for solo orders or the fleet-average live travel profile for grouped fleet orders
+
+Travel-speed sources currently in code:
+
+- Corp `Navigation`: `+0.03 warp-speed` per level
+- Pilot `Navigation`: contributes that same `warp-speed` effect to the assigned ship's transit profile
+- Hull warp bonuses: built into the ship definition
+- `warp-tuner-i`: `+0.08 warp-speed` fitted module bonus
+- `logistics-command`: `+0.02 warp-speed` per commander level in fleet/wing scope
+
+This same duration is stamped onto each active fleet-order leg so `FleetPanel` ETA, StarMap interpolation, and simulation advancement all reference the same travel clock.
 
 ---
 

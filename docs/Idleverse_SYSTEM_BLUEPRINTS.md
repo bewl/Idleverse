@@ -33,8 +33,8 @@ MiningState {
 
 ## Mechanics
 
-- **9 ore belts** across 3 security tiers (highsec ×4, lowsec ×3, nullsec ×2)
-- Lowsec requires Advanced Mining I; nullsec requires Advanced Mining III
+- **10 ore belts** across 3 security tiers (highsec ×4, lowsec ×4, nullsec ×2)
+- Lowsec progression now branches across Advanced Mining I-II and Mining Barge I; nullsec belts require Mining Barge I or Astrogeology V depending on deposit class
 - **Belt skill gates**: `ORE_BELTS[beltId].requiredSkill` is checked in `setShipActivity()` before a ship can be assigned to mine a belt; if the corp's skill level is below the required minimum the assignment is rejected. The `SystemPanel` renders locked belt cards with a 🔒 disabled button and a `GameTooltip` displaying the required skill name and level; unlocked belts surface live fleet-assignment status rather than a legacy mining toggle.
 - The `SystemPanel` is the operational assignment surface for mining: each unlocked belt card can now directly assign a configured mining wing in the current system to that belt, pushing the wing's ships into `activity: 'mining'` with the selected `assignedBeltId`.
 - The `MiningPanel` now groups active operations by mining wing rather than showing a single fleet-level cargo bar, so belt assignments and storage fill are presented in the same wing section. Storage is framed everywhere as a `Storage Target`: either shared fleet storage when no hauling wing exists, a single hauling-wing cargo hold, or a multi-wing hauling network.
@@ -65,6 +65,7 @@ Converts raw ores into refined minerals — the input material for all manufactu
 
 - Works as a job queue (up to 3 simultaneous jobs)
 - Each job processes a batch of ore into minerals over time
+- The lowsec `Ionite` branch adds `Fluxite` as a midgame conductive mineral for cruiser reactors and combat electronics
 - **Efficiency** skill-scaled: Reprocessing, Reprocessing Efficiency, Metallurgy skills apply
 - Auto-reprocessing: per-ore toggle + configurable minimum-keep threshold
 - Yield improved by `reprocessing-efficiency` modifier
@@ -76,23 +77,27 @@ Converts raw ores into refined minerals — the input material for all manufactu
 
 ## Role
 
-Converts minerals into manufactured components and ships via a recipe queue.
+Converts minerals and intermediate parts into manufactured components, modules, and ships via a recipe queue.
 
 ## State
 
 `src/game/systems/manufacturing/`
 
-## Recipes (12 total)
+## Recipes
 
-**Components (Tier 3):** Hull Plate, Thruster Node, Condenser Coil, Sensor Cluster, Mining Laser, Shield Emitter
+Current live recipes cover:
 
-**Ships (Tier 4):** Shuttle, Frigate, Mining Frigate, Hauler, Destroyer, Exhumer
+- Tier 3 shared components, including the cruiser-support set: Armor Honeycomb, Reactor Lattice, and Targeting Bus
+- Craftable ship fittings for every current T1 module definition
+- Tier 4 T1 ships from Shuttle through Cruiser and Exhumer
+- T2 components, T2 ships, and the POS Core strategic structure item
 
 ## Mechanics
 
 - Recipe queue with up to 5 parallel jobs
 - Manufacturing speed scaled by Industry + Advanced Industry skills
 - Ship recipes produce a `ShipInstance` (not a stackable resource)
+- Module recipes produce stackable resource inventory, and fitting now consumes module stock while removal or ship recall returns modules to inventory
 - Some recipes gated by skill level (e.g. Sensor Cluster requires Electronics II)
 - Locked-state UX now uses a shared unlock-preview card that explains the Industry I requirement, ETA from the current corp skill sheet, and the downstream value of converting ore and minerals into ships, components, and later blueprint research
 
@@ -109,16 +114,16 @@ queues for combat/mining specialisation.
 
 `src/game/systems/skills/`
 
-## Skill Categories (34 skills total)
+## Skill Categories (35 skills total)
 
 | Category | Skills |
 |---|---|
 | Mining | Mining, Astrogeology, Advanced Mining, Ice Harvesting, Drone Interfacing, Mining Barge |
-| Spaceship | Spaceship Command, Frigate, Mining Frigate, Industrial, Destroyer, Cruiser, Gunnery, Military Operations |
+| Spaceship | Spaceship Command, Navigation, Frigate, Mining Frigate, Industrial, Destroyer, Cruiser, Gunnery, Military Operations |
 | Industry | Industry, Advanced Industry, Reprocessing, Reprocessing Efficiency |
-| Science | Science, Metallurgy, Survey |
+| Science | Science, Metallurgy, Survey, Astrometrics, Archaeology, Hacking |
 | Electronics | Electronics, CPU Management, Ladar Sensing |
-| Trade | Trade, Broker Relations |
+| Trade | Trade, Broker Relations, Accounting |
 
 ## Mechanics
 
@@ -126,6 +131,7 @@ queues for combat/mining specialisation.
 - Time per level: `SKILL_LEVEL_SECONDS[level-1] × rank` (level 1 = 60s × rank, level 5 = 64,800s × rank)
 - Skills apply effects via `modifiers` dictionary in GameState
 - Pilot skills (individual) trained through the Pilots tab in the Fleet panel
+- `Navigation` is now the baseline travel-speed progression hook. Corp training increases the global `warp-speed` modifier, while pilot-trained Navigation contributes to the assigned ship's live transit profile during fleet and wing travel.
 - The Overview panel now reads the current skill sheet to frame five parallel progression tracks (Mining, Industry, Trade, Combat, Exploration), each with a next unlock target and ETA so the skill system teaches options rather than only exposing raw modifier rows
 - `SkillsPanel` now includes a path-oriented specialization guide plus outcome text in the detail pane, so players can compare payoff, ETA, and downstream unlocks before committing queue time
 - `SkillsPanel` now also surfaces advisory specialization lanes ranked from the live corp state. The top recommendations are computed from current inventory, unlock status, fleet activity, and first-week progression context rather than being static card ordering.
@@ -211,14 +217,18 @@ systems via BFS shortest-path or Dijkstra least-cost routing.
 ## Mechanics
 
 - 400 systems procedurally generated from a seed; 3 security tiers (highsec, lowsec, nullsec)
-- Jump lanes form a connected graph; fleets advance one hop per tick
-- Fleet `fleetOrder` drives movement; `maxJumpRangeLY` constrains which hops are valid
+- Jump lanes form a connected graph; fleets and detached hauling/escort wings now advance across timed warp legs derived from the same warp-duration model used by manual travel
+- Fleet `fleetOrder` drives movement; `maxJumpRangeLY` constrains which hops are valid, while each active leg stores departure time plus computed duration so ETA/progress can be rendered consistently in simulation and UI
+- Fleet and wing warp timing now composes four live speed sources: corp `warp-speed`, hull warp bonus, assigned-pilot Navigation skill, and fitted/commander travel bonuses (`warp-tuner-i`, `logistics-command`)
 - RoutePlanner in StarMapPanel: calculates and dispatches multi-hop routes
+- While the Route tab is open, clicking a system directly on the map now sets the route destination in-place instead of kicking the user back to Intel view
+- Changing the route origin, destination, or route filter clears the currently rendered route preview so the map never shows a stale path after planner inputs change
 - Fleet-group dispatch now recalculates effective jump range from the fleet's live hull mix before issuing an order and refreshes stale cached range values, so saved fleets cannot silently fail valid routes because of outdated `maxJumpRangeLY` data
 - StarMapPanel right panel: Intel tab (system info, threats) | Route tab (route planning)
 - FleetPanel navigation now surfaces the selected route posture's consequence inline (`Direct`, `Safest`, `No-null`, `High-sec`) so movement policy reads as a tradeoff between speed and exposure instead of a hidden dropdown value
-- StarMap route summaries now estimate total travel time, average hop time, and route exposure from the solved hop sequence so players can compare fast-vs-safe posture before dispatching a fleet
+- StarMap route summaries now estimate total travel time, average hop time, and route exposure from the solved hop sequence so players can compare fast-vs-safe posture before dispatching a fleet; when a fleet is bound as the route origin, the estimate uses that fleet's live warp profile instead of a generic hull-only assumption
 - Route summaries now surface inline dispatch acceptance/failure messaging so route-planning clicks resolve into a visible fleet-order state instead of a silent no-op when a move is rejected
+- FleetPanel now exposes in-transit destination, next jump, current-leg progress, and aggregate ETA for whole-fleet movement, while dispatched hauling wings surface convoy ETA based on their detached ship orders
 - StarMapPanel defaults to rendering a name label for every visible system, including unvisited systems, so the galaxy canvas matches route-planning dropdown intel. A Display filter can hide labels for a cleaner view, and the canvas now reintroduces zoom-adaptive decluttering at wide zoom levels so non-critical labels thin out before they become unreadable. Highlighted systems (selected/current/hovered/route) still receive stronger alpha and optional secondary security/star-type text.
 - StarMapPanel hover detail is now rendered as a React overlay anchored to the projected star position instead of a canvas text box. Hover cards can show richer system intel such as fleets present, body counts, active threats, trade spreads, and route-hop context while the canvas remains responsible only for hit-testing and highlight rings.
 - StarMapPanel right rail now gives more room to route planning and system inspection: the rail is wider, the current-location summary is condensed into a compact header strip, and route controls use larger task-oriented controls with a more legible route-summary card.
@@ -257,7 +267,7 @@ PlayerFleet {
 
 ## UI Notes
 
-- `ShipCard` now surfaces a `Hull Identity` block with the hull description, warp bonus, slot layout, and a compact summary of currently fitted bonus directions (mining, combat, cargo, scan) so players can read hull tradeoffs before optimizing deeper fitting behavior
+- `ShipCard` now surfaces a `Hull Identity` block with the hull description, warp bonus, slot layout, and a compact summary of currently fitted bonus directions (mining, combat, cargo, scan, warp) so players can read hull tradeoffs before optimizing deeper fitting behavior
 
 ## Corp Identity
 
@@ -297,7 +307,7 @@ Each `PlayerFleet` has a legacy `cargoHold: Record<string, number>` for non-wing
 
 **Mining restored**: When the return trip completes, ships with an `assignedBeltId` have their `activity` restored to `'mining'`, completing the round-trip loop.
 
-**Manual haul**: FleetPanel expanded card shows a fill bar and a "Haul to HQ" button.
+**Manual haul**: FleetPanel expanded card shows a fill bar and a "Haul to HQ" button. For whole fleets without hauling wings, this now uses the same `miningOriginSystemId` round-trip stamp as auto-haul so the fleet dumps at HQ and returns to its mining system correctly.
 
 ## Mechanics
 
@@ -813,7 +823,7 @@ File: `src/game/systems/fleet/commander.config.ts`
 |---|---|
 | `mining-command` | +4% fleet mining yield per level (max +20%) |
 | `combat-command` | +5% fleet DPS and +3% fleet tank per level |
-| `logistics-command` | +8% fleet cargo capacity and −5% haul trip duration per level |
+| `logistics-command` | +8% fleet cargo capacity, −5% haul trip duration, and +2% warp speed per level |
 | `industrial-command` | +6% on-site refining yield per level |
 | `recon-command` | +10% scan strength and −8% anomaly signature radius per level |
 

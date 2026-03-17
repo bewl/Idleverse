@@ -473,8 +473,8 @@ export function runTick(state: GameState, deltaSeconds: number): TickResult {
       }
     }
 
-    // ── 8a. Advance autonomous fleet orders (one hop per tick) ──────────
-    const orderResult = advanceFleetOrders(s);
+    // ── 8a. Advance autonomous fleet orders using timed warp legs ───────
+    const orderResult = advanceFleetOrders(s, nowMs);
     s = orderResult.newState;
 
     // ── FC-3: Detached escorted hauling wings auto-respond to hostile systems ─

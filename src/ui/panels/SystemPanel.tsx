@@ -22,6 +22,7 @@ import { NavTag } from '@/ui/components/NavTag';
 import { HULL_DEFINITIONS } from '@/game/systems/fleet/fleet.config';
 import { GameTooltip } from '@/ui/components/GameTooltip';
 import { GameDropdown, type DropdownOption } from '@/ui/components/GameDropdown';
+import { ActivityBar } from '@/ui/effects/ActivityBar';
 import { SKILL_DEFINITIONS } from '@/game/systems/skills/skills.config';
 import type { CelestialBody } from '@/types/galaxy.types';
 import type { Anomaly, AnomalyType, PlayerFleet } from '@/types/game.types';
@@ -638,6 +639,37 @@ function temperatureInfo(orbitFrac: number): { label: string; color: string } {
   if (orbitFrac < 0.45) return { label: 'Warm',      color: '#f59e0b' };
   if (orbitFrac < 0.65) return { label: 'Temperate', color: '#4ade80' };
   return                        { label: 'Frozen',    color: '#67e8f9' };
+}
+
+function CommandMetric({
+  label,
+  value,
+  meta,
+  tone = 'slate',
+}: {
+  label: string;
+  value: string;
+  meta?: string;
+  tone?: 'cyan' | 'violet' | 'amber' | 'emerald' | 'slate';
+}) {
+  const toneStyles =
+    tone === 'cyan'
+      ? { color: '#67e8f9', border: '1px solid rgba(34,211,238,0.22)', background: 'rgba(8,51,68,0.18)' }
+      : tone === 'violet'
+        ? { color: '#c4b5fd', border: '1px solid rgba(167,139,250,0.22)', background: 'rgba(49,46,129,0.16)' }
+        : tone === 'amber'
+          ? { color: '#fcd34d', border: '1px solid rgba(251,191,36,0.22)', background: 'rgba(120,70,0,0.14)' }
+          : tone === 'emerald'
+            ? { color: '#86efac', border: '1px solid rgba(74,222,128,0.22)', background: 'rgba(20,83,45,0.16)' }
+            : { color: '#cbd5e1', border: '1px solid rgba(51,65,85,0.35)', background: 'rgba(15,23,42,0.35)' };
+
+  return (
+    <div style={{ padding: '8px 10px', borderRadius: 6, ...toneStyles }}>
+      <div style={{ fontSize: 8, textTransform: 'uppercase', letterSpacing: '0.12em', color: '#475569' }}>{label}</div>
+      <div style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 700, marginTop: 4 }}>{value}</div>
+      {meta && <div style={{ fontSize: 9, color: '#64748b', marginTop: 2 }}>{meta}</div>}
+    </div>
+  );
 }
 
 interface BeltAssignmentFeedback {
@@ -1354,6 +1386,20 @@ function SystemPanelInner() {
         : localFleets.length === 0
           ? 'Move a fleet into this system before anchoring an outpost.'
           : 'Deploy a POS Core here and promote it to Corp HQ.';
+  const activeFleetCount = localFleets.filter(fleet => fleet.shipIds.length > 0).length;
+  const scanningFleetCount = localFleets.filter(fleet => fleet.isScanning).length;
+  const activeMiningRatio = systemBeltIds.length > 0 ? activeBeltCount / systemBeltIds.length : 0;
+  const activityRate = Math.min(1, Math.max(
+    activeFleetCount / Math.max(1, localFleets.length || 1),
+    activeMiningRatio,
+    revealedCount / Math.max(1, systemAnomalies.length || 1),
+    scanningFleetCount > 0 ? 0.65 : 0,
+  ));
+  const selectedBodyLabel = selectedBody
+    ? bodyTypeLabel(selectedBody.type)
+    : activeTab === 'anomalies'
+      ? `${revealedCount} revealed sites`
+      : 'No body selected';
 
   return (
     <div style={{
@@ -1551,6 +1597,44 @@ function SystemPanelInner() {
           </span>
         </div>
       )}
+
+      <div style={{
+        padding: '8px 16px',
+        borderBottom: '1px solid rgba(22,30,52,0.6)',
+        background: 'rgba(3,5,16,0.42)',
+        flexShrink: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8,
+      }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 8 }}>
+          <CommandMetric
+            label="Fleet Presence"
+            value={`${activeFleetCount}`}
+            meta={scanningFleetCount > 0 ? `${scanningFleetCount} scanning` : 'local command presence'}
+            tone={activeFleetCount > 0 ? 'cyan' : 'slate'}
+          />
+          <CommandMetric
+            label="Belts Active"
+            value={`${activeBeltCount}/${systemBeltIds.length}`}
+            meta={systemBeltIds.length > 0 ? 'mining belts online' : 'no ore belts'}
+            tone={activeBeltCount > 0 ? 'amber' : systemBeltIds.length > 0 ? 'slate' : 'slate'}
+          />
+          <CommandMetric
+            label="Anomalies"
+            value={`${revealedCount}`}
+            meta={`${systemAnomalies.length} signatures tracked`}
+            tone={revealedCount > 0 ? 'violet' : 'slate'}
+          />
+          <CommandMetric
+            label="Corp Presence"
+            value={isOutpostHq ? 'Outpost HQ' : isHqSystem ? 'Station HQ' : outpostDef ? 'Outpost' : stationDef ? 'Station' : 'Unclaimed'}
+            meta={isRegisteredHere ? 'registered access' : stationDef ? 'local services available' : 'field operations only'}
+            tone={isOutpostHq || isHqSystem ? 'emerald' : stationDef || outpostDef ? 'cyan' : 'slate'}
+          />
+        </div>
+        <ActivityBar active={activeFleetCount > 0 || activeBeltCount > 0 || revealedCount > 0} rate={activityRate} color={revealedCount > 0 ? 'violet' : activeBeltCount > 0 ? 'amber' : 'cyan'} label="System load" valueLabel={revealedCount > 0 ? `${revealedCount} signatures` : activeBeltCount > 0 ? `${activeBeltCount} active belts` : `${activeFleetCount} fleets`} />
+      </div>
 
       {outpostDef && (
         <div style={{
@@ -1804,6 +1888,39 @@ function SystemPanelInner() {
           padding: '12px 12px', display: 'flex', flexDirection: 'column', gap: 10,
           background: 'rgba(3,5,16,0.95)', overflowY: 'auto', flexShrink: 0,
         }}>
+          <div style={{
+            padding: '8px 10px',
+            borderRadius: 6,
+            border: '1px solid rgba(22,30,52,0.7)',
+            background: 'rgba(6,9,20,0.55)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 4,
+          }}>
+            <div style={{ fontSize: 8, color: '#334155', letterSpacing: '0.1em', textTransform: 'uppercase' }}>System Intel</div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: selectedBody ? '#fbbf24' : '#cbd5e1' }}>
+                  {selectedBody ? selectedBody.name : system.name}
+                </div>
+                <div style={{ fontSize: 9, color: '#64748b' }}>{selectedBodyLabel}</div>
+              </div>
+              <span style={{
+                fontSize: 8,
+                padding: '2px 6px',
+                borderRadius: 4,
+                color: '#67e8f9',
+                border: '1px solid rgba(34,211,238,0.22)',
+                background: 'rgba(8,51,68,0.18)',
+                textTransform: 'uppercase',
+                letterSpacing: '0.08em',
+                fontWeight: 700,
+              }}>
+                {activeTab}
+              </span>
+            </div>
+          </div>
+
           {/* Body list — moons grouped under parents */}
           <div>
             <div style={{ fontSize: 8, color: '#334155', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 4 }}>

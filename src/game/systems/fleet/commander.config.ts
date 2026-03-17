@@ -50,10 +50,11 @@ export const COMMANDER_SKILL_DEFINITIONS: Record<string, CommanderSkillDefinitio
   'logistics-command': {
     id: 'logistics-command',
     name: 'Logistics Command',
-    description: 'Expands fleet cargo capacity and reduces haul trip duration.',
+    description: 'Expands fleet cargo capacity, accelerates haul cycles, and tightens inter-system convoy execution.',
     effectPerLevel: [
       { key: 'commander-cargo-capacity', value: 0.08 }, // +8% per level → max +40%
       { key: 'haul-speed',               value: 0.05 }, // +5% haul speed per level → max +25%
+      { key: 'warp-speed',              value: 0.02 }, // +2% warp speed per level → max +10%
     ],
     milestones: { 3: 'fast-haul' },
   },
@@ -85,6 +86,7 @@ export const COMMANDER_BONUS_LABELS: Record<string, string> = {
   'fleet-tank':              '🛡 Fleet Tank',
   'commander-cargo-capacity': '📦 Cargo Cap',
   'haul-speed':              '🚀 Haul Speed',
+  'warp-speed':              '🌀 Warp Speed',
   'on-site-refining-yield':  '♻ On-Site Refining',
   'scan-speed':              '◉ Scan Speed',
   'signature-radius':        '📡 Sig Reduction',

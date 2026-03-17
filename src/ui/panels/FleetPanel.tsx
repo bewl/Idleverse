@@ -8,7 +8,9 @@ import {
   getPilotMoraleMultiplier, pilotTrainingEta, canPilotFlyShip, getPilotDisplayState,
 } from '@/game/systems/fleet/pilot.logic';
 import { formatTrainingEta } from '@/game/systems/skills/skills.logic';
+import { formatEta } from '@/game/galaxy/travel.logic';
 import { getTotalFleetPayroll, suggestDoctrine, getDoctrineRequirementsMet, computeFleetCargoCapacity } from '@/game/systems/fleet/fleet.logic';
+import { getFleetOrderEtaSeconds, getFleetOrderProgress, getShipOrderEtaSeconds } from '@/game/systems/fleet/fleet.orders';
 import { getAliveNpcGroupsInSystem } from '@/game/systems/combat/combat.logic';
 import { StarfieldBackground } from '@/ui/effects/StarfieldBackground';
 import { generateGalaxy } from '@/game/galaxy/galaxy.gen';
@@ -18,7 +20,9 @@ import { GameDropdown, type DropdownOption } from '@/ui/components/GameDropdown'
 import { useUiStore } from '@/stores/uiStore';
 import { COMMANDER_SKILL_DEFINITIONS, COMMANDER_BONUS_LABELS } from '@/game/systems/fleet/commander.config';
 import { commanderSkillEtaSeconds, getCombinedCommanderBonus } from '@/game/systems/fleet/commander.logic';
-import { getEscortWing, getFleetStoredCargo, getFleetStorageCapacity, getHaulingWingEffectiveSecurityFilter, getOperationalFleetShipIds, getWingCargoCapacity, getWingCargoTotals, getWingCargoUsed, getWingCurrentSystemId, hasActiveEscortWing, hasDispatchedHaulingWing } from '@/game/systems/fleet/wings.logic';
+import { getEscortWing, getFleetStoredCargo, getFleetStorageCapacity, getHaulingWingEffectiveSecurityFilter, getOperationalFleetShipIds, getWingCargoCapacity, getWingCargoTotals, getWingCargoUsed, getWingCurrentSystemId, getWingDispatchShipIds, hasActiveEscortWing, hasDispatchedHaulingWing } from '@/game/systems/fleet/wings.logic';
+import { ActivityBar } from '@/ui/effects/ActivityBar';
+import { describeFleetActivity, describeWingActivity } from '@/ui/utils/fleetActivity';
 
 const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V'];
 
@@ -84,6 +88,37 @@ function getStorageTargetCopy(haulingWingCount: number) {
   };
 }
 
+function CommandMetric({
+  label,
+  value,
+  meta,
+  tone = 'slate',
+}: {
+  label: string;
+  value: string;
+  meta?: string;
+  tone?: 'cyan' | 'violet' | 'amber' | 'emerald' | 'slate';
+}) {
+  const toneClass =
+    tone === 'cyan'
+      ? 'text-cyan-300 border-cyan-700/30 bg-cyan-950/15'
+      : tone === 'violet'
+        ? 'text-violet-300 border-violet-700/30 bg-violet-950/15'
+        : tone === 'amber'
+          ? 'text-amber-300 border-amber-700/30 bg-amber-950/15'
+          : tone === 'emerald'
+            ? 'text-emerald-300 border-emerald-700/30 bg-emerald-950/15'
+            : 'text-slate-300 border-slate-700/30 bg-slate-900/50';
+
+  return (
+    <div className={`rounded-lg border px-2.5 py-2 ${toneClass}`}>
+      <div className="text-[8px] uppercase tracking-widest text-slate-500">{label}</div>
+      <div className="text-[12px] font-semibold font-mono mt-1">{value}</div>
+      {meta && <div className="text-[9px] text-slate-500 mt-0.5">{meta}</div>}
+    </div>
+  );
+}
+
 // ─── Role minibar ──────────────────────────────────────────────────────────
 
 function RoleMinibar({ ships }: { ships: ShipInstance[] }) {
@@ -121,6 +156,9 @@ function WingRow({
   fleetShips,
   allShips,
   allPilots,
+  gameState,
+  allSystems,
+  nowMs,
   homeSystemId,
   onRename,
   onDelete,
@@ -137,6 +175,9 @@ function WingRow({
   fleetShips: ShipInstance[];
   allShips: Record<string, ShipInstance>;
   allPilots: Record<string, PilotInstance>;
+  gameState: ReturnType<typeof useGameStore.getState>['state'];
+  allSystems: ReturnType<typeof generateGalaxy>;
+  nowMs: number;
   homeSystemId: string | null;
   onRename: (fleetId: string, wingId: string, name: string) => boolean;
   onDelete: (fleetId: string, wingId: string) => boolean;
@@ -171,18 +212,21 @@ function WingRow({
   const haulingUsed = wing.type === 'hauling' ? getWingCargoUsed(wing) : 0;
   const haulingPct = haulingCapacity > 0 ? haulingUsed / haulingCapacity : 0;
   const routePolicy = wing.type === 'hauling' ? getHaulingWingEffectiveSecurityFilter(fleet, wing, allShips) : null;
+  const wingEtaSeconds = wing.isDispatched
+    ? getWingDispatchShipIds(fleet, wing).reduce((longestEta, shipId) => {
+        const ship = allShips[shipId];
+        if (!ship?.fleetOrder) return longestEta;
+        return Math.max(longestEta, getShipOrderEtaSeconds(gameState, ship, ship.fleetOrder, allSystems, nowMs));
+      }, 0)
+    : 0;
   const wingLabel = WING_LABELS[wing.type];
   const wingTint = WING_TINT[wing.type];
   const isActive = wing.isDispatched;
   const isPending = wing.type === 'hauling' && haulingPct >= 0.9 && !wing.isDispatched;
   const isConfigured = wing.shipIds.length > 0 && !isActive && !isPending;
-  const dotClass = isActive
-    ? 'bg-cyan-400 animate-pulse'
-    : isConfigured
-      ? 'bg-emerald-400'
-      : isPending
-        ? 'bg-amber-400/70'
-        : 'bg-slate-600';
+  const getSystemName = (systemId: string) => allSystems.find(system => system.id === systemId)?.name ?? systemId;
+  const wingActivity = describeWingActivity(gameState, fleet, wing, getSystemName);
+  const dotClass = wingActivity.dotClass;
 
   const saveName = () => {
     const nextName = nameInput.trim();
@@ -255,14 +299,22 @@ function WingRow({
             {escortActive ? 'escort cover' : ROUTE_FILTER_LABELS[routePolicy].toLowerCase()}
           </span>
         )}
+        {wing.isDispatched && wingEtaSeconds > 0 && (
+          <span className="text-[8px] shrink-0 text-cyan-300/70">ETA {formatEta(wingEtaSeconds)}</span>
+        )}
         {wingCommander && (
           <span className="text-[8px] text-slate-500 shrink-0">
             cmdr {wingCommander.name}
           </span>
         )}
-        <span className="text-[9px] text-slate-500 shrink-0">
-          {wing.isDispatched ? 'hauling' : isPending ? 'ready' : wing.shipIds.length > 0 ? 'configured' : 'idle'}
-        </span>
+        <span className={`text-[9px] shrink-0 ${
+          wingActivity.tone === 'cyan' ? 'text-cyan-300/80' :
+          wingActivity.tone === 'amber' ? 'text-amber-300/80' :
+          wingActivity.tone === 'emerald' ? 'text-emerald-300/80' :
+          wingActivity.tone === 'violet' ? 'text-violet-300/80' :
+          wingActivity.tone === 'rose' ? 'text-rose-300/80' :
+          'text-slate-500'
+        }`}>{wingActivity.shortLabel}</span>
         <span className="text-[10px] text-slate-600 shrink-0">{expanded ? '▴' : '▾'}</span>
         <button
           onClick={e => { e.stopPropagation(); onDelete(fleetId, wing.id); }}
@@ -271,6 +323,11 @@ function WingRow({
         >
           ✕
         </button>
+      </div>
+
+      <div className="px-2 pb-1.5 flex items-center gap-2 min-w-0">
+        <span className="text-[8px] uppercase tracking-widest text-slate-600 shrink-0">Activity</span>
+        <span className="text-[9px] text-slate-500 truncate">{wingActivity.detail}</span>
       </div>
 
       {!expanded && wing.type === 'hauling' && haulingCapacity > 0 && (
@@ -323,6 +380,9 @@ function WingRow({
                   {Math.round(haulingUsed).toLocaleString()} / {Math.round(haulingCapacity).toLocaleString()} m³
                 </span>
               </div>
+              {wing.isDispatched && wingEtaSeconds > 0 && (
+                <div className="text-[8px] text-cyan-300/70">Convoy ETA {formatEta(wingEtaSeconds)}</div>
+              )}
               <div className="flex-1 bg-slate-800/70 rounded-full h-1 overflow-hidden">
                 <div
                   className={`h-full rounded-full transition-all duration-500 ${wing.isDispatched ? 'bg-cyan-500/70' : haulingPct >= 0.9 ? 'bg-amber-600/60' : 'bg-emerald-500'}`}
@@ -395,6 +455,21 @@ function WingRow({
             </div>
           )}
 
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-[8px] uppercase tracking-widest text-slate-500">Activity</span>
+            <span className={`text-[9px] px-1.5 py-0.5 rounded border ${
+              wingActivity.tone === 'cyan' ? 'border-cyan-400/25 bg-cyan-950/25 text-cyan-300/80' :
+              wingActivity.tone === 'amber' ? 'border-amber-400/25 bg-amber-950/25 text-amber-300/80' :
+              wingActivity.tone === 'emerald' ? 'border-emerald-400/25 bg-emerald-950/25 text-emerald-300/80' :
+              wingActivity.tone === 'violet' ? 'border-violet-400/25 bg-violet-950/25 text-violet-300/80' :
+              wingActivity.tone === 'rose' ? 'border-rose-400/25 bg-rose-950/25 text-rose-300/80' :
+              'border-slate-600 bg-slate-900/50 text-slate-400'
+            }`}>
+              {wingActivity.shortLabel}
+            </span>
+            <span className="text-[8px] text-slate-500">{wingActivity.detail}</span>
+          </div>
+
           {wing.type === 'hauling' && haulingUsed > 0 && !wing.isDispatched && homeSystemId !== null && fleet.currentSystemId !== homeSystemId && (
             <button
               onClick={() => onDispatch(fleetId, wing.id)}
@@ -456,6 +531,8 @@ function FleetCard({
   isLast,
   onToggle,
   state,
+  galaxy,
+  systemNameById,
   focusedWingId,
 }: {
   fleetId: string;
@@ -464,6 +541,8 @@ function FleetCard({
   isLast: boolean;
   onToggle: () => void;
   state: ReturnType<typeof useGameStore.getState>['state'];
+  galaxy: ReturnType<typeof generateGalaxy>;
+  systemNameById: Record<string, string>;
   focusedWingId?: string | null;
 }) {
   const setShipRole     = useGameStore(s => s.setShipRole);
@@ -478,6 +557,7 @@ function FleetCard({
   const cancelCombat     = useGameStore(s => s.cancelCombatOrder);
   const issueGroupOrder  = useGameStore(s => s.issueFleetGroupOrder);
   const cancelGroupOrder = useGameStore(s => s.cancelFleetGroupOrder);
+  const haulFleetToHQ = useGameStore(s => s.haulFleetToHQ);
   const setFleetScanning = useGameStore(s => s.setFleetScanning);
   const designateCommander     = useGameStore(s => s.designateFleetCommander);
   const queueCmdSkill          = useGameStore(s => s.queueCommanderSkill);
@@ -495,7 +575,7 @@ function FleetCard({
   const [destSystemId, setDestSystemId] = useState('');
   const [secFilter,    setSecFilter]    = useState<RouteSecurityFilter>('shortest');
 
-  const galaxy = useMemo(() => generateGalaxy(state.galaxy.seed), [state.galaxy.seed]);
+  const nowMs = state.lastUpdatedAt;
 
   const fleet = state.systems.fleet.fleets[fleetId];
   if (!fleet) return null;
@@ -544,17 +624,21 @@ function FleetCard({
   const cargoPct      = cargoCapacity > 0 ? Math.min(1, cargoUsed / cargoCapacity) : 0;
   const storageTarget = getStorageTargetCopy(haulingWings.length);
   const hqSystemId    = state.systems.factions.homeStationSystemId;
+  const nextFleetStopId = fleet.fleetOrder ? fleet.fleetOrder.route[fleet.fleetOrder.currentLeg + 1] ?? null : null;
+  const fleetEtaSeconds = fleet.fleetOrder
+    ? getFleetOrderEtaSeconds(state, fleet, allShips, fleet.fleetOrder, galaxy, nowMs)
+    : 0;
+  const fleetLegProgress = fleet.fleetOrder
+    ? getFleetOrderProgress(state, fleet, allShips, fleet.fleetOrder, galaxy, nowMs)
+    : 0;
   const canHaulNow    = haulingWings.length === 1
     ? !haulingWings[0].isDispatched && hqSystemId !== null && hqSystemId !== fleet.currentSystemId && cargoUsed > 0
     : haulingWings.length === 0 && !isMoving && hqSystemId !== null && hqSystemId !== fleet.currentSystemId && cargoUsed > 0;
+  const commander = fleet.commanderId ? allPilots[fleet.commanderId] ?? null : null;
+  const readinessRate = fleetShips.length > 0 ? operationalFleetShips.length / fleetShips.length : 0;
+  const fleetActivity = describeFleetActivity(state, fleet, systemId => systemNameById[systemId] ?? systemId);
 
-  const dotColor   = isMoving
-    ? 'bg-cyan-400 animate-pulse'
-    : fleet.combatOrder
-      ? 'bg-red-400 animate-pulse'
-      : fleet.isScanning
-        ? 'bg-violet-400 animate-pulse'
-        : 'bg-emerald-400';
+  const dotColor = fleetActivity.dotClass;
 
   // Ships in same system that can join
   const joinableShips = Object.values(allShips).filter(
@@ -628,20 +712,19 @@ function FleetCard({
               }}
               title="View fleet in star system"
             >
-              {galaxy.find(s => s.id === fleet.currentSystemId)?.name ?? fleet.currentSystemId}
+              {systemNameById[fleet.currentSystemId] ?? fleet.currentSystemId}
             </span>
             <span className="text-[9px] text-slate-600">·</span>
             <span className="text-[9px] text-slate-500">{fleetShips.length} ship{fleetShips.length !== 1 ? 's' : ''}</span>
             <span className="text-[9px] text-slate-600">· {operationalFleetShips.length} operational</span>
-            {isMoving && <span className="text-[9px] text-cyan-400/70">· In transit</span>}
-            {!isMoving && fleet.combatOrder && (
-              <span className={`text-[9px] ${fleet.combatOrder.type === 'patrol' ? 'text-amber-400/70' : 'text-red-400/70'}`}>
-                · {fleet.combatOrder.type === 'patrol' ? '⚔ Patrol' : '🎯 Raid'}
-              </span>
-            )}
-            {!isMoving && !fleet.combatOrder && fleet.isScanning && (
-              <span className="text-[9px] text-violet-400/80">· ◉ Scanning</span>
-            )}
+            <span className={`text-[9px] ${
+              fleetActivity.tone === 'cyan' ? 'text-cyan-300/80' :
+              fleetActivity.tone === 'amber' ? 'text-amber-300/80' :
+              fleetActivity.tone === 'emerald' ? 'text-emerald-300/80' :
+              fleetActivity.tone === 'violet' ? 'text-violet-300/80' :
+              fleetActivity.tone === 'rose' ? 'text-rose-300/80' :
+              'text-slate-500'
+            }`}>· {fleetActivity.shortLabel}</span>
           </div>
         </div>
         {/* Reorder buttons */}
@@ -668,6 +751,40 @@ function FleetCard({
           style={{ borderColor: fleetColor + '22' }}
           onClick={e => e.stopPropagation()}
         >
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+            <CommandMetric
+              label="Readiness"
+              value={`${operationalFleetShips.length}/${fleetShips.length || 0}`}
+              meta={fleetShips.length > 0 ? `${Math.round(readinessRate * 100)}% hulls operational` : 'no hulls assigned'}
+              tone={operationalFleetShips.length > 0 ? 'cyan' : 'slate'}
+            />
+            <CommandMetric
+              label="Wings"
+              value={`${wings.length}`}
+              meta={haulingWings.length > 0 ? `${haulingWings.length} hauling lane${haulingWings.length !== 1 ? 's' : ''}` : 'no wing network'}
+              tone={wings.length > 0 ? 'violet' : 'slate'}
+            />
+            <CommandMetric
+              label="Commander"
+              value={commander ? commander.name : 'unassigned'}
+              meta={commander ? `${Object.keys(commander.commandSkills?.levels ?? {}).length} command tracks` : 'no command bonuses live'}
+              tone={commander ? 'amber' : 'slate'}
+            />
+            <CommandMetric
+              label="Cargo"
+              value={cargoCapacity > 0 ? `${Math.round(cargoPct * 100)}%` : 'idle'}
+              meta={cargoCapacity > 0 ? `${Math.round(cargoUsed).toLocaleString()} / ${Math.round(cargoCapacity).toLocaleString()} m3` : 'no storage online'}
+              tone={cargoPct >= 0.8 ? 'amber' : cargoUsed > 0 ? 'emerald' : 'slate'}
+            />
+          </div>
+          <ActivityBar
+            active={fleetShips.length > 0}
+            rate={Math.min(1, Math.max(readinessRate, cargoPct, isMoving ? 0.8 : 0, fleet.isScanning ? 0.65 : 0, fleet.combatOrder ? 0.9 : 0))}
+            color={isMoving || fleet.combatOrder ? 'cyan' : cargoPct >= 0.8 ? 'amber' : 'green'}
+            label="Fleet status"
+            valueLabel={fleetActivity.shortLabel}
+          />
+
           {/* Storage target */}
           {cargoCapacity > 0 && (
             <div className="flex flex-col gap-1.5">
@@ -704,7 +821,7 @@ function FleetCard({
                     if (haulingWings.length === 1) {
                       dispatchHaulingWingToHQ(fleetId, haulingWings[0].id);
                     } else {
-                      issueGroupOrder(fleetId, hqSystemId);
+                      haulFleetToHQ(fleetId);
                     }
                   }}
                   className="text-[9px] px-2 py-0.5 rounded border border-amber-400/40 text-amber-300/80 hover:border-amber-300 hover:text-amber-200 self-start"
@@ -730,10 +847,34 @@ function FleetCard({
               )}
             </div>
             <div className="flex items-center gap-2 flex-wrap">
+              <span className={`text-[9px] px-2 py-0.5 rounded border ${
+                fleetActivity.tone === 'cyan' ? 'bg-cyan-900/40 text-cyan-300 border-cyan-400/25' :
+                fleetActivity.tone === 'amber' ? 'bg-amber-900/40 text-amber-300 border-amber-400/25' :
+                fleetActivity.tone === 'emerald' ? 'bg-emerald-900/40 text-emerald-300 border-emerald-400/25' :
+                fleetActivity.tone === 'violet' ? 'bg-violet-900/40 text-violet-300 border-violet-400/25' :
+                fleetActivity.tone === 'rose' ? 'bg-rose-900/40 text-rose-300 border-rose-400/25' :
+                'bg-slate-900/40 text-slate-400 border-slate-700/30'
+              }`}>
+                {fleetActivity.shortLabel}
+              </span>
+              <span className="text-[8px] text-slate-500">{fleetActivity.detail}</span>
               {isMoving && (
-                <span className="text-[9px] px-2 py-0.5 rounded bg-cyan-900/40 text-cyan-300 border border-cyan-400/25">
-                  ▶ In transit → <NavTag entityType="system" entityId={fleet.fleetOrder?.destinationSystemId ?? ''} label={galaxy.find(s => s.id === fleet.fleetOrder?.destinationSystemId)?.name ?? fleet.fleetOrder?.destinationSystemId ?? ''} />
-                </span>
+                <div className="flex flex-col gap-1 min-w-[220px]">
+                  <span className="text-[9px] px-2 py-0.5 rounded bg-cyan-900/40 text-cyan-300 border border-cyan-400/25">
+                    ▶ In transit → <NavTag entityType="system" entityId={fleet.fleetOrder?.destinationSystemId ?? ''} label={systemNameById[fleet.fleetOrder?.destinationSystemId ?? ''] ?? fleet.fleetOrder?.destinationSystemId ?? ''} />
+                  </span>
+                  <div className="flex items-center gap-2 flex-wrap text-[8px] text-cyan-200/70">
+                    <span>ETA {formatEta(fleetEtaSeconds)}</span>
+                    {nextFleetStopId && (
+                      <span>
+                        next jump → <NavTag entityType="system" entityId={nextFleetStopId} label={systemNameById[nextFleetStopId] ?? nextFleetStopId} />
+                      </span>
+                    )}
+                  </div>
+                  <div className="h-1 bg-slate-800/80 rounded-full overflow-hidden max-w-[220px]">
+                    <div className="h-full bg-cyan-400/80 rounded-full transition-all" style={{ width: `${Math.max(4, fleetLegProgress * 100)}%` }} />
+                  </div>
+                </div>
               )}
               {!isMoving && fleet.combatOrder && (
                 <span className={`text-[9px] px-2 py-0.5 rounded border ${
@@ -820,6 +961,9 @@ function FleetCard({
                   fleetShips={fleetShips}
                   allShips={allShips}
                   allPilots={allPilots}
+                  gameState={state}
+                  allSystems={galaxy}
+                  nowMs={nowMs}
                   homeSystemId={hqSystemId}
                   onRename={renameFleetWing}
                   onDelete={deleteFleetWing}
@@ -848,7 +992,6 @@ function FleetCard({
           {/* Fleet Commander */}
           {(() => {
             const pilots   = state.systems.fleet.pilots;
-            const commander = fleet.commanderId ? pilots[fleet.commanderId] ?? null : null;
             const cmdSkills = (skillId: string) => COMMANDER_SKILL_DEFINITIONS[skillId];
 
             // Pilots in this fleet (have a ship in fleet.shipIds)
@@ -1326,7 +1469,19 @@ function FleetCard({
 
 // ─── Fleets tab ─────────────────────────────────────────────────────────────
 
-function FleetsTab({ state, focusId, focusWingId }: { state: ReturnType<typeof useGameStore.getState>['state']; focusId?: string | null; focusWingId?: string | null }) {
+function FleetsTab({
+  state,
+  galaxy,
+  systemNameById,
+  focusId,
+  focusWingId,
+}: {
+  state: ReturnType<typeof useGameStore.getState>['state'];
+  galaxy: ReturnType<typeof generateGalaxy>;
+  systemNameById: Record<string, string>;
+  focusId?: string | null;
+  focusWingId?: string | null;
+}) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -1339,11 +1494,41 @@ function FleetsTab({ state, focusId, focusWingId }: { state: ReturnType<typeof u
   const maxFleets = state.systems.fleet.maxFleets;
 
   const unassignedShips = Object.values(allShips).filter(s => s.fleetId === null);
+  const fleets = fleetIds.map(id => state.systems.fleet.fleets[id]).filter(Boolean) as PlayerFleet[];
+  const totalAssignedShips = fleets.reduce((sum, fleet) => sum + fleet.shipIds.length, 0);
+  const movingFleets = fleets.filter(fleet => fleet.fleetOrder !== null).length;
+  const scanningFleets = fleets.filter(fleet => fleet.isScanning).length;
+  const activeWings = fleets.reduce((sum, fleet) => sum + (fleet.wings ?? []).filter(wing => wing.isDispatched).length, 0);
+  const activityRate = Math.min(1, Math.max(
+    fleetIds.length > 0 ? fleetIds.length / Math.max(1, maxFleets) : 0,
+    totalAssignedShips > 0 ? totalAssignedShips / Math.max(1, Object.keys(allShips).length) : 0,
+    movingFleets > 0 ? 0.7 : 0,
+    scanningFleets > 0 ? 0.55 : 0,
+  ));
 
   const toggleExpand = (id: string) => setExpandedId(prev => prev === id ? null : id);
 
   return (
     <div className="flex flex-col gap-3">
+      <div className="rounded-xl border border-slate-700/30 bg-slate-900/35 px-3 py-2.5">
+        <div className="flex items-center justify-between gap-3 mb-3">
+          <div>
+            <div className="text-[9px] text-cyan-400 uppercase tracking-widest font-bold">Fleet Command Deck</div>
+            <div className="text-xs text-slate-400 mt-0.5">Formation count, live posture, and reserve hull pressure across the active fleet grid.</div>
+          </div>
+          <div className="text-[10px] text-slate-500 text-right">
+            Cap <span className="font-mono text-slate-300">{fleetIds.length}/{maxFleets}</span>
+          </div>
+        </div>
+        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4 mb-3">
+          <CommandMetric label="Formed Fleets" value={`${fleetIds.length}`} meta={`${Math.max(0, maxFleets - fleetIds.length)} slots open`} tone={fleetIds.length > 0 ? 'cyan' : 'slate'} />
+          <CommandMetric label="Assigned Hulls" value={`${totalAssignedShips}`} meta={`${unassignedShips.length} reserve hulls`} tone={totalAssignedShips > 0 ? 'emerald' : 'slate'} />
+          <CommandMetric label="Transit Posture" value={`${movingFleets}`} meta={scanningFleets > 0 ? `${scanningFleets} scanning fleet${scanningFleets !== 1 ? 's' : ''}` : 'no scans active'} tone={movingFleets > 0 ? 'cyan' : scanningFleets > 0 ? 'violet' : 'slate'} />
+          <CommandMetric label="Wing Traffic" value={`${activeWings}`} meta={activeWings > 0 ? 'dispatched support lanes live' : 'no dispatched wings'} tone={activeWings > 0 ? 'amber' : 'slate'} />
+        </div>
+        <ActivityBar active={fleetIds.length > 0 || unassignedShips.length > 0} rate={activityRate} color={movingFleets > 0 ? 'cyan' : activeWings > 0 ? 'amber' : 'green'} label="Command load" valueLabel={movingFleets > 0 ? `${movingFleets} transit` : activeWings > 0 ? `${activeWings} active wings` : `${fleetIds.length} formed`} />
+      </div>
+
       {/* Fleet cards */}
       {fleetIds.length === 0 ? (
         <p className="text-[9px] text-slate-600">No fleets formed. Select ships below to create one.</p>
@@ -1357,6 +1542,8 @@ function FleetsTab({ state, focusId, focusWingId }: { state: ReturnType<typeof u
             isLast={idx === fleetIds.length - 1}
             onToggle={() => toggleExpand(id)}
             state={state}
+            galaxy={galaxy}
+            systemNameById={systemNameById}
             focusedWingId={focusId === id ? focusWingId : null}
           />
         ))
@@ -1364,11 +1551,14 @@ function FleetsTab({ state, focusId, focusWingId }: { state: ReturnType<typeof u
 
       {/* Unassigned ships pool */}
       {unassignedShips.length > 0 && (
-        <div className="flex flex-col gap-1.5 pt-2 border-t border-slate-700/20">
-          <span className="text-[8px] uppercase tracking-widest text-slate-500">
-            Unassigned Ships ({unassignedShips.length})
-          </span>
-          <div className="flex flex-wrap gap-1">
+        <div className="flex flex-col gap-2 pt-2 border-t border-slate-700/20">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-[8px] uppercase tracking-widest text-slate-500">
+              Unassigned Ships ({unassignedShips.length})
+            </span>
+            <span className="text-[9px] text-slate-600">Form direct from reserve stock</span>
+          </div>
+          <div className="grid gap-1.5 md:grid-cols-2 xl:grid-cols-3">
             {unassignedShips.map(ship => {
               const hull = HULL_DEFINITIONS[ship.shipDefinitionId];
               const canForm = fleetIds.length < maxFleets;
@@ -1377,10 +1567,17 @@ function FleetsTab({ state, focusId, focusWingId }: { state: ReturnType<typeof u
                   key={ship.id}
                   disabled={!canForm}
                   onClick={() => canForm && createFleet(`Fleet ${fleetIds.length + 1}`, [ship.id])}
-                  className="text-[9px] px-2 py-1 rounded border border-slate-700/40 text-slate-400 hover:border-violet-400/40 hover:text-violet-300 disabled:opacity-30 disabled:cursor-not-allowed"
+                  className="flex items-center justify-between gap-3 rounded border border-slate-700/40 bg-slate-900/35 px-2.5 py-2 text-left text-slate-400 hover:border-violet-400/40 hover:text-violet-300 disabled:opacity-30 disabled:cursor-not-allowed"
                   title={canForm ? 'Form new fleet' : `Max ${maxFleets} fleets`}
                 >
-                  ⬡ {ship.customName ?? hull?.name ?? ship.shipDefinitionId}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${canForm ? 'bg-violet-400' : 'bg-slate-600'}`} />
+                      <span className="text-[10px] font-semibold truncate">{ship.customName ?? hull?.name ?? ship.shipDefinitionId}</span>
+                    </div>
+                    <div className="text-[8px] text-slate-500 mt-0.5">{hull?.shipClass ?? 'unknown hull'} reserve</div>
+                  </div>
+                  <span className="text-[8px] uppercase tracking-widest text-slate-500">form</span>
                 </button>
               );
             })}
@@ -1474,6 +1671,10 @@ function PilotCard({
   const activeSkillName = pilot.skills.activeSkillId
     ? SKILL_DEFINITIONS[pilot.skills.activeSkillId]?.name
     : null;
+  const assignedShip = pilot.assignedShipId ? state.systems.fleet.ships[pilot.assignedShipId] : null;
+  const assignedHull = assignedShip ? HULL_DEFINITIONS[assignedShip.shipDefinitionId] : null;
+  const focus = pilot.skills.idleTrainingFocus ?? 'balanced';
+  const trainingRate = pilot.skills.activeSkillId ? Math.min(1, Math.max(0.08, 1 - Math.min(eta, 172800) / 172800)) : 0;
 
   const isActive = pilot.status === 'active';
   const dotColor = isActive ? 'bg-cyan-400 animate-pulse' : pilot.status === 'docked' ? 'bg-emerald-400' : 'bg-slate-600';
@@ -1488,13 +1689,26 @@ function PilotCard({
         <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dotColor}`} />
         <PilotPortrait seed={pilot.portraitSeed} size={28} />
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 flex-wrap">
             <span className="text-[11px] font-semibold text-slate-200 truncate">{pilot.name}</span>
             {pilot.isPlayerPilot && (
               <span className="text-[8px] uppercase tracking-widest text-amber-400/80 border border-amber-400/30 px-1 rounded">Dir.</span>
             )}
+            <span className={`text-[8px] px-1.5 py-0.5 rounded border ${FOCUS_COLOR[focus]} border-current bg-current/10`}>
+              {FOCUS_LABEL[focus]}
+            </span>
           </div>
-          <span className="text-[9px] text-slate-500">{displayState}</span>
+          <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
+            <span className="text-[9px] text-slate-500">{displayState}</span>
+            <span className="text-[9px] text-slate-600">·</span>
+            <span className="text-[9px] text-slate-500">Morale {Math.round(pilot.morale)}%</span>
+            {assignedShip && (
+              <>
+                <span className="text-[9px] text-slate-600">·</span>
+                <span className="text-[9px] text-slate-500 truncate">{assignedShip.customName ?? assignedHull?.name ?? assignedShip.id}</span>
+              </>
+            )}
+          </div>
         </div>
         <div className="text-right">
           {pilot.skills.activeSkillId && (
@@ -1514,6 +1728,14 @@ function PilotCard({
           className="px-3 pb-3 border-t border-slate-700/30 pt-2 flex flex-col gap-2"
           onClick={e => e.stopPropagation()}
         >
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+            <CommandMetric label="Morale" value={`${Math.round(pilot.morale)}%`} meta={pilot.status} tone={pilot.morale >= 70 ? 'emerald' : pilot.morale >= 40 ? 'amber' : 'slate'} />
+            <CommandMetric label="Assignment" value={assignedShip ? (assignedShip.customName ?? assignedHull?.name ?? assignedShip.id) : 'unassigned'} meta={assignedShip ? 'ship posted' : 'ready for posting'} tone={assignedShip ? 'cyan' : 'slate'} />
+            <CommandMetric label="Training" value={activeSkillName ?? 'idle'} meta={eta > 0 ? formatTrainingEta(eta) : 'queue empty'} tone={pilot.skills.activeSkillId ? 'violet' : 'slate'} />
+            <CommandMetric label="Output" value={`${Math.round(pilot.stats.oreMinedTotal).toLocaleString()}`} meta={!pilot.isPlayerPilot ? `${pilot.payrollPerDay.toLocaleString()} ISK / day` : 'director slot'} tone={!pilot.isPlayerPilot ? 'amber' : 'emerald'} />
+          </div>
+          <ActivityBar active={pilot.skills.activeSkillId !== null || assignedShip !== null || isActive} rate={Math.min(1, Math.max(trainingRate, assignedShip ? 0.65 : 0, isActive ? 0.8 : 0))} color={pilot.skills.activeSkillId ? 'violet' : assignedShip ? 'cyan' : 'green'} label="Pilot status" valueLabel={pilot.skills.activeSkillId ? 'training live' : assignedShip ? 'posted to hull' : 'reserve'} />
+
           {/* Rename pilot */}
           <div className="flex items-center gap-2">
             {editingPilotName ? (
@@ -1651,8 +1873,6 @@ function PilotCard({
 
           {/* Pilot ↔ Ship assignment */}
           {pilot.assignedShipId ? (() => {
-            const assignedShip = state.systems.fleet.ships[pilot.assignedShipId];
-            const assignedHull = assignedShip ? HULL_DEFINITIONS[assignedShip.shipDefinitionId] : null;
             return (
               <div className="flex items-center gap-2">
                 <span className="text-[9px] text-slate-400">
@@ -1708,9 +1928,10 @@ function PilotCard({
 
 // ─── Ship card ─────────────────────────────────────────────────────────────
 
-function ShipCard({ ship, state, expanded, onToggle }: {
+function ShipCard({ ship, state, systemNameById, expanded, onToggle }: {
   ship: ShipInstance;
   state: ReturnType<typeof useGameStore.getState>['state'];
+  systemNameById: Record<string, string>;
   expanded: boolean;
   onToggle: () => void;
 }) {
@@ -1754,7 +1975,13 @@ function ShipCard({ ship, state, expanded, onToggle }: {
     fittedEffectTotals['combat-rating'] ? { label: `Combat +${Math.round(fittedEffectTotals['combat-rating'] * 100)}%`, color: '#f87171' } : null,
     fittedEffectTotals['cargo-capacity'] ? { label: `Cargo +${Math.round(fittedEffectTotals['cargo-capacity'] * 100)}%`, color: '#f59e0b' } : null,
     fittedEffectTotals['scan-strength'] ? { label: `Scan +${Math.round(fittedEffectTotals['scan-strength'] * 100)}%`, color: '#34d399' } : null,
+    fittedEffectTotals['warp-speed'] ? { label: `Warp +${Math.round(fittedEffectTotals['warp-speed'] * 100)}%`, color: '#10b981' } : null,
   ].filter(Boolean) as Array<{ label: string; color: string }>;
+  const fittedModuleCount = (['high', 'mid', 'low'] as const).reduce((sum, slot) => sum + ship.fittedModules[slot].length, 0);
+  const maxModuleSlots = hull ? hull.moduleSlots.high + hull.moduleSlots.mid + hull.moduleSlots.low : 0;
+  const fitRate = maxModuleSlots > 0 ? fittedModuleCount / maxModuleSlots : 0;
+  const integrity = Math.max(0, 100 - ship.hullDamage);
+  const systemName = systemNameById[ship.systemId] ?? ship.systemId;
 
   const isActive = ship.activity !== 'idle';
   const dotColor = isActive ? 'bg-cyan-400 animate-pulse' : assignedPilot ? 'bg-emerald-400' : 'bg-slate-600';
@@ -1791,6 +2018,8 @@ function ShipCard({ ship, state, expanded, onToggle }: {
             <span className="text-[9px] text-slate-500">
               {assignedPilot ? assignedPilot.name : <span className="text-amber-400/70">No pilot</span>} · {ship.activity}
             </span>
+            <span className="text-[9px] text-slate-600">·</span>
+            <span className="text-[9px] text-slate-500">Integrity {Math.round(integrity)}%</span>
             {hull?.requiredPilotSkill && (
               <span
                 className="text-[8px] px-1 rounded border border-slate-700/40 text-slate-600"
@@ -1803,13 +2032,21 @@ function ShipCard({ ship, state, expanded, onToggle }: {
         </div>
         <div className="text-right">
           <div className="text-[9px] text-slate-500">
-            {ship.systemId}
+            {systemName}
           </div>
         </div>
       </div>
 
       {expanded && (
         <div className="px-3 pb-3 border-t border-slate-700/30 pt-2 flex flex-col gap-2" onClick={e => e.stopPropagation()}>
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+            <CommandMetric label="Integrity" value={`${Math.round(integrity)}%`} meta={ship.hullDamage > 0 ? 'repair attention required' : 'combat ready'} tone={ship.hullDamage >= 50 ? 'amber' : ship.hullDamage > 0 ? 'violet' : 'emerald'} />
+            <CommandMetric label="Fitting" value={`${fittedModuleCount}/${maxModuleSlots || 0}`} meta={fittedEffectTotals['combat-rating'] ? 'combat fit leaning' : fittingFocusBadges.length > 0 ? 'specialized fit online' : 'baseline hull'} tone={fittedModuleCount > 0 ? 'violet' : 'slate'} />
+            <CommandMetric label="Pilot" value={assignedPilot ? assignedPilot.name : 'vacant'} meta={assignedPilot ? 'crew assigned' : 'awaiting crew'} tone={assignedPilot ? 'cyan' : 'slate'} />
+            <CommandMetric label="Fleet" value={assignedFleet ? assignedFleet.name : 'independent'} meta={assignedFleet ? 'linked to command network' : 'free hull'} tone={assignedFleet ? 'amber' : 'slate'} />
+          </div>
+          <ActivityBar active={assignedPilot !== null || isActive || fittedModuleCount > 0} rate={Math.min(1, Math.max(fitRate, assignedPilot ? 0.6 : 0, isActive ? 0.85 : 0, integrity / 100))} color={isActive ? 'cyan' : ship.hullDamage >= 50 ? 'amber' : 'green'} label="Ship status" valueLabel={isActive ? ship.activity : assignedPilot ? 'crewed' : 'vacant'} />
+
           {/* Hull stats */}
           {hull && (
             <div className="flex flex-col gap-2">
@@ -2111,25 +2348,38 @@ function OperationsTab({ state }: { state: ReturnType<typeof useGameStore.getSta
   const offers = state.systems.fleet.recruitmentOffers;
   const credits = state.resources['credits'] ?? 0;
   const payroll = getTotalFleetPayroll(state);
+  const priorityOffers = offers.filter(offer => offer.source === 'milestone').length;
+  const affordableOffers = offers.filter(offer => credits >= offer.hiringCost).length;
+  const totalHangarHulls = deployableHulls.reduce((sum, hull) => sum + (state.resources[hull.resourceId] ?? 0), 0);
+  const payrollCoverageDays = payroll > 0 ? credits / payroll : 0;
+  const activityRate = Math.min(1, Math.max(
+    deployableHulls.length / 6,
+    offers.length / 6,
+    priorityOffers > 0 ? 0.75 : 0,
+    affordableOffers > 0 ? 0.55 : 0,
+  ));
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Corp finances */}
-      <div className="flex flex-col gap-1">
-        <span className="text-[8px] uppercase tracking-widest text-slate-500">Corp Finances</span>
-        <div className="flex gap-4 text-[10px]">
-          <div className="flex gap-1">
-            <span className="text-slate-500">Balance:</span>
-            <span className="font-mono text-emerald-400">{credits.toLocaleString()} ISK</span>
+      <div className="rounded-xl border border-slate-700/30 bg-slate-900/35 px-3 py-2.5">
+        <div className="flex items-center justify-between gap-3 mb-3">
+          <div>
+            <div className="text-[9px] text-cyan-400 uppercase tracking-widest font-bold">Fleet Operations Deck</div>
+            <div className="text-xs text-slate-400 mt-0.5">Hangar deployment, staffing pressure, and corp payroll posture in one place.</div>
           </div>
-          <div className="flex gap-1">
-            <span className="text-slate-500">Payroll/day:</span>
-            <span className="font-mono text-amber-400">{payroll.toLocaleString()} ISK</span>
+          <div className="text-[10px] text-slate-500 text-right">
+            Balance <span className="font-mono text-emerald-400">{credits.toLocaleString()} ISK</span>
           </div>
         </div>
+        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4 mb-3">
+          <CommandMetric label="Hangar" value={`${totalHangarHulls}`} meta={`${deployableHulls.length} hull lines ready`} tone={totalHangarHulls > 0 ? 'cyan' : 'slate'} />
+          <CommandMetric label="Recruitment" value={`${offers.length}`} meta={priorityOffers > 0 ? `${priorityOffers} priority contracts` : 'standard pool'} tone={priorityOffers > 0 ? 'cyan' : offers.length > 0 ? 'amber' : 'slate'} />
+          <CommandMetric label="Affordable" value={`${affordableOffers}`} meta="candidates you can hire now" tone={affordableOffers > 0 ? 'emerald' : 'slate'} />
+          <CommandMetric label="Payroll Runway" value={payroll > 0 ? `${payrollCoverageDays.toFixed(1)}d` : 'stable'} meta={`${payroll.toLocaleString()} ISK / day`} tone={payroll > 0 && payrollCoverageDays < 3 ? 'amber' : 'emerald'} />
+        </div>
+        <ActivityBar active={deployableHulls.length > 0 || offers.length > 0} rate={activityRate} color={priorityOffers > 0 ? 'cyan' : affordableOffers > 0 ? 'green' : 'amber'} label="Operations load" valueLabel={priorityOffers > 0 ? `${priorityOffers} priority` : offers.length > 0 ? `${offers.length} offers` : `${totalHangarHulls} hulls`} />
       </div>
 
-      {/* Deploy ship */}
       {deployableHulls.length > 0 && (
         <div className="flex flex-col gap-1.5">
           <span className="text-[8px] uppercase tracking-widest text-slate-500">Deploy from Hangar</span>
@@ -2139,20 +2389,27 @@ function OperationsTab({ state }: { state: ReturnType<typeof useGameStore.getSta
               <button
                 key={hull.id}
                 onClick={() => deployShip(hull.id)}
-                className="flex items-center justify-between px-3 py-2 rounded border border-slate-700/30 bg-slate-900/40 hover:border-cyan-400/30 hover:bg-cyan-400/5 transition-all text-left"
+                className="flex items-center justify-between gap-3 px-3 py-2 rounded border border-slate-700/30 bg-slate-900/40 hover:border-cyan-400/30 hover:bg-cyan-400/5 transition-all text-left"
               >
-                <div>
-                  <div className="text-[10px] font-semibold text-slate-200">{hull.name}</div>
-                  <div className="text-[9px] text-slate-500">{hull.description.slice(0, 60)}…</div>
+                <div className="flex items-center gap-2 min-w-0 flex-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 shrink-0" />
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <div className="text-[10px] font-semibold text-slate-200">{hull.name}</div>
+                      <span className="text-[8px] px-1.5 py-0.5 rounded border border-cyan-700/30 bg-cyan-950/15 text-cyan-300 font-mono uppercase tracking-widest">
+                        deployable
+                      </span>
+                    </div>
+                    <div className="text-[9px] text-slate-500">{hull.description.slice(0, 72)}…</div>
+                  </div>
                 </div>
-                <span className="text-[9px] font-mono text-slate-400 ml-2">×{count}</span>
+                <span className="text-[9px] font-mono text-slate-400 shrink-0">×{count}</span>
               </button>
             );
           })}
         </div>
       )}
 
-      {/* Recruitment */}
       <div className="flex flex-col gap-1.5">
         <div className="flex items-center justify-between">
           <span className="text-[8px] uppercase tracking-widest text-slate-500">Recruitment Office</span>
@@ -2187,6 +2444,7 @@ function OperationsTab({ state }: { state: ReturnType<typeof useGameStore.getSta
               className="rounded border border-slate-700/30 bg-slate-900/40 overflow-hidden"
             >
               <div className="flex items-start gap-2.5 px-3 py-2">
+                <span className={`w-1.5 h-1.5 rounded-full shrink-0 mt-2 ${offer.source === 'milestone' ? 'bg-cyan-400 animate-pulse' : canAfford ? 'bg-emerald-400' : 'bg-amber-400/60'}`} />
                 <PilotPortrait seed={offer.pilotSeed} size={28} />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5">
@@ -2220,6 +2478,7 @@ function OperationsTab({ state }: { state: ReturnType<typeof useGameStore.getSta
                 <div className="text-[9px] text-slate-500">
                   Hire: <span className={`font-mono ${canAfford ? 'text-emerald-400' : 'text-red-400/70'}`}>{offer.hiringCost.toLocaleString()} ISK</span>
                   <span className="ml-2">· Payroll: <span className="font-mono text-amber-400">{offer.payrollPerDay.toLocaleString()}/day</span></span>
+                  <span className="ml-2">· Runway impact: <span className="font-mono text-slate-400">{payroll + offer.payrollPerDay > 0 ? `${(credits / (payroll + offer.payrollPerDay)).toFixed(1)}d` : 'stable'}</span></span>
                 </div>
                 <button
                   disabled={!canAfford}
@@ -2260,6 +2519,11 @@ export function FleetPanel() {
   const [focusFleetId, setFocusFleetId] = useState<string | null>(null);
   const [focusWingId, setFocusWingId] = useState<string | null>(null);
   const state = useGameStore(s => s.state);
+  const galaxy = useMemo(() => generateGalaxy(state.galaxy.seed), [state.galaxy.seed]);
+  const systemNameById = useMemo(
+    () => Object.fromEntries(galaxy.map(system => [system.id, system.name])),
+    [galaxy],
+  );
 
   const focusTarget = useUiStore(s => s.focusTarget);
   const clearFocus  = useUiStore(s => s.clearFocus);
@@ -2317,6 +2581,12 @@ export function FleetPanel() {
   const pilots = Object.values(fleet.pilots);
   const ships  = Object.values(fleet.ships);
   const fleets = Object.values(fleet.fleets);
+  const assignedPilots = pilots.filter(pilot => pilot.assignedShipId !== null).length;
+  const trainingPilots = pilots.filter(pilot => pilot.skills.activeSkillId !== null).length;
+  const activeShips = ships.filter(ship => ship.activity !== 'idle').length;
+  const damagedShips = ships.filter(ship => ship.hullDamage > 0).length;
+  const movingFleets = fleets.filter(fleetEntry => fleetEntry.fleetOrder !== null).length;
+  const scanningFleets = fleets.filter(fleetEntry => fleetEntry.isScanning).length;
 
   const toggleExpand = (id: string) => setExpandedId(prev => prev === id ? null : id);
 
@@ -2362,10 +2632,28 @@ export function FleetPanel() {
 
       {/* Content */}
       <div className="relative z-10 flex-1 overflow-y-auto p-3 flex flex-col gap-2">
-        {activeTab === 'fleets' && <FleetsTab state={state} focusId={focusFleetId} focusWingId={focusWingId} />}
+        {activeTab === 'fleets' && <FleetsTab state={state} galaxy={galaxy} systemNameById={systemNameById} focusId={focusFleetId} focusWingId={focusWingId} />}
 
         {activeTab === 'pilots' && (
           <>
+            <div className="rounded-xl border border-slate-700/30 bg-slate-900/35 px-3 py-2.5 mb-1">
+              <div className="flex items-center justify-between gap-3 mb-3">
+                <div>
+                  <div className="text-[9px] text-cyan-400 uppercase tracking-widest font-bold">Pilot Roster Deck</div>
+                  <div className="text-xs text-slate-400 mt-0.5">Training load, assignments, and payroll pressure for the current roster.</div>
+                </div>
+                <div className="text-[10px] text-slate-500 text-right">
+                  Active <span className="font-mono text-cyan-300">{assignedPilots}/{pilots.length}</span>
+                </div>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4 mb-3">
+                <CommandMetric label="Roster" value={`${pilots.length}`} meta={`${Math.max(0, pilots.length - assignedPilots)} unassigned`} tone={pilots.length > 0 ? 'cyan' : 'slate'} />
+                <CommandMetric label="Training" value={`${trainingPilots}`} meta={trainingPilots > 0 ? 'queues currently running' : 'all queues idle'} tone={trainingPilots > 0 ? 'violet' : 'slate'} />
+                <CommandMetric label="Morale Risk" value={`${pilots.filter(pilot => pilot.morale < 40).length}`} meta="pilots under 40% morale" tone={pilots.some(pilot => pilot.morale < 40) ? 'amber' : 'emerald'} />
+                <CommandMetric label="Payroll" value={`${pilots.filter(pilot => !pilot.isPlayerPilot).reduce((sum, pilot) => sum + pilot.payrollPerDay, 0).toLocaleString()}`} meta="ISK / day contractor load" tone={pilots.some(pilot => !pilot.isPlayerPilot) ? 'amber' : 'slate'} />
+              </div>
+              <ActivityBar active={pilots.length > 0} rate={Math.min(1, Math.max(pilots.length > 0 ? assignedPilots / pilots.length : 0, pilots.length > 0 ? trainingPilots / pilots.length : 0, pilots.some(pilot => pilot.morale < 40) ? 0.45 : 0))} color={trainingPilots > 0 ? 'violet' : assignedPilots > 0 ? 'cyan' : 'green'} label="Roster load" valueLabel={trainingPilots > 0 ? `${trainingPilots} training` : `${assignedPilots} assigned`} />
+            </div>
             {pilots.length === 0 && (
               <p className="text-[10px] text-slate-600 text-center mt-8">No pilots in the roster.</p>
             )}
@@ -2383,6 +2671,24 @@ export function FleetPanel() {
 
         {activeTab === 'ships' && (
           <>
+            <div className="rounded-xl border border-slate-700/30 bg-slate-900/35 px-3 py-2.5 mb-1">
+              <div className="flex items-center justify-between gap-3 mb-3">
+                <div>
+                  <div className="text-[9px] text-cyan-400 uppercase tracking-widest font-bold">Ship Readiness Deck</div>
+                  <div className="text-xs text-slate-400 mt-0.5">Crew coverage, fitting posture, and hull condition across deployed ships.</div>
+                </div>
+                <div className="text-[10px] text-slate-500 text-right">
+                  Damaged <span className="font-mono text-amber-300">{damagedShips}</span>
+                </div>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4 mb-3">
+                <CommandMetric label="Deployed" value={`${ships.length}`} meta={`${ships.filter(ship => ship.fleetId !== null).length} linked to fleets`} tone={ships.length > 0 ? 'cyan' : 'slate'} />
+                <CommandMetric label="Crewed" value={`${ships.filter(ship => ship.assignedPilotId !== null).length}`} meta={`${ships.filter(ship => ship.assignedPilotId === null).length} hulls vacant`} tone={ships.some(ship => ship.assignedPilotId !== null) ? 'emerald' : 'slate'} />
+                <CommandMetric label="Active Sorties" value={`${activeShips}`} meta={movingFleets > 0 ? `${movingFleets} fleets in transit` : scanningFleets > 0 ? `${scanningFleets} scanning fleets` : 'no live sorties'} tone={activeShips > 0 ? 'cyan' : scanningFleets > 0 ? 'violet' : 'slate'} />
+                <CommandMetric label="Integrity Alerts" value={`${damagedShips}`} meta={damagedShips > 0 ? 'repair queue should be watched' : 'all hulls nominal'} tone={damagedShips > 0 ? 'amber' : 'emerald'} />
+              </div>
+              <ActivityBar active={ships.length > 0} rate={Math.min(1, Math.max(ships.length > 0 ? activeShips / ships.length : 0, ships.length > 0 ? ships.filter(ship => ship.assignedPilotId !== null).length / ships.length : 0, damagedShips > 0 ? 0.45 : 0))} color={activeShips > 0 ? 'cyan' : damagedShips > 0 ? 'amber' : 'green'} label="Ship load" valueLabel={activeShips > 0 ? `${activeShips} active` : damagedShips > 0 ? `${damagedShips} damaged` : 'nominal'} />
+            </div>
             {ships.length === 0 && (
               <p className="text-[10px] text-slate-600 text-center mt-8">
                 No ships deployed. Manufacture a hull and deploy it from Operations.
@@ -2393,6 +2699,7 @@ export function FleetPanel() {
                 key={ship.id}
                 ship={ship}
                 state={state}
+                systemNameById={systemNameById}
                 expanded={expandedId === ship.id}
                 onToggle={() => toggleExpand(ship.id)}
               />

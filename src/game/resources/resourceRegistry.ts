@@ -22,6 +22,8 @@ const RESOURCES: ResourceDefinition[] = [
     description: 'Blood-red heavy ore from disputed belts. Notable Vexirite and Noxium source.' },
   { id: 'voidite',   name: 'Voidite',   category: 'ore-lowsec', tier: 1, precision: 0,
     description: 'Semi-translucent pale ore. Uncommon source of Zyridium crystals.' },
+  { id: 'ionite',    name: 'Ionite',    category: 'ore-lowsec', tier: 1, precision: 0,
+    description: 'Charged cobalt ore from storm-lashed belts. Primary source of Fluxite conductors.' },
 
   // ── Nullsec Ores (Tier 1) ──────────────────────────────────────────────────
   { id: 'arkonite',  name: 'Arkonite',  category: 'ore-nullsec', tier: 1, precision: 0,
@@ -40,6 +42,8 @@ const RESOURCES: ResourceDefinition[] = [
     description: 'Conductive mineral essential for electronics and shield systems.' },
   { id: 'noxium',    name: 'Noxium',    category: 'mineral', tier: 2, precision: 0,
     description: 'Reactive mineral used in propulsion and advanced alloy production.' },
+  { id: 'fluxite',   name: 'Fluxite',   category: 'mineral', tier: 2, precision: 0,
+    description: 'High-energy conductive mineral used in cruiser reactor lattices and targeting buses.' },
   { id: 'zyridium',  name: 'Zyridium',  category: 'mineral', tier: 2, precision: 0,
     description: 'Rare crystalline mineral required for advanced components.' },
   { id: 'megacite',  name: 'Megacite',  category: 'mineral', tier: 2, precision: 0,
@@ -60,6 +64,46 @@ const RESOURCES: ResourceDefinition[] = [
     description: 'Core ore-extraction module. Increases yield and reduces cycle time.' },
   { id: 'shield-emitter',  name: 'Shield Emitter',  category: 'component', tier: 3, precision: 0,
     description: 'Defensive shield projector for combat-capable vessels.' },
+  { id: 'armor-honeycomb', name: 'Armor Honeycomb', category: 'component', tier: 3, precision: 0,
+    description: 'Layered impact-absorption mesh used in cruiser armor bands and defensive fittings.' },
+  { id: 'reactor-lattice', name: 'Reactor Lattice', category: 'component', tier: 3, precision: 0,
+    description: 'Dense power-distribution frame for cruiser reactors and high-draw combat modules.' },
+  { id: 'targeting-bus',   name: 'Targeting Bus',   category: 'component', tier: 3, precision: 0,
+    description: 'Signal-routing backbone used by cruiser-grade fire control and sensor packages.' },
+
+  // ── Manufactured Modules (Tier 3) ────────────────────────────────────────
+  { id: 'mining-laser-i',       name: 'Mining Laser I',         category: 'module', tier: 3, precision: 0,
+    description: 'Standard mining laser fitting for active extraction ships.' },
+  { id: 'mining-laser-ii',      name: 'Mining Laser II',        category: 'module', tier: 3, precision: 0,
+    description: 'Improved mining laser with stronger extraction throughput.' },
+  { id: 'salvager-i',           name: 'Salvager I',             category: 'module', tier: 3, precision: 0,
+    description: 'Utility salvager used to recover scrap and bounty-bearing debris.' },
+  { id: 'missile-launcher-i',   name: 'Missile Launcher I',     category: 'module', tier: 3, precision: 0,
+    description: 'Baseline light missile rack for frigate and destroyer hulls.' },
+  { id: 'shield-extender-i',    name: 'Shield Extender I',      category: 'module', tier: 3, precision: 0,
+    description: 'Defensive shield buffer fitting for combat hulls.' },
+  { id: 'warp-scrambler-i',     name: 'Warp Scrambler I',       category: 'module', tier: 3, precision: 0,
+    description: 'Short-range interdiction package that helps pin hostile targets.' },
+  { id: 'survey-scanner-i',     name: 'Survey Scanner I',       category: 'module', tier: 3, precision: 0,
+    description: 'Survey scanner that improves live belt composition reads.' },
+  { id: 'cargo-scanner-i',      name: 'Cargo Scanner I',        category: 'module', tier: 3, precision: 0,
+    description: 'Utility scanner for inspecting in-system cargo manifests.' },
+  { id: 'scan-pinpointing-i',   name: 'Scan Pinpointing Array I', category: 'module', tier: 3, precision: 0,
+    description: 'Focused scan-array fitting that tightens anomaly triangulation.' },
+  { id: 'warp-tuner-i',         name: 'Warp Tuner I',           category: 'module', tier: 3, precision: 0,
+    description: 'Transit-stability package that improves inter-system warp tempo.' },
+  { id: 'tracking-computer-i',  name: 'Tracking Computer I',    category: 'module', tier: 3, precision: 0,
+    description: 'Cruiser-grade fire-control computer that improves target solutions.' },
+  { id: 'tracking-computer-ii', name: 'Tracking Computer II',   category: 'module', tier: 3, precision: 0,
+    description: 'Enhanced tracking computer with heavier reactor and signal-bus demands.' },
+  { id: 'cargo-expander-i',     name: 'Cargo Expander I',       category: 'module', tier: 3, precision: 0,
+    description: 'Cargo-expansion fitting for industrial hulls and support ships.' },
+  { id: 'cargo-expander-ii',    name: 'Cargo Expander II',      category: 'module', tier: 3, precision: 0,
+    description: 'Higher-capacity cargo expander for dedicated logistics hulls.' },
+  { id: 'mining-upgrade-i',     name: 'Mining Upgrade I',       category: 'module', tier: 3, precision: 0,
+    description: 'Passive mining optimization fitting for extraction wings.' },
+  { id: 'hull-reinforcement-i', name: 'Hull Reinforcement I',   category: 'module', tier: 3, precision: 0,
+    description: 'Hull-bracing package that increases survivability under fire.' },
 
   // ── Advanced Minerals (Tier 2 — nullsec sources) ─────────────────────────
   { id: 'morphite',  name: 'Morphite',  category: 'mineral', tier: 2, precision: 0,
@@ -96,6 +140,8 @@ const RESOURCES: ResourceDefinition[] = [
     description: 'Industrial transport hull with expanded cargo hold for bulk logistics.' },
   { id: 'ship-destroyer',      name: 'Destroyer',      category: 'ship', tier: 4, precision: 0,
     description: 'Combat-focused multi-launcher hull bridging frigates and cruisers.' },
+  { id: 'ship-cruiser',        name: 'Cruiser',        category: 'ship', tier: 4, precision: 0,
+    description: 'Medium combat hull with cruiser-grade reactor, armor grid, and targeting systems.' },
   { id: 'ship-exhumer',        name: 'Exhumer',        category: 'ship', tier: 4, precision: 0,
     description: 'Advanced mining barge with the highest ore yield per cycle in its class.' },
 
@@ -122,14 +168,29 @@ for (const r of RESOURCES) {
 
 export const ORE_IDS = [
   'ferrock', 'corite', 'silisite', 'platonite',
-  'darkstone', 'hematite', 'voidite',
+  'darkstone', 'hematite', 'voidite', 'ionite',
   'arkonite', 'crokitite',
 ];
 
 export const MINERAL_IDS = [
   'ferrite', 'silite', 'vexirite', 'isorium',
-  'noxium', 'zyridium', 'megacite', 'voidsteel',
+  'noxium', 'fluxite', 'zyridium', 'megacite', 'voidsteel',
   'morphite', 'zydrine',
+];
+
+export const COMPONENT_RESOURCE_IDS = [
+  'hull-plate', 'thruster-node', 'condenser-coil',
+  'sensor-cluster', 'mining-laser', 'shield-emitter',
+  'armor-honeycomb', 'reactor-lattice', 'targeting-bus',
+  'advanced-hull-plate', 'advanced-thruster-node', 'advanced-condenser-coil',
+  'pos-core',
+];
+
+export const MODULE_RESOURCE_IDS = [
+  'mining-laser-i', 'mining-laser-ii', 'salvager-i', 'missile-launcher-i',
+  'shield-extender-i', 'warp-scrambler-i', 'survey-scanner-i', 'cargo-scanner-i',
+  'scan-pinpointing-i', 'warp-tuner-i', 'tracking-computer-i', 'tracking-computer-ii',
+  'cargo-expander-i', 'cargo-expander-ii', 'mining-upgrade-i', 'hull-reinforcement-i',
 ];
 
 export const DATACORE_IDS = [
@@ -138,7 +199,7 @@ export const DATACORE_IDS = [
 
 export const SHIP_RESOURCE_IDS = [
   'ship-shuttle', 'ship-frigate', 'ship-mining-frigate',
-  'ship-hauler', 'ship-destroyer', 'ship-exhumer',
+  'ship-hauler', 'ship-destroyer', 'ship-cruiser', 'ship-exhumer',
   'ship-assault-frigate', 'ship-covert-ops', 'ship-command-destroyer',
 ];
 

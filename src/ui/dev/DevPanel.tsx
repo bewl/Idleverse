@@ -23,6 +23,8 @@ import {
   RESOURCE_REGISTRY,
   ORE_IDS,
   MINERAL_IDS,
+  COMPONENT_RESOURCE_IDS,
+  MODULE_RESOURCE_IDS,
   SHIP_RESOURCE_IDS,
 } from '@/game/resources/resourceRegistry';
 import {
@@ -40,10 +42,7 @@ import type { FactionId } from '@/types/faction.types';
 
 // ─── Static data ────────────────────────────────────────────────────────────
 
-const COMPONENT_IDS = [
-  'hull-plate', 'thruster-node', 'condenser-coil',
-  'sensor-cluster', 'mining-laser', 'shield-emitter',
-];
+const COMPONENT_IDS = COMPONENT_RESOURCE_IDS;
 
 const ALL_SYSTEM_UNLOCKS = [
   'system-mining', 'system-skills', 'system-manufacturing',
@@ -52,12 +51,12 @@ const ALL_SYSTEM_UNLOCKS = [
 
 const ALL_BELT_UNLOCKS = [
   'belt-ferrock', 'belt-corite', 'belt-silisite', 'belt-platonite',
-  'belt-darkstone', 'belt-hematite', 'belt-voidite', 'belt-arkonite', 'belt-crokitite',
+  'belt-darkstone', 'belt-hematite', 'belt-voidite', 'belt-ionite', 'belt-arkonite', 'belt-crokitite',
 ];
 
 const ALL_RECIPE_UNLOCKS = [
   'recipe-ship-shuttle', 'recipe-ship-frigate', 'recipe-ship-mining-frigate',
-  'recipe-ship-hauler', 'recipe-ship-destroyer', 'recipe-ship-exhumer',
+  'recipe-ship-hauler', 'recipe-ship-destroyer', 'recipe-ship-cruiser', 'recipe-ship-exhumer',
 ];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -272,6 +271,9 @@ function ResourcesTab() {
       [...ORE_IDS, ...MINERAL_IDS, ...COMPONENT_IDS, ...SHIP_RESOURCE_IDS].forEach(id => {
         r[id] = (r[id] ?? 0) + 50_000;
       });
+      MODULE_RESOURCE_IDS.forEach(id => {
+        r[id] = (r[id] ?? 0) + 500;
+      });
       r['credits'] = (r['credits'] ?? 0) + 10_000_000;
       return { state: { ...s.state, resources: r } };
     });
@@ -304,7 +306,7 @@ function ResourcesTab() {
       {['ferrock', 'corite', 'silisite', 'platonite'].map(id => <ResourceRow key={id} id={id} />)}
 
       <SectionLabel>Lowsec Ores</SectionLabel>
-      {['darkstone', 'hematite', 'voidite'].map(id => <ResourceRow key={id} id={id} />)}
+      {['darkstone', 'hematite', 'voidite', 'ionite'].map(id => <ResourceRow key={id} id={id} />)}
 
       <SectionLabel>Nullsec Ores</SectionLabel>
       {['arkonite', 'crokitite'].map(id => <ResourceRow key={id} id={id} />)}
@@ -314,6 +316,9 @@ function ResourcesTab() {
 
       <SectionLabel>Components</SectionLabel>
       {COMPONENT_IDS.map(id => <ResourceRow key={id} id={id} />)}
+
+      <SectionLabel>Modules</SectionLabel>
+      {MODULE_RESOURCE_IDS.map(id => <ResourceRow key={id} id={id} />)}
 
       <SectionLabel>Ships</SectionLabel>
       {SHIP_RESOURCE_IDS.map(id => <ResourceRow key={id} id={id} />)}

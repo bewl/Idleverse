@@ -1,6 +1,7 @@
-import type { GameState, ShipInstance, FleetActivity, PlayerFleet, ShipRole, FleetDoctrine } from '@/types/game.types';
+import type { GameState, ShipInstance, FleetActivity, PlayerFleet, ShipRole, FleetDoctrine, FleetWing } from '@/types/game.types';
 import { HULL_DEFINITIONS, MODULE_DEFINITIONS, DOCTRINE_DEFINITIONS } from './fleet.config';
-import { getPilotMiningBonus, getPilotCombatBonus, getPilotHaulingBonus, getPilotMoraleMultiplier, canPilotFlyShip } from './pilot.logic';
+import { getPilotMiningBonus, getPilotCombatBonus, getPilotHaulingBonus, getPilotMoraleMultiplier, getPilotWarpSpeedBonus, canPilotFlyShip } from './pilot.logic';
+import { getCombinedCommanderBonus } from './commander.logic';
 import { BASE_SHIP_CARGO_M3 } from '@/game/balance/constants';
 import { ORE_BELTS } from '@/game/systems/mining/mining.config';
 
@@ -98,6 +99,11 @@ export function recallShip(state: GameState, shipId: string): GameState | null {
   const newResources = { ...state.resources };
   if (hull) {
     newResources[hull.resourceId] = (newResources[hull.resourceId] ?? 0) + 1;
+  }
+  for (const slotType of ['high', 'mid', 'low'] as const) {
+    for (const moduleId of ship.fittedModules[slotType]) {
+      newResources[moduleId] = (newResources[moduleId] ?? 0) + 1;
+    }
   }
 
   return {
@@ -236,6 +242,9 @@ export function fitModule(
   const mod = MODULE_DEFINITIONS[moduleId];
   if (!mod || mod.slotType !== slotType) return null;
 
+  const available = state.resources[moduleId] ?? 0;
+  if (available < 1) return null;
+
   const currentSlots = ship.fittedModules[slotType];
   if (currentSlots.length >= hull.moduleSlots[slotType]) return null;
 
@@ -246,6 +255,10 @@ export function fitModule(
 
   return {
     ...state,
+    resources: {
+      ...state.resources,
+      [moduleId]: available - 1,
+    },
     systems: {
       ...state.systems,
       fleet: {
@@ -272,10 +285,15 @@ export function removeModule(
   const currentSlots = ship.fittedModules[slotType];
   if (index < 0 || index >= currentSlots.length) return null;
 
+  const removedModuleId = currentSlots[index];
   const newSlots = currentSlots.filter((_, i) => i !== index);
 
   return {
     ...state,
+    resources: {
+      ...state.resources,
+      [removedModuleId]: (state.resources[removedModuleId] ?? 0) + 1,
+    },
     systems: {
       ...state.systems,
       fleet: {
@@ -354,6 +372,63 @@ export function getFleetHaulingBonus(state: GameState): number {
     bonus += haulingBonus + cargoMult * 0.05;
   }
   return bonus;
+}
+
+export function getShipModuleEffectTotal(
+  ship: ShipInstance | undefined,
+  effectKey: string,
+): number {
+  if (!ship) return 0;
+  let total = 0;
+  for (const slotType of ['high', 'mid', 'low'] as const) {
+    for (const moduleId of ship.fittedModules[slotType]) {
+      total += MODULE_DEFINITIONS[moduleId]?.effects[effectKey] ?? 0;
+    }
+  }
+  return total;
+}
+
+export function getShipTransitWarpBonus(
+  state: GameState,
+  ship: ShipInstance | undefined,
+  fleet: PlayerFleet | null = null,
+  wing: FleetWing | null = null,
+): number {
+  if (!ship) return 0;
+  const hullBonus = HULL_DEFINITIONS[ship.shipDefinitionId]?.warpSpeedBonus ?? 0;
+  const moduleBonus = getShipModuleEffectTotal(ship, 'warp-speed');
+  const pilotBonus = ship.assignedPilotId
+    ? getPilotWarpSpeedBonus(state.systems.fleet.pilots[ship.assignedPilotId] ?? null as never)
+    : 0;
+  const commanderBonus = fleet
+    ? getCombinedCommanderBonus(state.systems.fleet.pilots, fleet, wing, 'warp-speed')
+    : 0;
+  return hullBonus + moduleBonus + pilotBonus + commanderBonus;
+}
+
+export function getShipTransitWarpMultiplier(
+  state: GameState,
+  ship: ShipInstance | undefined,
+  fleet: PlayerFleet | null = null,
+  wing: FleetWing | null = null,
+): number {
+  return 1 + getShipTransitWarpBonus(state, ship, fleet, wing);
+}
+
+export function getFleetTransitWarpMultiplier(
+  state: GameState,
+  shipIds: string[],
+  fleet: PlayerFleet | null = null,
+): number {
+  const activeShips = shipIds
+    .map(shipId => state.systems.fleet.ships[shipId])
+    .filter(Boolean) as ShipInstance[];
+  if (activeShips.length === 0) return 1;
+  const averageBonus = activeShips.reduce(
+    (sum, ship) => sum + getShipTransitWarpBonus(state, ship, fleet, null),
+    0,
+  ) / activeShips.length;
+  return 1 + averageBonus;
 }
 
 /**
