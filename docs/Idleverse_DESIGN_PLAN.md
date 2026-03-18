@@ -77,6 +77,97 @@ One paragraph describing what this plan is trying to achieve and why it matters.
 
 ---
 
+# Initiative — Activity Bar Cleanup
+> **Status:** ✅ Shipped — March 2026
+> **Last updated:** March 2026
+> **Depends on:** Existing panel telemetry, `ActivityBar`, `FlairProgressBar`, and command-deck card patterns
+
+## Goal
+
+Retire the `ActivityBar` component so operational panels emphasize concrete numbers, ETA, queue pressure, throughput, and explicit state copy instead of abstract activity strips.
+
+## Scope
+
+- Remove `ActivityBar` completely from the UI.
+- Remove redundant activity strips from cards that already surface real completion progress or ETA.
+- Keep richer `FlairProgressBar` treatment only on high-value completion progress surfaces.
+- Preserve small status dots for now.
+- Explicitly out of scope: a broad pulse-dot cleanup or redesigning every progress component in one pass.
+
+## Implementation Outline
+
+1. Remove the shared `ActivityBar` primitive and replace its remaining panel usages with direct KPI rows, concise state copy, or nothing at all when the surrounding card already carries the signal.
+2. Strip duplicate activity surfaces from manufacturing, reprocessing, mining, overview, market, fleet, and system panels.
+3. Keep only explicit progress bars where the player is tracking a real completion target.
+
+## Risks / Open Questions
+
+- Without abstract activity strips, card copy and KPI ordering have to keep active vs idle states obvious.
+- A later pass may still trim some explanatory copy now that the bars are gone.
+
+## What Was Built
+
+- Retired `src/ui/effects/ActivityBar.tsx` entirely.
+- Removed activity-strip usage from manufacturing, reprocessing, mining, overview, market, fleet, and system panels.
+- Kept true completion progress bars only on surfaces where the player is watching an actual timer or completion percentage.
+
+## Files Likely Affected
+
+- `src/ui/panels/ManufacturingPanel.tsx`
+- `src/ui/panels/ReprocessingPanel.tsx`
+- `src/ui/panels/OverviewPanel.tsx`
+- `src/ui/panels/FleetPanel.tsx`
+- `src/ui/panels/MiningPanel.tsx`
+- `src/ui/panels/MarketPanel.tsx`
+- `docs/Idleverse_AI_Architecture.md`
+- `docs/Idleverse_DESIGN_PLAN.md`
+
+---
+
+# Initiative — Reward Spikes Framework
+> **Status:** Active
+> **Last updated:** March 2026
+> **Depends on:** Existing combat loot, anomaly rewards, save migration pipeline, notification shell
+
+## Goal
+
+Add a reusable reward architecture that creates stronger dopamine hits without breaking Idleverse's idle pacing. The first implementation slice introduces a save-backed premium item inventory, a shared reward resolver, and combat-driven chase drops while keeping normal bounty and resource loot intact.
+
+## Scope
+
+- Add a canonical reward inventory and reward history model to `GameState.systems`.
+- Add a shared reward registry and resolution engine under `src/game/systems/rewards/`.
+- Integrate fleet combat with premium item drops and reward-history recording.
+- Keep normal resource loot and credits in the existing economy flow.
+- Explicitly out of scope: mining spike rewards, trading premium items, hard inventory caps, and deep affix/crafting systems.
+
+## Implementation Outline
+
+1. Extend save-backed state with inventory, reward history, discovery tracking, and migration support.
+2. Add data-driven reward definitions plus a shared resolver that can emit both resources and premium items.
+3. Route combat victory rewards through that shared resolver, then follow with mining and UI celebration slices.
+
+## Risks / Open Questions
+
+- Existing doctrine and HQ loot multipliers already affect resource loot, so premium-drop scaling must stay conservative and separate.
+- Inventory UX is not shipped in this slice yet, so player-facing surfacing depends on later UI work.
+- Mining still lacks jackpot logic until the next implementation pass lands.
+
+## Files Likely Affected
+
+- `src/types/game.types.ts`
+- `src/types/combat.types.ts`
+- `src/stores/initialState.ts`
+- `src/game/persistence/saveLoad.ts`
+- `src/game/systems/rewards/`
+- `src/game/systems/combat/combat.logic.ts`
+- `docs/Idleverse_SYSTEM_BLUEPRINTS.md`
+- `docs/Idleverse_AI_Architecture.md`
+- `docs/Idleverse_BALANCE_FORMULAS.md`
+- `docs/Idleverse_RESOURCE_REGISTRY.md`
+
+---
+
 # Initiative — Layered Content Expansion
 > **Status:** Active
 > **Last updated:** March 2026
@@ -350,35 +441,55 @@ Refresh the Fleet operations tab so it reads like a compact staffing and deploym
 # Initiative — System Panel Refresh
 > **Status:** Active
 > **Last updated:** March 2026
-> **Depends on:** Existing SystemPanel orrery, anomaly tab, station/outpost controls, current UI primitives
+> **Depends on:** Existing anomaly tab, station/outpost controls, mining assignment flow, and StarMap camera patterns
 
 ## Goal
 
-Refresh the SystemPanel so the command layer around the orrery feels as deliberate as the newer operations surfaces. The orrery and system logic stay intact; the focus is clearer system-level telemetry, better control hierarchy, and a stronger sidebar intel frame.
+Replace the old orrery presentation with a more spatial, camera-driven system view that feels closer to the galaxy map while preserving the SystemPanel's operational role. The focus is a readable 3D scene, constrained orbit camera, stronger hover inspection, and a cleaner adaptive inspector without disturbing mining, anomaly, docking, or tutorial flows.
 
 ## Scope
 
-- Add a compact system command deck covering fleets, mining-belt activity, anomaly presence, and corp foothold in the current system.
-- Tighten the sidebar with a clearer selected-body or system-intel summary.
-- Preserve the current orrery, body selection, station controls, and anomaly interactions.
-- Explicitly out of scope: orrery rendering changes, mining logic changes, or anomaly-system redesign.
+- Replace the orrery with a camera-driven 3D system scene that supports orbit, pan, zoom, and focus nudges.
+- Add hover-rich object inspection for bodies, fleets, and key structures directly in the scene.
+- Replace the heavier right-side rail with a single adaptive inspector that reacts to hover and explicit selection.
+- Preserve body selection, mining assignment, fleet scanning, station/outpost controls, warp blocking, and anomaly interactions.
+- Explicitly out of scope: mining logic changes, anomaly-system redesign, literal ship/station 3D models, or a WebGL migration.
 
 ## Implementation Outline
 
-1. Add a top system command deck with normalized activity feedback.
-2. Add a compact sidebar intel summary to improve orientation when switching between bodies and tabs.
-3. Validate that the panel remains readable while keeping the existing inline-style structure stable.
+1. Port the StarMap camera model into a system-scale canvas scene and replace the old orrery rendering path.
+2. Rebuild hover, click, and focus behavior around bodies, fleets, and structures while keeping current operational actions intact.
+3. Convert the right rail into an adaptive inspector and then polish remaining layout and styling debt around the new scene.
 
 ## Risks / Open Questions
 
-- The SystemPanel is still largely inline-styled, so targeted improvements need to avoid turning the file into a half-migrated styling mix.
-- The command deck must not crowd the header and warp banners when several system-state banners are visible at once.
-- A later pass may still want a deeper cleanup of the body-detail section for consistency with newer panel patterns.
+- The SystemPanel is still largely inline-styled, so the scene rewrite can easily leave the file feeling half-modernized unless follow-up cleanup continues.
+- Hover-rich inspection can become noisy if the scene and inspector both compete for attention at once.
+- Structure placement in the new scene is currently representational rather than simulation-accurate; a later pass may want richer structure staging.
+
+## What Was Built
+
+- Added a new `SystemSceneCanvas` rendering path with constrained orbit camera, pan, wheel zoom, and reset behavior.
+- Replaced the orrery tab presentation with a 3D system scene that renders planets, moons, belts, local fleets, and service structures as readable spatial abstractions. Belt presentation now uses a constrained nebulous ribbon pass so asteroid fields read as dust bands instead of transparent orbit rings while remaining easy to hover and select, and projected orbit-path seams now break adaptively in screen space so visibility gaps do not draw stray diagonal lines across the scene.
+- Replaced the old patterned screen-space background scatter with a seeded random starfield in the System view so the backdrop no longer forms accidental dot trails or banding that can be mistaken for scene geometry.
+- Reworked asteroid belts again so the dust uses overlapping nebula-style blobs arranged around the orbit, matching the galaxy-map cloud aesthetic more closely while keeping a separate small-asteroid scatter pass for solid debris.
+- Tuned the belt pass down so cloud contrast stays subtler at rest while asteroid debris is smaller and more abundant, keeping the field readable without overpowering the rest of the system scene.
+- Refined the belt cloud generator again so the ring is built from more numerous, size-varied, overlapping nebula blobs interpolated along the orbit rather than evenly spaced puff clusters, which helps the dust field blend together into a continuous ring.
+- Added hover cards in the scene and converted the right side into an adaptive inspector that can summarize the system, preview hovered targets, and fully inspect selected bodies or pinned fleets.
+- Collapsed the old top-of-panel command metric strip into compact map overlays and tab-row intel so the System view gives more vertical priority to the actual scene while keeping fleet, belt, anomaly, and corp-presence context visible.
+- Stabilized celestial placement in the System view so hovered and selected bodies do not keep drifting under the camera while the player is inspecting them.
+- Added tactical mining-link overlays in the System view so fleets in-system show explicit connectors to the belts they are actively mining, making remote extraction assignments legible at a glance.
+- Upgraded those mining-link overlays so each connector is now wing-colored and carries animated activity pulses, letting the scene communicate both which wing owns a belt assignment and that the extraction lane is live.
+- Corrected mining-link targeting so ship `assignedBeltId` resource assignments resolve onto the rendered asteroid-belt body in-system, which keeps starter-state and legacy mining overlays visible in New Aether as well as in later wing-driven setups.
+- Corrected mining-link belt anchoring so connectors resolve to the nearest visible point on the belt ring instead of the ring centroid, preventing links from visually pointing at the central star.
+- Replaced that camera-dependent contact point with a deterministic world-space belt anchor per mining lane so each connector keeps pointing at the same belt location while the player pans or rotates the scene.
+- Preserved the existing anomaly tab, mining assignment detail surface, fleet scanning controls, and station/outpost action flows while the presentation layer changed.
 
 ## Files Likely Affected
 
 - `src/ui/panels/SystemPanel.tsx`
-- `src/ui/effects/ActivityBar.tsx`
+- `src/ui/panels/SystemSceneCanvas.tsx`
+- `docs/Idleverse_SYSTEM_BLUEPRINTS.md`
 - `docs/Idleverse_DESIGN_PLAN.md`
 
 ---
@@ -410,6 +521,13 @@ Bring the remaining FleetPanel tabs into the same compact operational-console la
 - Fleet cards already carry a large amount of control density, so the new telemetry layer must not bury existing actions.
 - Pilot and ship tabs can become repetitive at higher counts, so scan hierarchy matters more than raw data quantity.
 - If the panel continues growing, a later pass may still want filtering or grouping rather than more inline telemetry.
+
+## Recent Shipped Slice
+
+- The Fleets tab summary deck and expanded fleet headers were tightened again so command telemetry consumes less vertical space before the player reaches storage, activity, wings, and commander controls.
+- Shared fleet metric and section-card styling in `FleetPanel.tsx` was compacted to reduce repeated padding and oversized card chrome across fleet-facing surfaces.
+- Fleet cards now surface a visible delete action in the header and route it through an inline review state that warns when staffed wings will be dissolved, lists the affected wing assignments, and blocks deletion while hauling wings are still dispatched.
+- Reserve hull assignment in the Fleets and Ships tabs now opens a shared click-to-open fleet flyout instead of auto-creating a new fleet or relying on a hover tooltip. The first menu level lists eligible local fleets, the adjacent flyout level exposes that fleet's wings plus a reserve-hull fallback, and new-fleet creation remains an explicit action inside the opened menu. The menu is now viewport-aware as well, so long fleet rosters scroll inside the panel and the wing flyout repositions upward instead of being cut off at the bottom edge.
 
 ## Files Likely Affected
 
@@ -1139,7 +1257,7 @@ All 8 targeted panels renovated with NavTag entity links, data density additions
 
 # ⚡ FC-3 — Fleet Wings
 
-> **Status:** Partially shipped — core wing systems and escort-aware hauling shipped March 2026; detached combat follow-ons remain.
+> **Status:** Partially shipped — core wing systems, escort-aware hauling, and Fleet Wings master-detail UI shipped March 2026; detached combat follow-ons remain.
 > **Priority:** High — this is active follow-on work on top of an already-live wing model.
 
 > **Depends on:** FC-1 (fleet cargo model), FC-2 (commander skills feed wing-level bonuses).
@@ -1195,7 +1313,9 @@ New file: `src/game/systems/fleet/wings.logic.ts`
 
 - `src/ui/panels/FleetPanel.tsx`: "Fleet Wings" collapsible section in expanded fleet card.
   - "+ Create Wing" buttons per wing type.
-  - Each wing: compact expandable row with inline rename, wing commander selector, ship assignment dropdowns, escort assignment dropdown, and per-wing dispatch button for hauling wings.
+  - Each wing now appears in a compact selectable master list that keeps readiness, posture, transit, and commander context visible for scanning.
+  - The selected wing opens in a dedicated detail pane for rename, wing commander selection, escort assignment, ship assignment, and hauling dispatch controls.
+  - `panelStates.fleet.selectedWingId` persists the inspected wing, while wing focus-target navigation auto-opens the owning fleet and selects that wing in the same detail pane.
   - Hauling wing status chip: `Hauling Wing — 2 ships — 3,400 / 4,000 m³ (85%) → hauling to HQ`.
   - Top cargo module switches to **Hauling Hold** or **Hauling Network** when hauling wings exist and shows aggregate hauling storage.
   - Ships not in any wing shown as "Unassigned" at the bottom.
@@ -1219,6 +1339,8 @@ New file: `src/game/systems/fleet/wings.logic.ts`
 | `src/stores/gameStore.ts` | `createFleetWing`, `renameFleetWing`, `deleteFleetWing`, `designateWingCommander`, `assignShipToWing`, `setWingEscort`, targeted hauling-wing dispatch |
 | `src/game/systems/fleet/wings.logic.ts` | *(new)* wing capacity + dispatch logic |
 | `src/game/core/tickRunner.ts` | Multi-hauler cargo distribution, per-wing auto-haul dispatch, HQ arrival, and return processing |
+| `src/stores/uiStore.ts` | Persisted Fleet panel selected-wing context for the master-detail UI |
+| `src/ui/panels/FleetPanel.tsx` | Fleet Wings master list plus dedicated selected-wing detail pane |
 | `src/game/systems/fleet/fleet.tick.ts` | Wing-command training eligibility and wing-scope mining bonuses |
 | `src/game/systems/fleet/exploration.logic.ts` | Wing-scope recon bonus propagation for scan strength |
 | `src/ui/panels/FleetPanel.tsx` | Wing management section with compact expandable rows, commander assignment, and per-wing dispatch |
@@ -1626,14 +1748,15 @@ Add a player-facing command inbox that preserves important gameplay events after
 ## Implementation Outline
 
 1. Add the canonical notification schema, save migration, and tick-result event aggregation so notifications are produced centrally rather than ad hoc in UI code.
-2. Add UI-only drawer and toast state in `uiStore`, then mount a top-bar inbox affordance, drawer preview, toast stack, and full Inbox panel from `GameLayout`.
-3. Tune event coverage and toast noise after the first live slice ships, using the Inbox panel as the durable audit trail for events that should not rely on transient HUD messaging.
+2. Add UI-only drawer and toast state in `uiStore`, then mount a top-bar inbox affordance, scrollable drawer, toast stack, full Inbox panel, and shared nav entry from `GameLayout`.
+3. Tune event coverage and toast noise after the first live slice ships, using the Inbox panel as the durable audit trail for events that should not rely on transient HUD messaging. Current tuning suppresses mining auto-haul arrival spam while keeping manually initiated fleet travel visible.
 
 ## Risks / Open Questions
 
 - Toast noise can get out of hand quickly if too many medium-value events are surfaced as popups instead of passive inbox entries.
 - Notification focus targets need to stay aligned with panel routing rules or deep links will rot as panels evolve.
 - Archived versus unread behavior is intentionally lightweight in the first slice; later filtering or pinning may be warranted if the event volume grows.
+- Compact feed density and a scrollable drawer solve the first usability pass, but a later slice may still want search or stronger nav-badge treatment if command traffic volume climbs further.
 
 ## Files Likely Affected
 

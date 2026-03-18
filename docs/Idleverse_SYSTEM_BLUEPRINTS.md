@@ -35,8 +35,8 @@ MiningState {
 
 - **10 ore belts** across 3 security tiers (highsec ×4, lowsec ×4, nullsec ×2)
 - Lowsec progression now branches across Advanced Mining I-II and Mining Barge I; nullsec belts require Mining Barge I or Astrogeology V depending on deposit class
-- **Belt skill gates**: `ORE_BELTS[beltId].requiredSkill` is checked in `setShipActivity()` before a ship can be assigned to mine a belt; if the corp's skill level is below the required minimum the assignment is rejected. The `SystemPanel` renders locked belt cards with a 🔒 disabled button and a `GameTooltip` displaying the required skill name and level; unlocked belts surface live fleet-assignment status rather than a legacy mining toggle.
-- The `SystemPanel` is the operational assignment surface for mining: each unlocked belt card can now directly assign a configured mining wing in the current system to that belt, pushing the wing's ships into `activity: 'mining'` with the selected `assignedBeltId`.
+- **Belt skill gates**: `ORE_BELTS[beltId].requiredSkill` is checked in `setShipActivity()` before a ship can be assigned to mine a belt; if the corp's skill level is below the required minimum the assignment is rejected. The `SystemPanel` now surfaces those locked belts inside the adaptive inspector with a 🔒 disabled button and a `GameTooltip` showing the required skill name and level, while unlocked belts expose live assignment status instead of a legacy mining toggle.
+- The `SystemPanel` is the operational assignment surface for mining: the main view is now a camera-driven 3D system scene with constrained orbit, pan, zoom, and hover inspection, and selecting a belt routes the player into the inspector detail that can assign a configured mining wing in the current system to that belt, pushing the wing's ships into `activity: 'mining'` with the selected `assignedBeltId`. Asteroid belts render as a projected nebulous ribbon instead of a hard orbit ring so the belt reads as a local dust field while still remaining selectable.
 - The `MiningPanel` now groups active operations by mining wing rather than showing a single fleet-level cargo bar, so belt assignments and storage fill are presented in the same wing section. Storage is framed everywhere as a `Storage Target`: either shared fleet storage when no hauling wing exists, a single hauling-wing cargo hold, or a multi-wing hauling network.
 - Each belt has a `poolSize` — it depletes as ore is extracted, then respawns
 - Ore accumulates in the storage target for the fleet: `fleet.cargoHold` for legacy fleets, or `haulingWing.cargoHold` when a hauling wing exists. The active hold has a capacity derived from assigned hull cargo.
@@ -221,11 +221,14 @@ systems via BFS shortest-path or Dijkstra least-cost routing.
 - Fleet `fleetOrder` drives movement; `maxJumpRangeLY` constrains which hops are valid, while each active leg stores departure time plus computed duration so ETA/progress can be rendered consistently in simulation and UI
 - Fleet and wing warp timing now composes four live speed sources: corp `warp-speed`, hull warp bonus, assigned-pilot Navigation skill, and fitted/commander travel bonuses (`warp-tuner-i`, `logistics-command`)
 - RoutePlanner in StarMapPanel: calculates and dispatches multi-hop routes
+- RoutePlanner destination selection is now navigator-oriented instead of a flat system list: the destination picker supports sort modes such as nearest-first, alphabetical, security-tier, belt-rich, and hostile-first ordering, plus filters for security tier, threat profile, visited-only, direct-reachable, stations, asteroid belts, and same-region routing. The dropdown also exposes a hover-detail intel pane so players can inspect distance, security, threat count, belts, station presence, and travel posture before selecting a target.
+- StarMapPanel now persists route-planner context across panel navigation, including the selected fleet, route endpoints, and route filter. When the map remounts, it reconstructs the visible route overlay from the fleet's live `fleetOrder` so in-transit fleets still show their travel path and animated position.
 - While the Route tab is open, clicking a system directly on the map now sets the route destination in-place instead of kicking the user back to Intel view
 - Changing the route origin, destination, or route filter clears the currently rendered route preview so the map never shows a stale path after planner inputs change
 - Fleet-group dispatch now recalculates effective jump range from the fleet's live hull mix before issuing an order and refreshes stale cached range values, so saved fleets cannot silently fail valid routes because of outdated `maxJumpRangeLY` data
 - StarMapPanel right panel: Intel tab (system info, threats) | Route tab (route planning)
 - FleetPanel navigation now surfaces the selected route posture's consequence inline (`Direct`, `Safest`, `No-null`, `High-sec`) so movement policy reads as a tradeoff between speed and exposure instead of a hidden dropdown value
+- FleetPanel whole-fleet movement now uses the same richer destination-selection model as the Star Map route planner. The destination picker keeps nearest-first, alphabetical, security-tier, belt-rich, and hostile-first ordering plus security, threat, visited-only, direct-reachable, station, belt, and same-region filters inside the dropdown itself as toggle chips. Hovering a destination in the dropdown detail pane exposes travel distance, security, threat count, belts, and station presence before issuing a move order.
 - StarMap route summaries now estimate total travel time, average hop time, and route exposure from the solved hop sequence so players can compare fast-vs-safe posture before dispatching a fleet; when a fleet is bound as the route origin, the estimate uses that fleet's live warp profile instead of a generic hull-only assumption
 - Route summaries now surface inline dispatch acceptance/failure messaging so route-planning clicks resolve into a visible fleet-order state instead of a silent no-op when a move is rejected
 - FleetPanel now exposes in-transit destination, next jump, current-leg progress, and aggregate ETA for whole-fleet movement, while dispatched hauling wings surface convoy ETA based on their detached ship orders
@@ -268,6 +271,10 @@ PlayerFleet {
 ## UI Notes
 
 - `ShipCard` now surfaces a `Hull Identity` block with the hull description, warp bonus, slot layout, and a compact summary of currently fitted bonus directions (mining, combat, cargo, scan, warp) so players can read hull tradeoffs before optimizing deeper fitting behavior
+- `FleetPanel` expanded fleet cards now use a command-deck layout instead of a single undifferentiated control slab. Each fleet opens into a command overview header plus distinct section cards for logistics, current activity, wings, commander/doctrine, combat response, navigation, and fleet assembly so movement, combat, and staffing actions read as separate operational areas.
+- Fleet wings inside `FleetPanel` now use a master-detail operations surface instead of nested expandable dashboards. The wing network section itself is collapsible and defaults closed, exposing only a compact network summary until the player chooses to expand it, and the entire section header acts as the expand/collapse target instead of a small toggle button. Once open, the left side becomes a compact wing list with whole-row selection, readiness, posture, transit, and commander context, while the right side becomes a dedicated detail pane for the currently selected wing's profile, command/escort control, live activity, and roster assignment. Wing selection is persisted in Fleet panel UI state so returning to the panel restores the inspected wing, and focused wing navigation routes into that same detail pane rather than relying on row-level expansion.
+- Fleet deletion is surfaced as a visible header action in `FleetPanel` rather than a hidden footer-only control. Choosing it opens an inline review block that explains deletion semantics (the fleet shell is removed, ships remain in-system as idle standalone hulls), warns when staffed wings and their assigned ships will be dissolved, and blocks the confirmation path while hauling wings are still dispatched.
+- Independent hull assignment in `FleetPanel` now uses a click-open flyout menu instead of a tooltip-style popout or implicit fleet creation. Clicking an unassigned hull opens a first-level fleet menu, and moving onto a fleet row opens a second-level wing flyout so the player can choose a reserve join or a specific wing assignment without showing the menu on plain hover. The flyout is viewport-aware: long fleet or wing lists scroll internally and the second-level menu clamps upward when needed so the control never falls off the bottom of the screen.
 
 ## Corp Identity
 
@@ -328,6 +335,7 @@ Each `PlayerFleet` has a legacy `cargoHold: Record<string, number>` for non-wing
 ## Role
 
 Fleets earn ISK bounties and resource loot by engaging NPC pirate groups. Resolution is automatic.
+Combat now also feeds the first-pass premium reward layer: victories can generate chase-item drops that bypass fleet cargo and land directly in the save-backed reward inventory.
 
 ## State
 
@@ -355,6 +363,23 @@ DEFEAT (adjusted < 1.0):
   no loot, no bounty
   fleetDamage = 20% + 30% × (1 − adjusted)
 ```
+
+## Reward Integration
+
+- Resource loot still resolves from the NPC group's `lootTable` and is deposited into `state.resources`.
+- Premium drops now resolve through `src/game/systems/rewards/rewardEngine.ts` using a source ID stamped on generated NPC groups.
+- The first implemented reward sources are faction-and-security-specific combat pools for Syndicate and Veldris pirate groups in lowsec and nullsec.
+- Premium drops are written into `GameState.systems.rewards.inventory` instead of fleet cargo so rare hits are not blocked behind hauling logistics.
+- Every combat reward grant also writes a capped history row to `GameState.systems.rewards.history`, including source, credits earned, resource rewards, and premium item rewards.
+- Existing loot multipliers still scale normal resource loot directly. Premium item-drop chance scales separately and more conservatively so doctrine/HQ bonuses do not double-amplify chase rewards.
+
+## First-Pass Premium Combat Drops
+
+- `Syndicate Signal Fragment` — stackable uncommon collectible from Syndicate combat pools.
+- `Ghost Signal Array` — epic prototype module drop from Syndicate elites.
+- `Veldris Blood Seal` — stackable uncommon collectible from Veldris combat pools.
+- `Marauder Overdrive Injector` — epic prototype module drop from Veldris elites.
+- `Encrypted Doctrine Shard` — rare research collectible shared by the first combat pools.
 
 ## Orders
 
@@ -611,6 +636,9 @@ tolltips, and a consistent visual language of glows, entity tags, and data-rich 
 across all 9 game panels.
 
 ## Components
+
+- `src/ui/panels/SystemPanel.tsx` now uses a camera-driven system view instead of the older orrery treatment. The scene supports constrained orbit camera controls, object hover cards, pinned fleet inspection, and a single adaptive inspector that swaps between system summary, hover preview, and selected-object actions.
+- `src/ui/panels/SystemSceneCanvas.tsx` is the dedicated canvas renderer for the system view. It reuses the galaxy map's camera vocabulary at system scale and renders readable spatial abstractions for bodies, ore belts, fleets, and service structures rather than purely flat orbital rings.
 
 ### `useUiStore` — UI State Store
 
@@ -959,13 +987,13 @@ Fleet Wings appears as a dedicated section in each expanded fleet card:
 
 - Create buttons for all five wing types.
 - Newly created fleets are seeded with an initial populated wing so ships are operational immediately.
-- Per-wing expandable rows showing name, type badge, ship count, hauling fill state, and dispatch status.
+- Per-wing master rows showing name, type badge, ship count, hauling fill state, route posture, and dispatch status.
+- A dedicated selected-wing detail pane exposes rename, commander assignment, escort assignment, dispatch, and roster-management controls for one wing at a time.
 - Hauling wing rows now surface route posture directly so players can tell whether a trip is running under escort cover or safe-route protocol.
 - Fleet and Overview summaries surface live escort-response state when a detached convoy is actively skirmishing in hostile space.
-- Inline wing commander selector sourced from pilots whose ships are inside that wing.
-- Inline rename support inside the expanded wing row.
+- Wing selection persists through `panelStates.fleet.selectedWingId`, while `focusTarget` still provides transient tutorial/navigation emphasis.
 - The top storage module switches from fleet Cargo Hold to Hauling Hold or Hauling Network when hauling wings exist.
-- Manual dispatch is available per hauling wing row; single-hauler fleets also keep the top-card shortcut.
+- Manual dispatch is available from the selected-wing detail pane; single-hauler fleets also keep the top-card shortcut.
 - Escort selector populated from the fleet's combat wings.
 - Ship assignment selector for every ship in the fleet.
 - Unassigned ship chips at the bottom for quick visual auditing.
@@ -1002,7 +1030,7 @@ Mutation safety rules:
 | `src/game/core/tickRunner.ts` | Multi-hauler storage distribution plus wing-aware dispatch, HQ arrival, and return processing |
 | `src/game/systems/fleet/fleet.tick.ts` | Mining yield and training integration for fleet + wing commanders |
 | `src/game/systems/fleet/exploration.logic.ts` | Scan strength integration for fleet + wing commanders |
-| `src/ui/panels/FleetPanel.tsx` | Fleet Wings management UI with expandable rows, inline rename, commander selectors, and per-wing dispatch |
+| `src/ui/panels/FleetPanel.tsx` | Fleet Wings management UI with master-detail wing selection, a dedicated detail pane, persisted selected-wing context, and per-wing dispatch |
 | `src/game/persistence/saveLoad.ts` | Save migration for missing `wings` arrays and wing commander defaults |
 
 ---
@@ -1050,7 +1078,7 @@ NotificationEntry {
 }
 ```
 
-Durable entries live in save-backed `GameState.notifications.entries`. UI-only state for the top-bar drawer, toast queue, and Inbox view filters lives in `useUiStore`.
+ Durable entries live in save-backed `GameState.notifications.entries`. UI-only state for the top-bar drawer, toast queue, Inbox view filters, and current Inbox selection lives in `useUiStore`.
 
 ## Mechanics
 
@@ -1059,22 +1087,25 @@ Durable entries live in save-backed `GameState.notifications.entries`. UI-only s
 - `notification.logic.ts` converts state deltas and tick-result telemetry into normalized `NotificationEntry` records, caps the rolling history, and decides which entries should also surface as toasts.
 - Toasts are transient: they are stored only in `uiStore.activeToasts`, auto-expire, and can be dismissed manually.
 - Toast dismissal is visually softened in `NotificationToastStack`: entries stay mounted briefly in a local exit state so auto-expiring or manually dismissed toasts fade out instead of disappearing abruptly.
-- The Inbox drawer is a top-bar triage surface for rapid review; the full Inbox panel is the durable history surface with unread, alert, message, and archived filtering.
+- The Inbox drawer is a top-bar triage surface for rapid review; it now exposes a bounded scrollable feed instead of a fixed six-item preview so recent command traffic remains accessible without leaving the current panel.
+- The full Inbox panel is the durable history surface with unread, alert, message, and archived filtering. Its left feed now uses denser summary rows, while the detail pane preserves the full body and metadata for the selected entry.
+- Active notification rows and detail actions use `Dismiss` wording, but continue to map to the lightweight archive/restore model backed by `archivedAt`.
 - Notifications can deep-link back into the relevant panel or entity through `focusTarget`, reusing the same navigation model as `NavTag` and breadcrumb history.
+- Fleet-arrival notifications intentionally suppress whole-fleet mining auto-haul and return-trip arrivals by checking `miningOriginSystemId`, while user-initiated travel and other logistics updates still flow into the Inbox.
 
 ## Phase 1 Event Coverage
 
 - Progression: skill advances, unlock deltas, recruitment directives
 - Industry: manufacturing completions, blueprint research completion, blueprint copy completion, reprocessing batch completion
-- Fleet: arrivals, hauling-wing delivery completion
+- Fleet: user-visible arrivals, hauling-wing delivery completion
 - Combat: new combat log entries
 - Exploration: newly discovered sites
 - Economy: first sales, large sales, trade-route completed runs
 
 ## UI
 
-- `GameLayout.tsx` mounts the top-bar Inbox button, drawer preview, and toast stack.
-- `InboxPanel.tsx` exposes the full archive with selection, archive/restore actions, and deep-link actions back to source panels.
+- `GameLayout.tsx` mounts the top-bar Inbox button, scrollable drawer, toast stack, and a first-class Inbox navigation entry in the shared sidebar/mobile nav shell.
+- `InboxPanel.tsx` exposes the full archive with compact feed rows, independent feed/detail scrolling, dismiss/restore actions, and deep-link actions back to source panels.
 - `NotificationCenter.tsx` provides the shared list, filter tabs, drawer, and toast primitives so notification styling stays consistent across all surfaces.
 
 ---
