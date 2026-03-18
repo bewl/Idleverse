@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { RouteSecurityFilter } from '@/types/faction.types';
 
 const INFO_SECTION_STORAGE_KEY = 'idleverse-ui-collapsed-info-sections';
 const DISMISSED_PROGRESS_PROMPTS_STORAGE_KEY = 'idleverse-ui-dismissed-progress-prompts';
@@ -102,10 +103,15 @@ export interface PanelStateMap {
   fleet: {
     activeTab?: 'fleets' | 'pilots' | 'ships' | 'operations';
     expandedId?: string | null;
+    selectedWingId?: string | null;
   };
   starmap: {
     selectedId?: string | null;
     rightTab?: 'intel' | 'route';
+    routeFrom?: string | null;
+    routeTo?: string | null;
+    routeFleetId?: string | null;
+    routeFilter?: RouteSecurityFilter;
   };
   system: {
     viewingSystemId?: string;

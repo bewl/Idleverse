@@ -3,7 +3,6 @@ import { useGameStore } from '@/stores/gameStore';
 import { getSystemById } from '@/game/galaxy/galaxy.gen';
 import { MANUFACTURING_RECIPES, RECIPE_ORDER, BLUEPRINT_DEFINITIONS } from '@/game/systems/manufacturing/manufacturing.config';
 import { FlairProgressBar } from '@/ui/components/FlairProgressBar';
-import { ActivityBar } from '@/ui/effects/ActivityBar';
 import { formatResourceAmount, RESOURCE_REGISTRY } from '@/game/resources/resourceRegistry';
 import {
   getManufacturingSpeedMultiplier,
@@ -559,7 +558,14 @@ function ActiveJobCard({
         </div>
       )}
       <FlairProgressBar value={progressPct} color={isTech2 ? 'amber' : 'cyan'} label="Production progress" valueLabel={`${Math.round(progressPct * 100)}%`} />
-      <ActivityBar active rate={Math.min(1, effectiveSpeed)} color={isTech2 ? 'amber' : 'cyan'} label="Production rate" valueLabel={`x${effectiveSpeed.toFixed(2)} speed`} />
+      <div className="flex flex-wrap gap-1.5 text-[9px]">
+        <span className={`rounded-full border px-2 py-0.5 font-mono ${isTech2 ? 'border-orange-700/30 bg-orange-950/20 text-orange-300' : 'border-cyan-700/30 bg-cyan-950/20 text-cyan-300'}`}>
+          x{effectiveSpeed.toFixed(2)} speed
+        </span>
+        <span className="rounded-full border border-slate-700/30 bg-slate-950/30 px-2 py-0.5 font-mono text-slate-400">
+          {unitsDone}/{job.quantity} units complete
+        </span>
+      </div>
       <div className="flex items-center justify-between text-xs">
         <div className="flex flex-wrap gap-1">
           {Object.entries(recipe.outputs).map(([r, amt]) => (
@@ -914,7 +920,6 @@ function JobsTab({ onOpenBlueprints }: { onOpenBlueprints: () => void }) {
   const totalBpcCount = blueprints.filter(blueprint => blueprint.type === 'copy').length;
   const totalBpoCount = blueprints.filter(blueprint => blueprint.type === 'original').length;
   const activeSignal = queue.length > 0 || usedSlots > 0;
-  const activityRate = Math.min(1, Math.max(queue.length / 50, maxSlots > 0 ? usedSlots / maxSlots : 0, Math.max(0, speedMult - 1)));
   const grade = manufacturingGrade(speedMult);
 
   const queueStartTimes: number[] = [];
@@ -968,12 +973,9 @@ function JobsTab({ onOpenBlueprints }: { onOpenBlueprints: () => void }) {
           <CommandMetric label="T2 Copies" value={`${readyT2Copies.length}`} meta={readyT2Copies.length > 0 ? 'Tech II runs ready' : 'No T2 copies staged'} tone={readyT2Copies.length > 0 ? 'emerald' : 'slate'} />
           <CommandMetric label="Blueprints" value={`${totalBpoCount}/${totalBpcCount}`} meta="BPO / BPC library" tone="cyan" />
         </div>
-        <div className="mt-3">
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-[9px] uppercase tracking-widest text-slate-600">Facility Activity</span>
-            <span className="text-[9px] font-mono text-slate-500">x{speedMult.toFixed(2)} speed</span>
-          </div>
-          <ActivityBar active={activeSignal} rate={activityRate} color={queue.length > 0 ? 'cyan' : usedSlots > 0 ? 'violet' : 'amber'} label="Queue load" valueLabel={queue.length > 0 ? `${queue.length} queued` : usedSlots > 0 ? `${usedSlots}/${maxSlots} lab slots` : 'idle'} />
+        <div className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-slate-700/20 bg-slate-950/20 px-2.5 py-2 text-[10px] text-slate-400">
+          <span>Facility state stays readable from queue, lab slots, and Tech II readiness above.</span>
+          <span className="font-mono text-slate-500">x{speedMult.toFixed(2)} speed</span>
         </div>
       </div>
 
@@ -1124,7 +1126,6 @@ function BlueprintsTab() {
   const maxSlots      = getMaxResearchSlots(state);
   const usedSlots     = mfg.researchJobs.length + mfg.copyJobs.length;
   const activeLab = mfg.researchJobs.length > 0 || mfg.copyJobs.length > 0;
-  const libraryRate = Math.min(1, Math.max(activeLab ? usedSlots / Math.max(1, maxSlots) : 0, mfg.blueprints.length / 40));
   const originalCount = mfg.blueprints.filter(bp => bp.type === 'original').length;
   const copyCount = mfg.blueprints.filter(bp => bp.type === 'copy').length;
   const readyT2Copies = mfg.blueprints.filter(bp => bp.type === 'copy' && bp.tier === 2 && !bp.isLocked && (bp.copiesRemaining === null || bp.copiesRemaining > 0)).length;
@@ -1169,11 +1170,10 @@ function BlueprintsTab() {
           <CommandMetric label="Copies" value={`${copyCount}`} meta={`${readyT2Copies} T2 ready`} tone={copyCount > 0 ? 'amber' : 'slate'} />
           <CommandMetric label="Locked" value={`${lockedBlueprints}`} meta={lockedBlueprints > 0 ? 'currently in use' : 'none locked'} tone={lockedBlueprints > 0 ? 'amber' : 'emerald'} />
         </div>
-        <div className="flex items-center justify-between gap-3 mb-1">
-          <span className="text-[9px] uppercase tracking-widest text-slate-600">Library Activity</span>
-          <span className="text-[9px] font-mono text-slate-500">{filteredBlueprints.length} visible</span>
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-700/20 bg-slate-950/20 px-2.5 py-2 text-[10px] text-slate-400">
+          <span>Library scanability comes from counts, locked-state tags, and collapsed row hints.</span>
+          <span className="font-mono text-slate-500">{filteredBlueprints.length} visible</span>
         </div>
-        <ActivityBar active={activeLab} rate={libraryRate} color={activeLab ? 'violet' : 'amber'} label="Lab load" valueLabel={activeLab ? `${usedSlots}/${maxSlots} slots` : `${filteredBlueprints.length} visible`} />
       </div>
 
       <PanelInfoSection
@@ -1261,8 +1261,6 @@ export function ManufacturingPanel() {
   const queueLength = state.systems.manufacturing.queue.length;
   const activeLabJobs = state.systems.manufacturing.researchJobs.length + state.systems.manufacturing.copyJobs.length;
   const grade = manufacturingGrade(speedMult);
-  const headerActive = queueLength > 0 || activeLabJobs > 0;
-  const headerRate = Math.min(1, Math.max(queueLength / 50, activeLabJobs / Math.max(1, getMaxResearchSlots(state)), Math.max(0, speedMult - 1)));
 
   useEffect(() => {
     if (!focusTarget?.panelSection) return;
@@ -1330,7 +1328,9 @@ export function ManufacturingPanel() {
               </span>
             </div>
           </div>
-          <ActivityBar active={headerActive} rate={headerRate} color={queueLength > 0 ? 'cyan' : activeLabJobs > 0 ? 'violet' : 'amber'} label="Complex load" valueLabel={queueLength > 0 ? `${queueLength} queued` : activeLabJobs > 0 ? `${activeLabJobs} lab jobs` : 'idle'} />
+          <div className="rounded-lg border border-slate-700/20 bg-slate-950/20 px-2.5 py-2 text-[10px] text-slate-400">
+            Queue depth, lab occupancy, and speed grade now carry the full facility readout without a separate activity strip.
+          </div>
         </div>
       </div>
 

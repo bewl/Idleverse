@@ -1,4 +1,4 @@
-﻿export const SAVE_VERSION = 2; // incremented for full Eve-pivot data migration
+﻿export const SAVE_VERSION = 3; // reward inventory foundation
 
 export const UPGRADE_GROWTH_RATE = 1.15;
 export const OFFLINE_CAP_SECONDS = 24 * 60 * 60;

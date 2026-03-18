@@ -136,6 +136,7 @@ interface NavEntry {
 
 const NAV: NavEntry[] = [
   { id: 'overview',       label: 'Overview',        short: 'Home',   unlockKey: 'system-mining',        icon: '📊' },
+  { id: 'inbox',          label: 'Inbox',           short: 'Inbox',  unlockKey: 'system-mining',        icon: 'inbox' },
   { id: 'skills',         label: 'Skill Queue',     short: 'Skills', unlockKey: 'system-skills',        icon: '⚡' },
   { id: 'fleet',          label: 'Fleet',           short: 'Fleet',  unlockKey: 'system-fleet',         icon: '🚀' },
   { id: 'starmap',        label: 'Galaxy Map',      short: 'Map',    unlockKey: 'system-mining',        icon: '🗺️' },

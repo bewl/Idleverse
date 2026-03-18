@@ -77,6 +77,40 @@ export function loadGame(): SaveFile | null {
     if (!save.state.notifications || !Array.isArray(save.state.notifications.entries)) {
       save.state.notifications = { entries: [] };
     }
+    if (!save.state.systems?.rewards || typeof save.state.systems.rewards !== 'object') {
+      save.state.systems.rewards = {
+        inventory: [],
+        history: [],
+        discoveredDefinitionIds: {},
+      };
+    } else {
+      if (!Array.isArray(save.state.systems.rewards.inventory)) {
+        save.state.systems.rewards.inventory = [];
+      }
+      if (!Array.isArray(save.state.systems.rewards.history)) {
+        save.state.systems.rewards.history = [];
+      }
+      if (!save.state.systems.rewards.discoveredDefinitionIds || typeof save.state.systems.rewards.discoveredDefinitionIds !== 'object') {
+        save.state.systems.rewards.discoveredDefinitionIds = {};
+      }
+      for (const item of save.state.systems.rewards.inventory as any[]) {
+        if (!item || typeof item !== 'object') continue;
+        if (typeof item.quantity !== 'number') {
+          item.quantity = 1;
+        }
+        if (typeof item.stackable !== 'boolean') {
+          item.stackable = false;
+        }
+        if (!item.source || typeof item.source !== 'object') {
+          item.source = {
+            type: 'combat',
+            id: 'legacy-save',
+            name: 'Legacy Reward',
+            acquiredAt: save.savedAt ?? Date.now(),
+          };
+        }
+      }
+    }
     if (!save.state.tutorial || typeof save.state.tutorial !== 'object') {
       save.state.tutorial = {
         currentStepId: null,

@@ -112,6 +112,7 @@ src/
       mining/       — mining.config.ts, mining.logic.ts, mining.tick.ts
       project/      — stub
       reprocessing/ — reprocessing.logic.ts
+      rewards/      — rewardRegistry.ts, rewardEngine.ts, rewardTypes.ts
       research/     — implemented in manufacturing/manufacturing.logic.ts (Phase 3 done)
       skills/       — skills.config.ts, skills.logic.ts
     utils/          — seeded RNG, math helpers
@@ -139,8 +140,17 @@ src/
       ResourceBar.tsx
       SkillsPanel.tsx
       StarMapPanel.tsx
+        SystemSceneCanvas.tsx
       SystemPanel.tsx
 ```
+
+    `FleetPanel` now treats each expanded fleet card as a sectioned command surface rather than one continuous control column. The panel composes a reusable section-card wrapper around major fleet domains such as overview, logistics, activity, wings, command, combat, navigation, and assembly so dense operational controls stay visually partitioned without splitting the fleet workflow across multiple views. The wings area itself now defaults to a collapsed summary state, uses the whole section header as its expand/collapse target, and opens into a master-detail surface instead of another nested dashboard layer: a compact selectable wing list on the left and a dedicated detail pane on the right for the currently selected wing's profile, command, operations, and roster management. On smaller viewports the same selection model stacks vertically instead of reopening many inline wing cards.
+
+    Shared interaction affordances now live partially in `src/index.css` as a safety net: plain buttons, role-button targets, and Star Map filter rows all receive a baseline hover response even when a local component does not define a custom hover treatment. Dense collapsible headers should still declare their own hover surface locally, but generic interactive feedback is no longer optional.
+
+    Older inline-styled controls in `StarMapPanel` and `DevPanel` are now being normalized onto shared `legacy-panel-btn` styling in `src/index.css` so hover and focus behavior stays consistent even before those panels receive a fuller visual refactor.
+
+    `SystemPanel` now splits into a presentation shell plus a dedicated `SystemSceneCanvas` renderer. The panel still owns browsing state, selected-body state, anomaly mode, docking/POS actions, and mining-assignment detail, while the new canvas owns constrained orbit camera controls, hit-testing, hover targeting, and scene rendering for bodies, fleets, and local structures. This keeps the operational logic in the panel while isolating the camera-heavy rendering path into its own file.
 
 ### Folder Intent
 
@@ -320,7 +330,13 @@ Use `PanelInfoSection.tsx` for any non-interactive explanatory content that shou
 
 `panelStates` stores restorable per-panel view context such as active tabs, current selections, and intra-panel modes. Use it for UI state that should come back when the player returns through breadcrumbs or entity-tag navigation, but should still remain outside persistent simulation state.
 
-The Inbox follows the same separation strictly: durable notification records live in save-backed `GameState.notifications`, while the drawer-open flag, toast queue, and Inbox filter state remain in `uiStore` because they are presentational runtime state rather than simulation state.
+The Star Map uses that split directly: `panelStates.starmap` stores selection and route-planner context such as `selectedId`, `rightTab`, `routeFrom`, `routeTo`, `routeFilter`, and `routeFleetId`, while the actual in-transit position continues to come from save-backed fleet `fleetOrder` state. On remount, the panel rebuilds the highlighted route from the selected fleet's live order instead of relying on stale component-local route state.
+
+The Fleet panel now uses the same pattern for wing inspection. `panelStates.fleet.selectedWingId` stores the currently inspected wing for the expanded fleet card, while `focusTarget` and local `focusedWingId` continue to represent transient navigation or tutorial emphasis. That split lets a wing navigation target auto-open the owning fleet and select the correct wing detail pane without turning tutorial focus into the long-lived source of truth for the panel.
+
+Shared UI telemetry should stay decision-oriented. The old `ActivityBar` presentation primitive has been retired entirely. Panels should rely on concrete counts, state chips, ETA text, throughput labels, and true completion progress bars instead of abstract activity strips. Use richer animated progress treatment only for real finish-line progress surfaces the player is actively tracking.
+
+The Inbox follows the same separation strictly: durable notification records live in save-backed `GameState.notifications`, while the drawer-open flag, toast queue, Inbox filter state, and selected Inbox entry remain in `uiStore` because they are presentational runtime state rather than simulation state.
 
 The tutorial uses the same split intentionally. Canonical tutorial progress lives in save-backed `GameState.tutorial` so onboarding is scoped to each save, while the active overlay visibility is stored in `uiStore.tutorialOverlayOpen` because the shell is still a presentation concern. In the stricter guided mode now in use, `GameLayout` forces the overlay back open while a tutorial save is active, removes replay after completion for that save, and layers cutout-aligned dim scrims above the app so only the current tutorial target control remains interactive and visually emphasized. The same shell now drives cross-panel Fleet, Star Map, System, and Mining steps by reusing `panelStates` and `focusTarget` rather than introducing a separate tutorial-only router.
 
@@ -400,6 +416,8 @@ export provides composable primitives for building layouts:
   - Optional split detail pane for dense pickers such as fleet fittings and blueprint selection, so option scanning and option inspection stay in the same popup
   - Trigger height is normalized by size (`compact` vs `default`) so dropdown controls keep a consistent vertical rhythm across panels even when option metadata differs
   - Default option rows are compressed into a denser single-row-biased layout so more items remain visible in the menu at once while keeping tones, badges, and metadata styling
+  - Hover selection in the option list is intentionally sticky: moving the cursor through spacing between rows or into the detail pane does not clear the current hovered option; the highlight only changes when another row is actually hovered
+  - Inter-row spacing belongs to adjacent option entries rather than to the list container itself, so dense pickers do not create dead hover zones that collapse the active detail preview between rows
 
   ### Content Model
 
@@ -422,8 +440,10 @@ export provides composable primitives for building layouts:
 
   Panels can override `renderValue` and `renderOption`, but the default renderer already supports
   colored rows, metadata, badges, and group-aware filtering. Dense pickers can additionally provide
-  `renderDetail` to render a right-hand or bottom-mounted inspection pane without rewriting the
-  shell behavior.
+  `renderDetail` to render a right-hand or bottom-mounted inspection pane and `menuHeader` to mount
+  custom in-menu controls such as toggle-chip sort and filter bars without rewriting the shell behavior.
+
+  The Star Map route planner now uses that richer path directly for destination selection: sort and filter controls live inside the dropdown as toggle chips, while the dropdown's detail pane renders destination intel such as distance, threat level, station presence, and mining relevance for the currently hovered system. The Fleet panel whole-fleet movement picker now follows the same pattern so both travel-entry surfaces expose comparable in-menu destination sorting, filters, and intel instead of drifting into separate UX rules.
 
 ## NavTag Routing
 
@@ -462,6 +482,7 @@ interface GameState {
     manufacturing: ManufacturingState;
     market: MarketState;
     fleet: FleetState;
+    rewards: RewardsState;
     structures: StructuresState;
     factions: FactionsState;
   };
@@ -476,9 +497,15 @@ Avoid deeply tangled state relationships when possible.
 
 Fleet state now includes fleet commanders, wing commanders, hauling-wing cargo holds, and typed `wings` on each `PlayerFleet`. New-game defaults in `src/stores/initialState.ts` seed a starter fleet, starter ship, Corp HQ, and an initial populated mining wing so the opening state is immediately operational.
 
-`notifications.entries` is the durable player-facing event log. New entries are aggregated centrally from the tick seam in `gameStore.tick()` using `src/game/notifications/notification.logic.ts`, then capped to a rolling history window. `GameLayout.tsx` consumes that state to drive both the persistent Inbox panel and the transient toast layer.
+`notifications.entries` is the durable player-facing event log. New entries are aggregated centrally from the tick seam in `gameStore.tick()` using `src/game/notifications/notification.logic.ts`, then capped to a rolling history window. `GameLayout.tsx` consumes that state to drive the top-bar scrollable Inbox drawer, the persistent Inbox panel, the shared sidebar/mobile Inbox route, and the transient toast layer.
+
+The notification UI intentionally stays summary-first. `NotificationCenter.tsx` renders dense shared rows for both the drawer and the Inbox feed, while `InboxPanel.tsx` keeps the full message body and archival metadata in a separate detail pane with its own scroll container. User-facing `Dismiss` controls still map to the save-backed archive model instead of introducing a second delete state.
+
+Notification noise is tuned centrally rather than in UI code. `src/game/notifications/notification.logic.ts` suppresses whole-fleet mining auto-haul arrival updates by checking `miningOriginSystemId`, preserving manually issued fleet-travel arrivals while keeping automation loops from spamming the durable command log.
 
 `tutorial` is a small save-backed onboarding progress model. `src/game/progression/tutorialSequence.ts` now owns both the ordered step registry and the derived presentation payload for the overlay: lock copy, step checklists, live metrics, progress bars, and current interaction targets. The registry also derives a deterministic first remote mining destination from the generated galaxy so Fleet, Star Map, System, and Mining onboarding can target real reachable content without adding tutorial-only save state. `gameStore` owns save-backed mutations such as skip, restart, explicit step completion, and immediate reevaluation after actions like fleet dispatch or mining-wing assignment. `GameLayout.tsx` mounts the visual tutorial shell, routes step CTAs back through existing panel navigation and panel-state restoration, and enforces the guided interaction lock by floating only the current tutorial target above a fixed blocker layer.
+
+`systems.rewards` now carries the first-pass premium reward model. Commodity rewards still land in `resources` or fleet cargo as before, while premium drops are written into a save-backed inventory list plus a rolling reward-history feed. The shared resolver in `src/game/systems/rewards/rewardEngine.ts` keeps source definitions, RNG resolution, inventory stacking, and discovery tracking out of combat/mining-specific logic so later systems can plug into the same pattern.
 
 ## Tick / Simulation Model
 

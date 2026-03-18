@@ -7,7 +7,6 @@ import { getSystemById } from '@/game/galaxy/galaxy.gen';
 import type { PlayerFleet } from '@/types/game.types';
 import { getFleetStorageCapacity, getFleetStoredCargo, getHaulingWings, getOperationalFleetShipIds, getWingByShipId } from '@/game/systems/fleet/wings.logic';
 import { useUiStore } from '@/stores/uiStore';
-import { ActivityBar } from '@/ui/effects/ActivityBar';
 import { describeFleetActivity, describeWingActivity } from '@/ui/utils/fleetActivity';
 import { ThemedIcon } from '@/ui/components/ThemedIcon';
 import { isTutorialStepCurrent } from '@/game/progression/tutorialSequence';
@@ -147,7 +146,6 @@ function FleetMiningCard({ fleet, focused = false }: { fleet: PlayerFleet; focus
   }, {})).reduce((sum, rate) => sum + rate, 0);
   const activeBeltCount = activeMiningWings.reduce((sum, wing) => sum + wing.activeBeltIds.length, 0);
   const cargoTone = sharedStorageFillPct >= 80 ? 'amber' : sharedStorageFillPct > 0 ? 'cyan' : 'slate';
-  const activityRate = Math.min(1, Math.max(totalOreRate / 8, sharedStorageFillPct / 100, haulingActive ? 0.65 : 0));
 
   const storageTarget = getStorageTargetCopy(haulingWings.length);
   const getSystemName = (systemId: string) => galaxy ? getSystemById(galaxy.seed, systemId)?.name ?? systemId : systemId;
@@ -206,8 +204,6 @@ function FleetMiningCard({ fleet, focused = false }: { fleet: PlayerFleet; focus
         <CommandMetric label="Mining Wings" value={`${activeMiningWings.length}`} meta={`${miningShips.length} miners online`} tone={activeMiningWings.length > 0 ? 'violet' : 'slate'} />
         <CommandMetric label="Hauling" value={`${haulingWings.length}`} meta={haulingActive ? 'cargo in motion' : storageTarget.label} tone={haulingActive ? 'amber' : haulingWings.length > 0 ? 'emerald' : 'slate'} />
       </div>
-
-      <ActivityBar active={totalOreRate > 0 || haulingActive} rate={activityRate} color={haulingActive ? 'amber' : 'cyan'} label="Extraction rate" valueLabel={haulingActive ? 'haul in motion' : `${totalOreRate.toFixed(2)}/s`} />
 
       <div className="flex items-center gap-2 flex-wrap rounded-lg border border-slate-700/30 bg-slate-950/35 px-3 py-2">
         <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${fleetActivity.dotClass}`} />
@@ -377,7 +373,6 @@ export function MiningPanel() {
     const cap = getFleetStorageCapacity(fleet, state.systems.fleet.ships, state.systems.fleet.pilots);
     return cap > 0 && (used / cap) * 100 >= 80;
   }).length;
-  const activityRate = Math.min(1, Math.max(totalOreRate / 12, avgCargoFill / 100, haulingActive / Math.max(1, miningFleets.length)));
 
   return (
     <div className="flex flex-col gap-4">
@@ -410,7 +405,6 @@ export function MiningPanel() {
               <CommandMetric label="Hauling" value={`${haulingLines}`} meta={haulingActive > 0 ? `${haulingActive} hauling now` : 'all staged'} tone={haulingActive > 0 ? 'amber' : haulingLines > 0 ? 'emerald' : 'slate'} />
             </div>
           </div>
-          <ActivityBar active={totalOreRate > 0 || haulingActive > 0} rate={activityRate} color={haulingActive > 0 ? 'amber' : 'cyan'} label="Mining load" valueLabel={haulingActive > 0 ? `${haulingActive} hauling` : `${totalMiningWings} wings`} />
         </div>
       )}
 

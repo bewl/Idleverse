@@ -18,7 +18,6 @@ import { getSystemById } from '@/game/galaxy/galaxy.gen';
 import { getAliveNpcGroupsInSystem } from '@/game/systems/combat/combat.logic';
 import { computeFleetCargoCapacity } from '@/game/systems/fleet/fleet.logic';
 import { getFleetStoredCargo, getFleetStorageCapacity, getHaulingWings, getOperationalFleetShipIds, getWingCurrentSystemId, hasActiveEscortWing } from '@/game/systems/fleet/wings.logic';
-import { ActivityBar } from '@/ui/effects/ActivityBar';
 import { describeFleetActivity } from '@/ui/utils/fleetActivity';
 import { ThemedIcon } from '@/ui/components/ThemedIcon';
 
@@ -751,7 +750,6 @@ function OverviewModeTabs() {
           {tabs.find(tab => tab.id === mode)?.summary}
         </div>
       </div>
-      <ActivityBar active={liveSignals > 0} rate={Math.min(1, Math.max(liveSignals / 4, promptCount > 0 ? 0.55 : 0))} color={mode === 'guidance' ? 'violet' : 'cyan'} label="View load" valueLabel={mode === 'guidance' ? `${promptCount} prompts` : `${liveSignals} live signals`} />
     </div>
   );
 }
@@ -867,12 +865,6 @@ function OperationsCommandDeck() {
   const oreRate = Object.entries(rates)
     .filter(([id, rate]) => id !== 'credits' && rate > 0 && RESOURCE_REGISTRY[id]?.category === 'ore')
     .reduce((sum, [, rate]) => sum + rate, 0);
-  const activityRate = Math.min(1, Math.max(
-    activeSignals / 5,
-    Math.min(1, manufacturingQueue / 4),
-    Math.min(1, reprocessingQueue / 4),
-    Math.min(1, movingFleets / Math.max(1, fleets.length)),
-  ));
 
   return (
     <div
@@ -927,8 +919,6 @@ function OperationsCommandDeck() {
           onClick={() => navigate('fleet', { entityType: 'panel', entityId: 'fleet-operations', panelSection: 'operations' })}
         />
       </div>
-
-      <ActivityBar active={activeSignals > 0} rate={activityRate} color={manufacturingQueue > 0 ? 'violet' : movingFleets > 0 ? 'cyan' : 'amber'} label="Operations load" valueLabel={manufacturingQueue > 0 ? `${manufacturingQueue} fabrication` : movingFleets > 0 ? `${movingFleets} in transit` : `${activeSignals} active`} />
     </div>
   );
 }
@@ -1464,7 +1454,6 @@ function ManufacturingCard() {
           </div>
         </div>
         <p className="text-slate-600 text-xs italic">Fabrication queue is empty. Blueprint work can keep the industrial line moving.</p>
-        <ActivityBar active={researchLoad + copyLoad > 0} rate={Math.min(1, (researchLoad + copyLoad) / 3)} color={researchLoad + copyLoad > 0 ? 'cyan' : 'violet'} label="Lab load" valueLabel={researchLoad + copyLoad > 0 ? `${researchLoad + copyLoad} lab jobs` : 'idle'} />
         {totalCompleted > 0 && (
           <div className="text-[10px] text-slate-600">{totalCompleted} items produced all time</div>
         )}
@@ -1514,7 +1503,6 @@ function ManufacturingCard() {
       </div>
 
       <FlairProgressBar value={progressPct} color="violet" label="Fabrication progress" valueLabel={`${Math.round(progressPct * 100)}%`} />
-      <ActivityBar active rate={Math.min(1, Math.max(progressPct, slowMult / 2))} color="violet" label="Production rate" valueLabel={`x${slowMult.toFixed(2)} speed`} />
       <div className="text-[10px] text-slate-500">
         {researchLoad + copyLoad > 0
           ? `${researchLoad} research and ${copyLoad} copy jobs are running alongside fabrication.`

@@ -219,28 +219,32 @@ export function NotificationRow({
 
   return (
     <div className={`rounded-xl border ${selected ? tone.border : 'border-slate-800/80 bg-slate-950/55'} transition-colors`}>
-      <div className="flex items-stretch gap-2 p-2">
+      <div className={`flex items-stretch gap-2 ${compact ? 'p-1.5' : 'p-2'}`}>
         <button
-          className="flex min-w-0 flex-1 items-start gap-2 text-left"
+          className={`flex min-w-0 flex-1 items-start gap-2 text-left ${compact ? 'rounded-lg px-0.5 py-0.5 hover:bg-white/[0.03]' : ''}`}
           onClick={onSelect}
         >
           <span className={`mt-1 h-1.5 w-1.5 shrink-0 rounded-full ${entry.readAt ? 'bg-slate-700' : tone.dot}`} />
-          <span className="mt-0.5 shrink-0">
-            <ThemedIcon icon={icon} size={16} tone={tone.iconTone} interactive />
+          <span className={`shrink-0 ${compact ? 'mt-0.5' : 'mt-0.5'}`}>
+            <ThemedIcon icon={icon} size={compact ? 14 : 16} tone={tone.iconTone} interactive />
           </span>
           <span className="min-w-0 flex-1">
-            <span className="flex items-center gap-1.5">
+            <span className="flex items-center gap-1">
               <span className={`truncate text-[11px] font-semibold ${entry.readAt ? 'text-slate-300' : tone.text}`}>
                 {entry.title}
               </span>
               {!entry.readAt && <span className="rounded-full bg-cyan-500/15 px-1.5 py-0.5 text-[8px] font-mono uppercase tracking-[0.2em] text-cyan-200">New</span>}
             </span>
-            {!compact && (
+            {compact ? (
+              <span className="mt-0.5 block truncate text-[10px] text-slate-400">
+                {entry.body}
+              </span>
+            ) : (
               <span className="mt-1 block text-[10px] leading-relaxed text-slate-400">
                 {entry.body}
               </span>
             )}
-            <span className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[9px] font-mono uppercase tracking-[0.18em] text-slate-500">
+            <span className={`flex flex-wrap items-center gap-1.5 text-[9px] font-mono uppercase tracking-[0.18em] text-slate-500 ${compact ? 'mt-1' : 'mt-1.5'}`}>
               <span className={`rounded-full border px-1.5 py-0.5 ${tone.badge}`}>{entry.kind}</span>
               <span className="rounded-full border border-slate-800/80 bg-slate-900/70 px-1.5 py-0.5 text-slate-400">{CATEGORY_LABELS[entry.category]}</span>
               <span>{sourceLabel}</span>
@@ -269,7 +273,7 @@ export function NotificationRow({
                 onArchive();
               }}
             >
-              Archive
+              Dismiss
             </button>
           )
         )}
@@ -348,7 +352,7 @@ export function NotificationDrawer({
   onOpenInbox,
   onMarkAllRead,
 }: NotificationDrawerProps) {
-  const visibleEntries = filterNotifications(entries, activeView, false).slice(0, 6);
+  const visibleEntries = filterNotifications(entries, activeView, false);
 
   return (
     <div className="w-[min(30rem,calc(100vw-1.5rem))] rounded-2xl border border-cyan-500/20 bg-slate-950/95 p-3 shadow-[0_24px_80px_rgba(2,6,23,0.72)] backdrop-blur-xl">
@@ -381,7 +385,7 @@ export function NotificationDrawer({
 
       <NotificationViewTabs activeView={activeView} entries={entries} showArchived={false} onChange={onChangeView} />
 
-      <div className="mt-3">
+      <div className="mt-3 max-h-[22rem] overflow-y-auto pr-1">
         <NotificationList
           entries={visibleEntries}
           galaxySeed={galaxySeed}

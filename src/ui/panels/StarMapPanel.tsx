@@ -80,6 +80,10 @@ interface RouteDispatchFeedback {
   text: string;
 }
 
+type DestinationSortMode = 'distance-asc' | 'name' | 'security' | 'belts' | 'threat';
+type DestinationSecurityFilter = 'all' | SystemSecurity;
+type DestinationThreatFilter = 'all' | 'quiet' | 'hostile';
+
 type OverlayMode = 'default' | 'resource' | 'fleet' | 'faction';
 
 type SectorArchetype = 'core' | 'border' | 'frontier' | 'null-zone' | 'mining-hub' | 'expanse';
@@ -178,6 +182,43 @@ function makeSystemFilter(
     )) return false;
     if (q && !sys.name.toLowerCase().includes(q)) return false;
     return true;
+  };
+}
+
+function buildActiveRouteFromPath(allSystems: StarSystem[], path: string[]): ActiveRoute | null {
+  if (path.length < 2) return null;
+
+  const seen = new Set<string>();
+  const sectorPath: Array<{ gx: number; gy: number }> = [];
+  const legSecurity: SystemSecurity[] = [];
+  let totalLy = 0;
+
+  for (let index = 0; index < path.length; index += 1) {
+    const system = allSystems.find(entry => entry.id === path[index]);
+    if (!system) return null;
+
+    const sector = systemSector(system);
+    const sectorKey = sectorId(sector.gx, sector.gy);
+    if (!seen.has(sectorKey)) {
+      seen.add(sectorKey);
+      sectorPath.push(sector);
+    }
+
+    if (index === 0) continue;
+    const previousSystem = allSystems.find(entry => entry.id === path[index - 1]);
+    if (!previousSystem) return null;
+    legSecurity.push(system.security);
+    totalLy += unitsToLy(systemDistance(previousSystem, system));
+  }
+
+  return {
+    fromId: path[0],
+    toId: path[path.length - 1],
+    path,
+    hops: path.length - 1,
+    totalLy,
+    legSecurity,
+    sectorPath,
   };
 }
 
@@ -1238,8 +1279,8 @@ function FilterPanel({ filters, onChange }: { filters: MapFilters; onChange: (f:
           {section.keys.map(key => {
             const row = rows.find(r => r.key === key)!;
             return (
-              <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', padding: '3px 0' }}>
-                <span style={checkBtn(filters[key] as boolean, row.color)} onClick={() => toggle(key)}>
+              <label key={key} className="starmap-filter-row" style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                <span className="starmap-filter-check" style={checkBtn(filters[key] as boolean, row.color)} onClick={() => toggle(key)}>
                   <span style={checkInner(filters[key] as boolean, row.color)} />
                 </span>
                 <span style={{ fontSize: 10, color: (filters[key] as boolean) ? row.color : '#475569' }}>
@@ -1371,14 +1412,14 @@ function SystemIntelPanel({
       })()}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginTop: 4 }}>
         {!isCurrent && (
-          <button onClick={onSetCourse} style={{ padding: '8px 10px', fontSize: 9, fontWeight: 700, border: '1px solid rgba(34,211,238,0.3)', borderRadius: 6, background: 'rgba(8,51,68,0.3)', color: '#22d3ee', cursor: 'pointer', textAlign: 'left', gridColumn: '1 / -1' }}>
+          <button onClick={onSetCourse} className="legacy-panel-btn" style={{ padding: '8px 10px', fontSize: 9, fontWeight: 700, textAlign: 'left', gridColumn: '1 / -1', '--legacy-border': 'rgba(34,211,238,0.3)', '--legacy-bg': 'rgba(8,51,68,0.3)', '--legacy-color': '#22d3ee', '--legacy-hover-border': 'rgba(103,232,249,0.52)', '--legacy-hover-bg': 'rgba(8,51,68,0.52)', '--legacy-hover-color': '#cffafe', '--legacy-hover-shadow': '0 0 12px rgba(34,211,238,0.18)' } as React.CSSProperties}>
             ⊛ Set Course
           </button>
         )}
-        <button onClick={onSetRouteFrom} style={{ padding: '8px 10px', fontSize: 9, border: '1px solid rgba(71,85,105,0.3)', borderRadius: 6, background: 'rgba(6,9,20,0.4)', color: '#94a3b8', cursor: 'pointer', textAlign: 'left' }}>
+        <button onClick={onSetRouteFrom} className="legacy-panel-btn" style={{ padding: '8px 10px', fontSize: 9, textAlign: 'left', '--legacy-border': 'rgba(71,85,105,0.3)', '--legacy-bg': 'rgba(6,9,20,0.4)', '--legacy-color': '#94a3b8', '--legacy-hover-border': 'rgba(148,163,184,0.38)', '--legacy-hover-bg': 'rgba(15,23,42,0.72)', '--legacy-hover-color': '#e2e8f0' } as React.CSSProperties}>
           Route: Set as Origin
         </button>
-        <button onClick={onSetRouteTo} style={{ padding: '8px 10px', fontSize: 9, border: '1px solid rgba(71,85,105,0.3)', borderRadius: 6, background: 'rgba(6,9,20,0.4)', color: '#94a3b8', cursor: 'pointer', textAlign: 'left' }}>
+        <button onClick={onSetRouteTo} className="legacy-panel-btn" style={{ padding: '8px 10px', fontSize: 9, textAlign: 'left', '--legacy-border': 'rgba(71,85,105,0.3)', '--legacy-bg': 'rgba(6,9,20,0.4)', '--legacy-color': '#94a3b8', '--legacy-hover-border': 'rgba(148,163,184,0.38)', '--legacy-hover-bg': 'rgba(15,23,42,0.72)', '--legacy-hover-color': '#e2e8f0' } as React.CSSProperties}>
           Route: Set as Destination
         </button>
       </div>
@@ -1416,10 +1457,14 @@ function RoutePlanner({
     () => allSystems.filter(s => visitedSystems[s.id]).sort((a, b) => a.name.localeCompare(b.name)),
     [allSystems, visitedSystems],
   );
-  const allSystemsSorted = useMemo(
-    () => [...allSystems].sort((a, b) => a.name.localeCompare(b.name)),
-    [allSystems],
-  );
+  const [destinationSort, setDestinationSort] = useState<DestinationSortMode>('distance-asc');
+  const [destinationSecurity, setDestinationSecurity] = useState<DestinationSecurityFilter>('all');
+  const [destinationThreat, setDestinationThreat] = useState<DestinationThreatFilter>('all');
+  const [destinationVisitedOnly, setDestinationVisitedOnly] = useState(false);
+  const [destinationReachableOnly, setDestinationReachableOnly] = useState(false);
+  const [destinationStationsOnly, setDestinationStationsOnly] = useState(false);
+  const [destinationBeltsOnly, setDestinationBeltsOnly] = useState(false);
+  const [destinationSameRegionOnly, setDestinationSameRegionOnly] = useState(false);
 
   const selStyle: React.CSSProperties = {
     width: '100%', padding: '7px 8px', fontSize: 9,
@@ -1455,6 +1500,10 @@ function RoutePlanner({
   const selectedFleetColor = selectedFleet
     ? ROUTE_FLEET_COLORS[playerFleets.indexOf(selectedFleet) % ROUTE_FLEET_COLORS.length]
     : null;
+  const routeOriginSystem = useMemo(
+    () => allSystems.find(system => system.id === routeFrom) ?? allSystems.find(system => system.id === currentSystemId) ?? null,
+    [allSystems, currentSystemId, routeFrom],
+  );
   const selectedFleetRange = useMemo(() => {
     if (!selectedFleet) return fleetJumpRangeLY;
     const ships = fleetShips.filter(s => selectedFleet.shipIds.includes(s.id));
@@ -1516,26 +1565,308 @@ function RoutePlanner({
         }, ...known]
       : known;
   }, [allSystems, currentSystemId, knownSystems]);
-  const destinationOptions = useMemo<DropdownOption[]>(() => (
-    allSystemsSorted.map(system => {
-      const tone: DropdownOption['tone'] = !visitedSystems[system.id]
+  const destinationIntel = useMemo(() => {
+    const originSector = routeOriginSystem ? systemSector(routeOriginSystem) : null;
+    return allSystems.map(system => {
+      const isVisited = !!visitedSystems[system.id];
+      const beltCount = system.bodies.filter(body => body.type === 'asteroid-belt').length;
+      const threatCount = isVisited ? getAliveNpcGroupsInSystem(gameState, system.id).length : 0;
+      const distanceLy = routeOriginSystem ? unitsToLy(systemDistance(routeOriginSystem, system)) : 0;
+      const directReachable = routeOriginSystem !== null && system.id !== routeOriginSystem.id && distanceLy <= jumpRangeLY;
+      const sameRegion = routeOriginSystem !== null && system.regionName === routeOriginSystem.regionName;
+      const sameSector = originSector ? (() => {
+        const destinationSector = systemSector(system);
+        return destinationSector.gx === originSector.gx && destinationSector.gy === originSector.gy;
+      })() : false;
+
+      return {
+        system,
+        isVisited,
+        beltCount,
+        threatCount,
+        distanceLy,
+        directReachable,
+        sameRegion,
+        sameSector,
+      };
+    });
+  }, [allSystems, gameState, jumpRangeLY, routeOriginSystem, visitedSystems]);
+
+  const destinationOptions = useMemo<DropdownOption[]>(() => {
+    const filtered = destinationIntel.filter(({ system, isVisited, beltCount, threatCount, directReachable, sameRegion }) => {
+      if (routeOriginSystem && system.id === routeOriginSystem.id) return false;
+      if (destinationSecurity !== 'all' && system.security !== destinationSecurity) return false;
+      if (destinationVisitedOnly && !isVisited) return false;
+      if (destinationReachableOnly && !directReachable) return false;
+      if (destinationStationsOnly && !system.stationId) return false;
+      if (destinationBeltsOnly && beltCount === 0) return false;
+      if (destinationSameRegionOnly && !sameRegion) return false;
+      if (destinationThreat === 'quiet' && threatCount > 0) return false;
+      if (destinationThreat === 'hostile' && threatCount === 0) return false;
+      return true;
+    });
+
+    filtered.sort((left, right) => {
+      if (destinationSort === 'distance-asc') {
+        const distanceDelta = left.distanceLy - right.distanceLy;
+        if (Math.abs(distanceDelta) > 0.01) return distanceDelta;
+        return left.system.name.localeCompare(right.system.name);
+      }
+      if (destinationSort === 'security') {
+        const securityRank = { highsec: 0, lowsec: 1, nullsec: 2 } as const;
+        const securityDelta = securityRank[left.system.security] - securityRank[right.system.security];
+        if (securityDelta !== 0) return securityDelta;
+        return left.system.name.localeCompare(right.system.name);
+      }
+      if (destinationSort === 'belts') {
+        if (right.beltCount !== left.beltCount) return right.beltCount - left.beltCount;
+        return left.distanceLy - right.distanceLy;
+      }
+      if (destinationSort === 'threat') {
+        if (right.threatCount !== left.threatCount) return right.threatCount - left.threatCount;
+        return left.distanceLy - right.distanceLy;
+      }
+      return left.system.name.localeCompare(right.system.name);
+    });
+
+    const mapped: DropdownOption[] = filtered.map(({ system, isVisited, beltCount, threatCount, distanceLy, directReachable, sameRegion, sameSector }) => {
+      const tone: DropdownOption['tone'] = !isVisited
         ? 'slate'
         : system.security === 'highsec'
           ? 'emerald'
           : system.security === 'lowsec'
             ? 'amber'
             : 'rose';
+      const badges = [
+        { label: secLabel(system.security), color: secColor(system.security) },
+        { label: `${distanceLy.toFixed(1)} LY`, color: '#67e8f9' },
+        { label: system.starType, color: '#94a3b8' },
+      ];
+      if (beltCount > 0) badges.push({ label: `${beltCount} Belts`, color: '#fb923c' });
+      if (system.stationId) badges.push({ label: 'Station', color: '#a78bfa' });
+      if (threatCount > 0) badges.push({ label: `${threatCount} Threat`, color: '#f87171' });
+      if (directReachable) badges.push({ label: 'Direct', color: '#34d399' });
+
       return {
         value: system.id,
-        label: `${visitedSystems[system.id] ? '' : '? '}${system.name}`,
-        description: visitedSystems[system.id] ? `${secLabel(system.security)} destination` : 'Unvisited destination',
-        group: visitedSystems[system.id] ? secLabel(system.security) : 'Unvisited',
+        label: `${isVisited ? '' : '? '}${system.name}`,
+        description: [
+          isVisited ? secLabel(system.security) : 'Unvisited',
+          sameRegion ? 'same region' : sameSector ? 'same sector' : system.regionName,
+        ].join(' · '),
+        meta: [
+          `${distanceLy.toFixed(1)} LY`,
+          directReachable ? 'direct jump' : 'multi-hop',
+        ].join(' · '),
+        group: isVisited ? secLabel(system.security) : 'Unvisited',
         tone,
-        badges: [{ label: system.starType, color: '#94a3b8' }],
-        keywords: [system.name, system.security, system.starType, visitedSystems[system.id] ? 'visited' : 'unvisited'],
+        badges,
+        keywords: [
+          system.name,
+          system.security,
+          system.starType,
+          system.regionName,
+          isVisited ? 'visited' : 'unvisited',
+          directReachable ? 'reachable direct' : 'multi hop',
+          system.stationId ? 'station' : 'no station',
+          beltCount > 0 ? 'belts mining' : 'no belts',
+          threatCount > 0 ? 'hostile threat pirates' : 'quiet safe',
+          sameRegion ? 'same region' : '',
+          sameSector ? 'same sector' : '',
+        ].filter(Boolean),
       };
-    })
-  ), [allSystemsSorted, visitedSystems]);
+    });
+
+    if (routeTo && !mapped.some(option => option.value === routeTo)) {
+      const selected = destinationIntel.find(entry => entry.system.id === routeTo);
+      if (selected) {
+        mapped.unshift({
+          value: selected.system.id,
+          label: `${selected.isVisited ? '' : '? '}${selected.system.name}`,
+          description: 'Currently selected destination · hidden by active filters',
+          meta: `${selected.distanceLy.toFixed(1)} LY`,
+          group: 'Selected',
+          tone: (selected.isVisited ? 'cyan' : 'slate') as DropdownOption['tone'],
+          badges: [{ label: 'Selected', color: '#22d3ee' }],
+          keywords: [selected.system.name, 'selected'],
+        });
+      }
+    }
+
+    return mapped;
+  }, [
+    destinationBeltsOnly,
+    destinationIntel,
+    destinationReachableOnly,
+    destinationSameRegionOnly,
+    destinationSecurity,
+    destinationSort,
+    destinationStationsOnly,
+    destinationThreat,
+    destinationVisitedOnly,
+    routeOriginSystem,
+    routeTo,
+  ]);
+  const selectedDestinationOption = useMemo(
+    () => destinationOptions.find(option => option.value === routeTo) ?? null,
+    [destinationOptions, routeTo],
+  );
+  const destinationFilterCount = [
+    destinationSecurity !== 'all',
+    destinationThreat !== 'all',
+    destinationVisitedOnly,
+    destinationReachableOnly,
+    destinationStationsOnly,
+    destinationBeltsOnly,
+    destinationSameRegionOnly,
+  ].filter(Boolean).length;
+  const destinationMenuHeader = useMemo(() => {
+    const toggleChipStyle = (active: boolean, color: string): React.CSSProperties => ({
+      padding: '4px 8px',
+      borderRadius: 999,
+      border: `1px solid ${active ? `${color}55` : 'rgba(51,65,85,0.65)'}`,
+      background: active ? `${color}14` : 'rgba(15,23,42,0.72)',
+      color: active ? color : '#94a3b8',
+      fontSize: 8,
+      fontWeight: 600,
+      letterSpacing: '0.08em',
+      textTransform: 'uppercase',
+      cursor: 'pointer',
+    });
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+          <span style={{ fontSize: 8, color: '#64748b', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Destination Filters</span>
+          <span style={{ fontSize: 8, color: destinationFilterCount > 0 ? '#67e8f9' : '#475569', fontFamily: 'JetBrains Mono, monospace' }}>
+            {destinationOptions.length} matches · {destinationFilterCount > 0 ? `${destinationFilterCount} active` : 'broad scan'}
+          </span>
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          {[
+            { value: 'distance-asc', label: 'Nearest', color: '#22d3ee' },
+            { value: 'name', label: 'A-Z', color: '#94a3b8' },
+            { value: 'security', label: 'Security', color: '#34d399' },
+            { value: 'belts', label: 'Belts', color: '#fb923c' },
+            { value: 'threat', label: 'Threat', color: '#f87171' },
+          ].map(chip => (
+            <button
+              key={chip.value}
+              type="button"
+              onClick={() => setDestinationSort(chip.value as DestinationSortMode)}
+              style={toggleChipStyle(destinationSort === chip.value, chip.color)}
+            >
+              {chip.label}
+            </button>
+          ))}
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          {[
+            { value: 'all', label: 'Any Sec', color: '#22d3ee' },
+            { value: 'highsec', label: 'High', color: '#34d399' },
+            { value: 'lowsec', label: 'Low', color: '#fb923c' },
+            { value: 'nullsec', label: 'Null', color: '#f87171' },
+          ].map(chip => (
+            <button
+              key={chip.value}
+              type="button"
+              onClick={() => setDestinationSecurity(chip.value as DestinationSecurityFilter)}
+              style={toggleChipStyle(destinationSecurity === chip.value, chip.color)}
+            >
+              {chip.label}
+            </button>
+          ))}
+          {[
+            { value: 'all', label: 'Any Threat', color: '#22d3ee' },
+            { value: 'quiet', label: 'Quiet', color: '#34d399' },
+            { value: 'hostile', label: 'Hostile', color: '#f87171' },
+          ].map(chip => (
+            <button
+              key={chip.value}
+              type="button"
+              onClick={() => setDestinationThreat(chip.value as DestinationThreatFilter)}
+              style={toggleChipStyle(destinationThreat === chip.value, chip.color)}
+            >
+              {chip.label}
+            </button>
+          ))}
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          {[
+            { label: 'Visited', active: destinationVisitedOnly, onClick: () => setDestinationVisitedOnly(value => !value), color: '#22d3ee' },
+            { label: 'Direct', active: destinationReachableOnly, onClick: () => setDestinationReachableOnly(value => !value), color: '#34d399' },
+            { label: 'Stations', active: destinationStationsOnly, onClick: () => setDestinationStationsOnly(value => !value), color: '#a78bfa' },
+            { label: 'Belts', active: destinationBeltsOnly, onClick: () => setDestinationBeltsOnly(value => !value), color: '#fb923c' },
+            { label: 'Same Region', active: destinationSameRegionOnly, onClick: () => setDestinationSameRegionOnly(value => !value), color: '#67e8f9' },
+          ].map(chip => (
+            <button
+              key={chip.label}
+              type="button"
+              onClick={chip.onClick}
+              style={toggleChipStyle(chip.active, chip.color)}
+            >
+              {chip.label}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }, [
+    destinationBeltsOnly,
+    destinationFilterCount,
+    destinationOptions.length,
+    destinationReachableOnly,
+    destinationSameRegionOnly,
+    destinationSecurity,
+    destinationSort,
+    destinationStationsOnly,
+    destinationThreat,
+    destinationVisitedOnly,
+  ]);
+
+  const renderDestinationDetail = useCallback((option: DropdownOption | null) => {
+    if (!option) {
+      return <div style={{ fontSize: 10, color: '#64748b' }}>Hover a destination to inspect travel, risk, and mining intel.</div>;
+    }
+    const intel = destinationIntel.find(entry => entry.system.id === option.value);
+    if (!intel) {
+      return <div style={{ fontSize: 10, color: '#64748b' }}>Destination intel unavailable.</div>;
+    }
+
+    const { system, isVisited, distanceLy, directReachable, beltCount, threatCount, sameRegion, sameSector } = intel;
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 600, color: '#e2e8f0' }}>{system.name}</div>
+          <div style={{ marginTop: 2, fontSize: 9, color: '#64748b' }}>{system.regionName}</div>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 6 }}>
+          <div style={{ padding: '6px 8px', borderRadius: 8, border: '1px solid rgba(51,65,85,0.7)', background: 'rgba(15,23,42,0.62)' }}>
+            <div style={{ fontSize: 8, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Distance</div>
+            <div style={{ marginTop: 2, fontSize: 11, color: '#67e8f9', fontFamily: 'JetBrains Mono, monospace' }}>{distanceLy.toFixed(1)} LY</div>
+          </div>
+          <div style={{ padding: '6px 8px', borderRadius: 8, border: '1px solid rgba(51,65,85,0.7)', background: 'rgba(15,23,42,0.62)' }}>
+            <div style={{ fontSize: 8, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Security</div>
+            <div style={{ marginTop: 2, fontSize: 11, color: secColor(system.security) }}>{secLabel(system.security)}</div>
+          </div>
+          <div style={{ padding: '6px 8px', borderRadius: 8, border: '1px solid rgba(51,65,85,0.7)', background: 'rgba(15,23,42,0.62)' }}>
+            <div style={{ fontSize: 8, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Travel</div>
+            <div style={{ marginTop: 2, fontSize: 11, color: directReachable ? '#34d399' : '#fbbf24' }}>{directReachable ? 'Direct jump' : 'Route solve needed'}</div>
+          </div>
+          <div style={{ padding: '6px 8px', borderRadius: 8, border: '1px solid rgba(51,65,85,0.7)', background: 'rgba(15,23,42,0.62)' }}>
+            <div style={{ fontSize: 8, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Threats</div>
+            <div style={{ marginTop: 2, fontSize: 11, color: threatCount > 0 ? '#f87171' : '#94a3b8' }}>{threatCount > 0 ? `${threatCount} active` : 'Quiet'}</div>
+          </div>
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          <span style={{ fontSize: 8, padding: '2px 6px', borderRadius: 999, border: '1px solid rgba(51,65,85,0.7)', color: '#94a3b8', background: 'rgba(15,23,42,0.62)' }}>{isVisited ? 'Visited' : 'Unvisited'}</span>
+          <span style={{ fontSize: 8, padding: '2px 6px', borderRadius: 999, border: '1px solid rgba(51,65,85,0.7)', color: beltCount > 0 ? '#fb923c' : '#94a3b8', background: 'rgba(15,23,42,0.62)' }}>{beltCount > 0 ? `${beltCount} asteroid belts` : 'No belts'}</span>
+          <span style={{ fontSize: 8, padding: '2px 6px', borderRadius: 999, border: '1px solid rgba(51,65,85,0.7)', color: system.stationId ? '#a78bfa' : '#94a3b8', background: 'rgba(15,23,42,0.62)' }}>{system.stationId ? 'Station' : 'No station'}</span>
+          <span style={{ fontSize: 8, padding: '2px 6px', borderRadius: 999, border: '1px solid rgba(51,65,85,0.7)', color: sameRegion || sameSector ? '#22d3ee' : '#94a3b8', background: 'rgba(15,23,42,0.62)' }}>{sameRegion ? 'Same region' : sameSector ? 'Same sector' : 'Remote destination'}</span>
+        </div>
+      </div>
+    );
+  }, [destinationIntel]);
 
   // Compute security breakdown for active route
   const secCount = activeRoute ? {
@@ -1640,13 +1971,18 @@ function RoutePlanner({
           emptyOptionDescription="Pick a target system to solve a route"
           searchPlaceholder="Search all known and unknown systems..."
           size="compact"
-          menuWidth={340}
+          menuWidth={420}
+          menuHeader={destinationMenuHeader}
+          renderDetail={renderDestinationDetail}
+          detailTitle={selectedDestinationOption?.label ? `${selectedDestinationOption.label} intel` : 'Destination intel'}
+          detailEmpty="Hover a destination to inspect it before selecting."
+          detailPlacement="bottom"
           buttonStyle={tutorialDropdownStyle}
         />
         <div style={{ fontSize: 7, color: tutorialDispatchStep ? '#67e8f9' : '#334155', marginTop: 4, lineHeight: 1.45 }}>
           {tutorialDispatchStep && tutorialFleetContext.targetSystemName
             ? `Route the starter fleet into ${tutorialFleetContext.targetSystemName}, then solve and dispatch the route.`
-            : 'Tip: while the Route tab is open, click a system directly on the map to set the destination.'}
+            : 'Tip: sort by distance, narrow by security or threat profile, then click a system on the map at any time to set it as the destination.'}
         </div>
       </div>
 
@@ -1712,20 +2048,23 @@ function RoutePlanner({
       <div style={{ display: 'flex', gap: 4 }}>
         <button onClick={onComputeRoute} disabled={!routeFrom || !routeTo}
           data-tutorial-anchor={tutorialDispatchStep ? 'starmap-route-find' : undefined}
-          className={tutorialDispatchStep ? 'tutorial-breathe relative z-[74]' : undefined}
+          className={`legacy-panel-btn ${tutorialDispatchStep ? 'tutorial-breathe relative z-[74]' : ''}`.trim()}
           style={{
             flex: 1, padding: '8px 10px', fontSize: 9, fontWeight: 700,
-            border: '1px solid rgba(34,211,238,0.3)', borderRadius: 6,
-            background: routeFrom && routeTo ? 'rgba(8,51,68,0.4)' : 'rgba(6,9,20,0.2)',
-            color: routeFrom && routeTo ? '#22d3ee' : '#334155',
-            cursor: routeFrom && routeTo ? 'pointer' : 'not-allowed',
+            '--legacy-border': 'rgba(34,211,238,0.3)',
+            '--legacy-bg': routeFrom && routeTo ? 'rgba(8,51,68,0.4)' : 'rgba(6,9,20,0.2)',
+            '--legacy-color': routeFrom && routeTo ? '#22d3ee' : '#334155',
+            '--legacy-hover-border': 'rgba(103,232,249,0.52)',
+            '--legacy-hover-bg': 'rgba(8,51,68,0.56)',
+            '--legacy-hover-color': '#cffafe',
+            '--legacy-hover-shadow': '0 0 12px rgba(34,211,238,0.18)',
             ...tutorialButtonStyle,
-          }}
+          } as React.CSSProperties}
         >
           Find Route
         </button>
         {activeRoute && (
-          <button onClick={onClearRoute} style={{ padding: '8px 10px', fontSize: 9, border: '1px solid rgba(239,68,68,0.25)', borderRadius: 6, background: 'rgba(127,29,29,0.15)', color: '#f87171', cursor: 'pointer' }}>
+          <button onClick={onClearRoute} className="legacy-panel-btn" style={{ padding: '8px 10px', fontSize: 9, '--legacy-border': 'rgba(239,68,68,0.25)', '--legacy-bg': 'rgba(127,29,29,0.15)', '--legacy-color': '#f87171', '--legacy-hover-border': 'rgba(248,113,113,0.48)', '--legacy-hover-bg': 'rgba(127,29,29,0.3)', '--legacy-hover-color': '#fecaca', '--legacy-hover-shadow': '0 0 10px rgba(239,68,68,0.14)' } as React.CSSProperties}>
             Clear
           </button>
         )}
@@ -1740,18 +2079,20 @@ function RoutePlanner({
             <button
               onClick={() => onDispatch(selectedFleet.id)}
               data-tutorial-anchor={tutorialDispatchStep ? 'starmap-route-dispatch' : undefined}
-              className={tutorialDispatchStep ? 'tutorial-breathe relative z-[74]' : undefined}
+              className={`legacy-panel-btn ${tutorialDispatchStep ? 'tutorial-breathe relative z-[74]' : ''}`.trim()}
               style={{
                 width: '100%', padding: '8px 10px', fontSize: 9, fontWeight: 700,
-                border: `1px solid ${selectedFleetColor}55`,
-                borderRadius: 6,
-                background: `${selectedFleetColor}20`,
-                color: selectedFleetColor ?? '#a78bfa',
-                cursor: 'pointer',
+                '--legacy-border': `${selectedFleetColor}55`,
+                '--legacy-bg': `${selectedFleetColor}20`,
+                '--legacy-color': selectedFleetColor ?? '#a78bfa',
+                '--legacy-hover-border': `${selectedFleetColor}88`,
+                '--legacy-hover-bg': `${selectedFleetColor}32`,
+                '--legacy-hover-color': selectedFleetColor ?? '#c4b5fd',
+                '--legacy-hover-shadow': `0 0 12px ${selectedFleetColor}22`,
                 marginBottom: 8,
                 letterSpacing: '0.06em',
                 boxShadow: tutorialDispatchStep ? '0 0 0 1px rgba(34,211,238,0.16), 0 0 18px rgba(34,211,238,0.16)' : undefined,
-              }}
+              } as React.CSSProperties}
             >
               ▶ Dispatch {selectedFleet.name} →
             </button>
@@ -1895,9 +2236,9 @@ function ZLayerControl({ zSlice, onUp, onDown, onReset }: {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
       <div style={{ fontSize: 7, color: '#334155', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Z</div>
-      <button style={bs} onClick={onUp}    title="Move Up (higher Z slice)">△</button>
-      <button style={bs} onClick={onReset} title="Galactic plane (Z=50%)">⌂</button>
-      <button style={bs} onClick={onDown}  title="Move Down (lower Z slice)">▽</button>
+      <button className="legacy-panel-btn" style={bs} onClick={onUp}    title="Move Up (higher Z slice)">△</button>
+      <button className="legacy-panel-btn" style={bs} onClick={onReset} title="Galactic plane (Z=50%)">⌂</button>
+      <button className="legacy-panel-btn" style={bs} onClick={onDown}  title="Move Down (lower Z slice)">▽</button>
       <div style={{ fontSize: 7, color: '#334155', fontFamily: 'monospace', textAlign: 'center', marginTop: 2 }}>
         {(zSlice * 100).toFixed(0)}
       </div>
@@ -2163,13 +2504,13 @@ function StarMapPanelInner() {
     onlyVisited: false, onlyWithBelts: false, hasNullOres: false,
   });
 
-  const [routeFrom,      setRouteFrom]      = useState<string | null>(galaxy.currentSystemId);
-  const [routeTo,        setRouteTo]        = useState<string | null>(null);
+  const [routeFrom,      setRouteFrom]      = useState<string | null>(() => savedPanelState.routeFrom ?? galaxy.currentSystemId);
+  const [routeTo,        setRouteTo]        = useState<string | null>(() => savedPanelState.routeTo ?? null);
   const [jumpRangeLY,    setJumpRangeLY]    = useState(DEFAULT_JUMP_RANGE_LY);
-  const [routeFilter,    setRouteFilter]    = useState<RouteSecurityFilter>('shortest');
+  const [routeFilter,    setRouteFilter]    = useState<RouteSecurityFilter>(() => savedPanelState.routeFilter ?? 'shortest');
   const [activeRoute,    setActiveRoute]    = useState<ActiveRoute | null>(null);
   const [routeComputed,  setRouteComputed]  = useState(false);
-  const [routeFleetId,   setRouteFleetId]   = useState<string | null>(null);
+  const [routeFleetId,   setRouteFleetId]   = useState<string | null>(() => savedPanelState.routeFleetId ?? null);
   const [dispatchFeedback, setDispatchFeedback] = useState<RouteDispatchFeedback | null>(null);
   const [overlay,        setOverlay]        = useState<OverlayMode>('default');
   const [hoverPreview,   setHoverPreview]   = useState<HoverPreview | null>(null);
@@ -2186,11 +2527,30 @@ function StarMapPanelInner() {
     if (savedPanelState.rightTab && savedPanelState.rightTab !== rightTab) {
       setRightTab(savedPanelState.rightTab);
     }
-  }, [savedPanelState.selectedId, savedPanelState.rightTab]);
+    if (savedPanelState.routeFrom !== undefined && savedPanelState.routeFrom !== routeFrom) {
+      setRouteFrom(savedPanelState.routeFrom ?? null);
+    }
+    if (savedPanelState.routeTo !== undefined && savedPanelState.routeTo !== routeTo) {
+      setRouteTo(savedPanelState.routeTo ?? null);
+    }
+    if (savedPanelState.routeFilter && savedPanelState.routeFilter !== routeFilter) {
+      setRouteFilter(savedPanelState.routeFilter);
+    }
+    if (savedPanelState.routeFleetId !== undefined && savedPanelState.routeFleetId !== routeFleetId) {
+      setRouteFleetId(savedPanelState.routeFleetId ?? null);
+    }
+  }, [
+    savedPanelState.selectedId,
+    savedPanelState.rightTab,
+    savedPanelState.routeFrom,
+    savedPanelState.routeTo,
+    savedPanelState.routeFilter,
+    savedPanelState.routeFleetId,
+  ]);
 
   useEffect(() => {
-    setPanelState('starmap', { selectedId, rightTab });
-  }, [selectedId, rightTab, setPanelState]);
+    setPanelState('starmap', { selectedId, rightTab, routeFrom, routeTo, routeFilter, routeFleetId });
+  }, [selectedId, rightTab, routeFrom, routeTo, routeFilter, routeFleetId, setPanelState]);
 
   // Warp ticker
   const warp    = galaxy.warp;
@@ -2267,6 +2627,35 @@ function StarMapPanelInner() {
     setRouteComputed(false);
     setDispatchFeedback(null);
   }, []);
+
+  useEffect(() => {
+    if (!routeFleetId) return;
+    const fleet = playerFleets.find(entry => entry.id === routeFleetId);
+    if (!fleet) {
+      setRouteFleetId(null);
+      return;
+    }
+    if (!fleet.fleetOrder) return;
+
+    const liveRoute = buildActiveRouteFromPath(allSystems, fleet.fleetOrder.route);
+    if (!liveRoute) return;
+
+    setRouteFrom(liveRoute.fromId);
+    setRouteTo(fleet.fleetOrder.destinationSystemId);
+    setRouteFilter(fleet.fleetOrder.securityFilter);
+    setActiveRoute(currentRoute => {
+      if (
+        currentRoute
+        && currentRoute.path.length === liveRoute.path.length
+        && currentRoute.path.every((systemId, index) => systemId === liveRoute.path[index])
+        && currentRoute.toId === liveRoute.toId
+      ) {
+        return currentRoute;
+      }
+      return liveRoute;
+    });
+    setRouteComputed(true);
+  }, [allSystems, playerFleets, routeFleetId]);
 
   useEffect(() => {
     if (!tutorialDispatchStep) {
@@ -2349,7 +2738,8 @@ function StarMapPanelInner() {
                 {allSystems.find(s => s.id === selectedId)?.name ?? selectedId}
               </span>
               <button onClick={() => setSelectedId(null)}
-                style={{ fontSize: 8, padding: '1px 5px', border: '1px solid rgba(71,85,105,0.3)', borderRadius: 3, background: 'transparent', color: '#475569', cursor: 'pointer', marginLeft: 2 }}
+                className="legacy-panel-btn"
+                style={{ fontSize: 8, padding: '1px 5px', marginLeft: 2, '--legacy-border': 'rgba(71,85,105,0.3)', '--legacy-bg': 'transparent', '--legacy-color': '#475569', '--legacy-hover-border': 'rgba(148,163,184,0.38)', '--legacy-hover-bg': 'rgba(15,23,42,0.68)', '--legacy-hover-color': '#e2e8f0', '--legacy-radius': '3px' } as React.CSSProperties}
               >×</button>
             </div>
           )}
@@ -2367,7 +2757,8 @@ function StarMapPanelInner() {
           />
           {searchQuery && (
             <button onClick={() => setSearchQuery('')}
-              style={{ position: 'absolute', right: 4, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: '#475569', cursor: 'pointer', fontSize: 10, padding: 0 }}
+              className="legacy-panel-btn"
+              style={{ position: 'absolute', right: 4, top: '50%', transform: 'translateY(-50%)', fontSize: 10, padding: '0 2px', '--legacy-border': 'transparent', '--legacy-bg': 'transparent', '--legacy-color': '#475569', '--legacy-hover-border': 'transparent', '--legacy-hover-bg': 'rgba(15,23,42,0.45)', '--legacy-hover-color': '#e2e8f0', '--legacy-radius': '3px' } as React.CSSProperties}
             >×</button>
           )}
         </div>
@@ -2381,13 +2772,17 @@ function StarMapPanelInner() {
               ['fleet',    '▶ FLT'],
               ['faction',  '⚑ FAC'],
             ] as [OverlayMode, string][]).map(([mode, label]) => (
-              <button key={mode} onClick={() => setOverlay(mode)} style={{
+              <button key={mode} onClick={() => setOverlay(mode)} className="legacy-panel-btn" style={{
                 padding: '3px 7px', fontSize: 8, fontWeight: 600, letterSpacing: '0.06em',
-                border: 'none', cursor: 'pointer',
-                background: overlay === mode ? 'rgba(34,211,238,0.15)' : 'rgba(6,9,20,0.5)',
-                color: overlay === mode ? '#22d3ee' : '#334155',
+                '--legacy-border': 'transparent',
+                '--legacy-bg': overlay === mode ? 'rgba(34,211,238,0.15)' : 'rgba(6,9,20,0.5)',
+                '--legacy-color': overlay === mode ? '#22d3ee' : '#334155',
+                '--legacy-hover-border': 'transparent',
+                '--legacy-hover-bg': overlay === mode ? 'rgba(34,211,238,0.24)' : 'rgba(15,23,42,0.74)',
+                '--legacy-hover-color': overlay === mode ? '#cffafe' : '#cbd5e1',
+                '--legacy-radius': '0px',
                 textTransform: 'uppercase',
-              }}>
+              } as React.CSSProperties}>
                 {label}
               </button>
             ))}
@@ -2396,13 +2791,16 @@ function StarMapPanelInner() {
             const active = i === 0 ? showFilters : showRight;
             const toggle = i === 0 ? () => setShowFilters(f => !f) : () => setShowRight(r => !r);
             return (
-              <button key={label} onClick={toggle} style={{
+              <button key={label} onClick={toggle} className="legacy-panel-btn" style={{
                 fontSize: 9, padding: '3px 8px',
-                border: `1px solid ${active ? 'rgba(34,211,238,0.3)' : 'rgba(30,40,60,0.5)'}`,
-                borderRadius: 3, cursor: 'pointer',
-                background: active ? 'rgba(8,51,68,0.2)' : 'rgba(6,9,20,0.3)',
-                color: active ? '#22d3ee' : '#475569',
-              }}>⊛ {label}</button>
+                '--legacy-border': active ? 'rgba(34,211,238,0.3)' : 'rgba(30,40,60,0.5)',
+                '--legacy-bg': active ? 'rgba(8,51,68,0.2)' : 'rgba(6,9,20,0.3)',
+                '--legacy-color': active ? '#22d3ee' : '#475569',
+                '--legacy-hover-border': active ? 'rgba(103,232,249,0.5)' : 'rgba(148,163,184,0.34)',
+                '--legacy-hover-bg': active ? 'rgba(8,51,68,0.4)' : 'rgba(15,23,42,0.72)',
+                '--legacy-hover-color': active ? '#cffafe' : '#cbd5e1',
+                '--legacy-radius': '3px',
+              } as React.CSSProperties}>⊛ {label}</button>
             );
           })}
           <span style={{ fontSize: 8, color: '#1e293b', fontFamily: 'monospace' }}>
@@ -2424,7 +2822,7 @@ function StarMapPanelInner() {
           <span style={{ fontSize: 10, color: '#c084fc', fontFamily: 'monospace', flexShrink: 0 }}>
             ⊛ Warping to {warpTo.name} — {formatEta(warpEta)}
           </span>
-          <button onClick={cancelWarp} style={{ padding: '2px 7px', fontSize: 9, border: '1px solid rgba(239,68,68,0.3)', borderRadius: 3, background: 'rgba(127,29,29,0.15)', color: '#f87171', cursor: 'pointer' }}>
+          <button onClick={cancelWarp} className="legacy-panel-btn" style={{ padding: '2px 7px', fontSize: 9, '--legacy-border': 'rgba(239,68,68,0.3)', '--legacy-bg': 'rgba(127,29,29,0.15)', '--legacy-color': '#f87171', '--legacy-hover-border': 'rgba(248,113,113,0.48)', '--legacy-hover-bg': 'rgba(127,29,29,0.3)', '--legacy-hover-color': '#fecaca', '--legacy-radius': '3px' } as React.CSSProperties}>
             Abort
           </button>
         </div>
@@ -2498,15 +2896,19 @@ function StarMapPanelInner() {
                 ['intel',  'Intel'],
                 ['route',  'Route'],
               ] as [typeof rightTab, string][]).map(([tab, label]) => (
-                <button key={tab} onClick={() => setRightTab(tab)} data-tutorial-anchor={tutorialDispatchStep && tab === 'route' ? 'starmap-route-tab' : undefined} className={tutorialDispatchStep && tab === 'route' ? 'tutorial-breathe relative z-[74]' : undefined} style={{
+                <button key={tab} onClick={() => setRightTab(tab)} data-tutorial-anchor={tutorialDispatchStep && tab === 'route' ? 'starmap-route-tab' : undefined} className={`legacy-panel-btn ${tutorialDispatchStep && tab === 'route' ? 'tutorial-breathe relative z-[74]' : ''}`.trim()} style={{
                   flex: 1, padding: '7px 4px', fontSize: 9, fontWeight: 600,
-                  letterSpacing: '0.08em', textTransform: 'uppercase', cursor: 'pointer',
-                  background: rightTab === tab ? 'rgba(8,51,68,0.3)' : 'transparent',
-                  color: rightTab === tab ? '#22d3ee' : '#334155',
-                  border: 'none',
+                  letterSpacing: '0.08em', textTransform: 'uppercase',
+                  '--legacy-border': 'transparent',
+                  '--legacy-bg': rightTab === tab ? 'rgba(8,51,68,0.3)' : 'transparent',
+                  '--legacy-color': rightTab === tab ? '#22d3ee' : '#334155',
+                  '--legacy-hover-border': 'transparent',
+                  '--legacy-hover-bg': rightTab === tab ? 'rgba(8,51,68,0.42)' : 'rgba(15,23,42,0.68)',
+                  '--legacy-hover-color': rightTab === tab ? '#cffafe' : '#cbd5e1',
+                  '--legacy-radius': '0px',
                   borderBottom: rightTab === tab ? '2px solid #22d3ee' : '2px solid transparent',
                   boxShadow: tutorialDispatchStep && tab === 'route' ? 'inset 0 0 0 1px rgba(34,211,238,0.14), 0 0 14px rgba(34,211,238,0.12)' : undefined,
-                }}>
+                } as React.CSSProperties}>
                   {label}
                 </button>
               ))}

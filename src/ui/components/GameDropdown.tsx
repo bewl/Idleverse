@@ -57,6 +57,7 @@ export interface GameDropdownProps {
   detailTitle?: string;
   detailEmpty?: ReactNode;
   detailPlacement?: 'right' | 'bottom';
+  menuHeader?: ReactNode;
   noResults?: ReactNode;
 }
 
@@ -187,6 +188,7 @@ export function GameDropdown({
   detailTitle,
   detailEmpty,
   detailPlacement = 'right',
+  menuHeader,
   noResults,
 }: GameDropdownProps) {
   const emptyEntryValue = '__dropdown-empty__';
@@ -339,13 +341,13 @@ export function GameDropdown({
     const target = event.target as HTMLElement | null;
     const entryElement = target?.closest?.('[data-dropdown-entry]') as HTMLElement | null;
     if (!entryElement) {
-      setHoveredValue(null);
       return;
     }
 
     const nextEntry = entryElement.dataset.dropdownEntry;
-    setHoveredValue(nextEntry || null);
-  }, []);
+    if (!nextEntry || nextEntry === hoveredValue) return;
+    setHoveredValue(nextEntry);
+  }, [hoveredValue]);
 
   const toneColor = getToneColor(selectedOption?.tone ?? triggerTone);
   const triggerPadding = size === 'compact' ? '0 9px' : '0 11px';
@@ -353,6 +355,7 @@ export function GameDropdown({
   const triggerMinHeight = size === 'compact' ? 28 : 34;
   const optionPadding = size === 'compact' ? '5px 8px' : '6px 9px';
   const optionMinHeight = size === 'compact' ? 28 : 32;
+  const optionSpacing = 4;
   const hasDetailPane = !!renderDetail;
   const contentDirection = detailPlacement === 'bottom' ? 'column' : 'row';
 
@@ -466,7 +469,18 @@ export function GameDropdown({
             </div>
           )}
 
-          <div style={{ display: 'flex', flexDirection: contentDirection, gap: 10, paddingTop: searchable || (filterable && groups.length > 1) ? 2 : 0 }}>
+          {menuHeader && (
+            <div style={{
+              padding: '0 0 10px',
+              marginTop: searchable || (filterable && groups.length > 1) ? 2 : 0,
+              marginBottom: 2,
+              borderBottom: '1px solid rgba(15,23,42,0.8)',
+            }}>
+              {menuHeader}
+            </div>
+          )}
+
+          <div style={{ display: 'flex', flexDirection: contentDirection, gap: 10, paddingTop: searchable || (filterable && groups.length > 1) || menuHeader ? 2 : 0 }}>
             <div style={{
               flex: hasDetailPane && detailPlacement === 'right' ? '0 0 52%' : 1,
               minWidth: 0,
@@ -474,33 +488,34 @@ export function GameDropdown({
               overflowY: 'auto',
               display: 'flex',
               flexDirection: 'column',
-              gap: 4,
-            }} onMouseMove={handleListMouseMove} onMouseLeave={() => setHoveredValue(null)}>
+              gap: 0,
+            }} onMouseMove={handleListMouseMove}>
               {emptyOptionLabel && (
-                <button
-                  data-dropdown-entry={emptyEntryValue}
-                  type="button"
-                  onClick={() => selectValue('')}
-                  style={{
-                    width: '100%',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    justifyContent: 'center',
-                    alignItems: 'flex-start',
-                    gap: 1,
-                    padding: optionPadding,
-                    minHeight: optionMinHeight,
-                    boxSizing: 'border-box',
-                    borderRadius: 8,
-                    border: '1px solid transparent',
-                    background: hoveredValue === emptyEntryValue ? 'rgba(148,163,184,0.10)' : 'transparent',
-                    color: '#cbd5e1',
-                    textAlign: 'left',
-                  }}
-                >
-                  <span>{emptyOptionLabel}</span>
-                  {emptyOptionDescription && <span style={{ color: '#64748b', fontSize: 10 }}>{emptyOptionDescription}</span>}
-                </button>
+                <div data-dropdown-entry={emptyEntryValue} style={{ paddingBottom: visibleOptions.length > 0 ? optionSpacing : 0 }}>
+                  <button
+                    type="button"
+                    onClick={() => selectValue('')}
+                    style={{
+                      width: '100%',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      justifyContent: 'center',
+                      alignItems: 'flex-start',
+                      gap: 1,
+                      padding: optionPadding,
+                      minHeight: optionMinHeight,
+                      boxSizing: 'border-box',
+                      borderRadius: 8,
+                      border: '1px solid transparent',
+                      background: hoveredValue === emptyEntryValue ? 'rgba(148,163,184,0.10)' : 'transparent',
+                      color: '#cbd5e1',
+                      textAlign: 'left',
+                    }}
+                  >
+                    <span>{emptyOptionLabel}</span>
+                    {emptyOptionDescription && <span style={{ color: '#64748b', fontSize: 10 }}>{emptyOptionDescription}</span>}
+                  </button>
+                </div>
               )}
 
               {visibleOptions.length === 0 ? (
@@ -511,34 +526,38 @@ export function GameDropdown({
                 const selected = option.value === value;
                 const active = option.value === hoveredValue;
                 return (
-                  <button
+                  <div
                     key={option.value}
                     data-dropdown-entry={option.value}
-                    type="button"
-                    disabled={option.disabled}
-                    onClick={() => !option.disabled && selectValue(option.value)}
-                    style={{
-                      width: '100%',
-                      padding: optionPadding,
-                      minHeight: optionMinHeight,
-                      boxSizing: 'border-box',
-                      borderRadius: 8,
-                      border: selected ? `1px solid ${getToneColor(option.tone)}44` : '1px solid transparent',
-                      background: selected
-                        ? `${getToneColor(option.tone)}12`
-                        : active
-                          ? 'rgba(148,163,184,0.10)'
-                          : 'transparent',
-                      color: option.disabled ? '#475569' : '#cbd5e1',
-                      fontSize: size === 'compact' ? 10 : 11,
-                      lineHeight: 1.1,
-                      textAlign: 'left',
-                      opacity: option.disabled ? 0.5 : 1,
-                      cursor: option.disabled ? 'not-allowed' : 'pointer',
-                    }}
+                    style={{ paddingBottom: optionIndex < visibleOptions.length - 1 ? optionSpacing : 0 }}
                   >
-                    {renderOption ? renderOption(option, { selected, active }) : <DefaultOption option={option} selected={selected} active={active} />}
-                  </button>
+                    <button
+                      type="button"
+                      disabled={option.disabled}
+                      onClick={() => !option.disabled && selectValue(option.value)}
+                      style={{
+                        width: '100%',
+                        padding: optionPadding,
+                        minHeight: optionMinHeight,
+                        boxSizing: 'border-box',
+                        borderRadius: 8,
+                        border: selected ? `1px solid ${getToneColor(option.tone)}44` : '1px solid transparent',
+                        background: selected
+                          ? `${getToneColor(option.tone)}12`
+                          : active
+                            ? 'rgba(148,163,184,0.10)'
+                            : 'transparent',
+                        color: option.disabled ? '#475569' : '#cbd5e1',
+                        fontSize: size === 'compact' ? 10 : 11,
+                        lineHeight: 1.1,
+                        textAlign: 'left',
+                        opacity: option.disabled ? 0.5 : 1,
+                        cursor: option.disabled ? 'not-allowed' : 'pointer',
+                      }}
+                    >
+                      {renderOption ? renderOption(option, { selected, active }) : <DefaultOption option={option} selected={selected} active={active} />}
+                    </button>
+                  </div>
                 );
               })}
             </div>

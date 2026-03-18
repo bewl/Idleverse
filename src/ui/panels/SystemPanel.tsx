@@ -22,8 +22,8 @@ import { NavTag } from '@/ui/components/NavTag';
 import { HULL_DEFINITIONS } from '@/game/systems/fleet/fleet.config';
 import { GameTooltip } from '@/ui/components/GameTooltip';
 import { GameDropdown, type DropdownOption } from '@/ui/components/GameDropdown';
-import { ActivityBar } from '@/ui/effects/ActivityBar';
 import { SKILL_DEFINITIONS } from '@/game/systems/skills/skills.config';
+import { SystemSceneCanvas, type SystemSceneHoverTarget } from '@/ui/panels/SystemSceneCanvas';
 import type { CelestialBody } from '@/types/galaxy.types';
 import type { Anomaly, AnomalyType, PlayerFleet } from '@/types/game.types';
 import { getTutorialFleetTravelContext, isTutorialStepCurrent } from '@/game/progression/tutorialSequence';
@@ -673,6 +673,42 @@ function CommandMetric({
   );
 }
 
+function SceneIntelPill({
+  label,
+  value,
+  tone = 'slate',
+}: {
+  label: string;
+  value: string;
+  tone?: 'cyan' | 'violet' | 'amber' | 'emerald' | 'slate';
+}) {
+  const toneStyles =
+    tone === 'cyan'
+      ? { color: '#67e8f9', border: '1px solid rgba(34,211,238,0.2)', background: 'rgba(8,51,68,0.18)' }
+      : tone === 'violet'
+        ? { color: '#c4b5fd', border: '1px solid rgba(167,139,250,0.2)', background: 'rgba(49,46,129,0.16)' }
+        : tone === 'amber'
+          ? { color: '#fcd34d', border: '1px solid rgba(251,191,36,0.2)', background: 'rgba(120,70,0,0.14)' }
+          : tone === 'emerald'
+            ? { color: '#86efac', border: '1px solid rgba(74,222,128,0.2)', background: 'rgba(20,83,45,0.16)' }
+            : { color: '#cbd5e1', border: '1px solid rgba(51,65,85,0.35)', background: 'rgba(15,23,42,0.5)' };
+
+  return (
+    <div style={{
+      padding: '6px 8px',
+      borderRadius: 999,
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 7,
+      backdropFilter: 'blur(10px)',
+      ...toneStyles,
+    }}>
+      <span style={{ fontSize: 8, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.1em' }}>{label}</span>
+      <span style={{ fontSize: 10, fontWeight: 700, fontFamily: 'monospace' }}>{value}</span>
+    </div>
+  );
+}
+
 interface BeltAssignmentFeedback {
   tone: 'success' | 'error';
   text: string;
@@ -1230,15 +1266,11 @@ function SystemPanelInner() {
   const savedPanelState = useUiStore(s => s.panelStates.system);
   const setPanelState = useUiStore(s => s.setPanelState);
 
-  // Ref to the orrery wrapper so we can compute tooltip position on focus navigation
-  const orreryWrapRef = useRef<HTMLDivElement>(null);
-
   const [viewingSystemId, setViewingSystemId] = useState<string>(() => savedPanelState.viewingSystemId ?? galaxy.currentSystemId);
 
   // Fleet tooltip state (declared early so focusTarget effect can pin)
-  const [hovFleetId, setHovFleetId] = useState<string | null>(null);
   const [pinnedFleetId, setPinnedFleetId] = useState<string | null>(null);
-  const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [sceneHover, setSceneHover] = useState<SystemSceneHoverTarget | null>(null);
   const setFleetScanning = useGameStore(s => s.setFleetScanning);
 
   // Sync viewing system when player warps to a new system
@@ -1250,6 +1282,9 @@ function SystemPanelInner() {
   useEffect(() => {
     if (focusTarget?.entityType === 'system') {
       setViewingSystemId(focusTarget.entityId);
+      setActiveTab('orrery');
+      setPinnedFleetId(null);
+      setSceneHover(null);
       clearFocus();
     } else if (focusTarget?.entityType === 'fleet') {
       // Navigate to the fleet's current system and auto-pin it
@@ -1258,24 +1293,9 @@ function SystemPanelInner() {
       if (fleet) {
         setViewingSystemId(fleet.currentSystemId);
         setPinnedFleetId(fleet.id);
-        // Compute expected canvas parking-orbit position for the tooltip
-        const wrap = orreryWrapRef.current;
-        if (wrap) {
-          const rect     = wrap.getBoundingClientRect();
-          const cx       = rect.left + rect.width  / 2;
-          const cy       = rect.top  + rect.height / 2;
-          const parkR    = Math.min(rect.width, rect.height) * FLEET_PARKING_FRAC;
-          // Use the same stable angle as the canvas (hashId + angleStep)
-          const fleetIds = fleets
-            .filter(f => f.currentSystemId === fleet.currentSystemId && f.shipIds.length > 0)
-            .map(f => f.id);
-          const fi       = fleetIds.indexOf(fleet.id);
-          const angle    = (Math.PI * 2 / Math.max(fleetIds.length, 1)) * fi + hashId(fleet.id);
-          setTooltipPos({
-            x: cx + Math.cos(angle) * parkR,
-            y: cy + Math.sin(angle) * parkR,
-          });
-        }
+        setSelectedBodyId(null);
+        setActiveTab('orrery');
+        setSceneHover(null);
       }
       clearFocus();
     }
@@ -1396,18 +1416,75 @@ function SystemPanelInner() {
           : 'Deploy a POS Core here and promote it to Corp HQ.';
   const activeFleetCount = localFleets.filter(fleet => fleet.shipIds.length > 0).length;
   const scanningFleetCount = localFleets.filter(fleet => fleet.isScanning).length;
-  const activeMiningRatio = systemBeltIds.length > 0 ? activeBeltCount / systemBeltIds.length : 0;
-  const activityRate = Math.min(1, Math.max(
-    activeFleetCount / Math.max(1, localFleets.length || 1),
-    activeMiningRatio,
-    revealedCount / Math.max(1, systemAnomalies.length || 1),
-    scanningFleetCount > 0 ? 0.65 : 0,
-  ));
   const selectedBodyLabel = selectedBody
     ? bodyTypeLabel(selectedBody.type)
     : activeTab === 'anomalies'
       ? `${revealedCount} revealed sites`
       : 'No body selected';
+  const pinnedFleet = useMemo(
+    () => localFleets.find(fleet => fleet.id === pinnedFleetId) ?? null,
+    [localFleets, pinnedFleetId],
+  );
+  const hoveredBody = useMemo(
+    () => sceneHover?.kind === 'body'
+      ? system.bodies.find(body => body.id === sceneHover.id) ?? null
+      : null,
+    [sceneHover, system.bodies],
+  );
+  const hoveredFleet = useMemo(
+    () => sceneHover?.kind === 'fleet'
+      ? localFleets.find(fleet => fleet.id === sceneHover.id) ?? null
+      : null,
+    [sceneHover, localFleets],
+  );
+  const hoveredStructure = useMemo(() => {
+    if (!sceneHover || (sceneHover.kind !== 'station' && sceneHover.kind !== 'outpost')) return null;
+    if (sceneHover.kind === 'station' && stationDef?.id === sceneHover.id) {
+      return { label: stationDef.name, tone: 'cyan' as const, detail: isDocked ? 'Docked access' : 'Station services available' };
+    }
+    if (sceneHover.kind === 'outpost' && outpostDef?.id === sceneHover.id) {
+      return { label: outpostDef.name, tone: 'emerald' as const, detail: isOutpostHq ? 'Corp HQ outpost' : 'Player outpost' };
+    }
+    return null;
+  }, [sceneHover, stationDef, outpostDef, isDocked, isOutpostHq]);
+  const structureMarkers = useMemo(() => {
+    const markers: Array<{ kind: 'station' | 'outpost'; id: string; label: string; color: string }> = [];
+    if (stationDef) {
+      markers.push({ kind: 'station', id: stationDef.id, label: stationDef.name, color: '#67e8f9' });
+    }
+    if (outpostDef) {
+      markers.push({ kind: 'outpost', id: outpostDef.id, label: outpostDef.name, color: '#86efac' });
+    }
+    return markers;
+  }, [stationDef, outpostDef]);
+  const beltBodyIdByDepositId = useMemo(() => {
+    const mapping = new Map<string, string>();
+    system.bodies.forEach(body => {
+      if (body.type !== 'asteroid-belt') return;
+      body.beltIds.forEach(beltId => mapping.set(beltId, body.id));
+    });
+    return mapping;
+  }, [system.bodies]);
+  const miningLinks = useMemo(() => (
+    localFleets.flatMap(fleet =>
+      (fleet.wings ?? []).flatMap(wing => {
+        const beltCounts = new Map<string, number>();
+        wing.shipIds.forEach(shipId => {
+          const ship = state.systems.fleet.ships[shipId];
+          if (!ship || ship.activity !== 'mining' || !ship.assignedBeltId || ship.systemId !== system.id) return;
+          const bodyId = beltBodyIdByDepositId.get(ship.assignedBeltId) ?? ship.assignedBeltId;
+          beltCounts.set(bodyId, (beltCounts.get(bodyId) ?? 0) + 1);
+        });
+        return Array.from(beltCounts.entries()).map(([beltId, shipCount]) => ({
+          fleetId: fleet.id,
+          wingId: wing.id,
+          wingName: wing.name,
+          beltId,
+          shipCount,
+        }));
+      }),
+    )
+  ), [beltBodyIdByDepositId, localFleets, state.systems.fleet.ships, system.id]);
 
   return (
     <div style={{
@@ -1606,44 +1683,6 @@ function SystemPanelInner() {
         </div>
       )}
 
-      <div style={{
-        padding: '8px 16px',
-        borderBottom: '1px solid rgba(22,30,52,0.6)',
-        background: 'rgba(3,5,16,0.42)',
-        flexShrink: 0,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 8,
-      }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 8 }}>
-          <CommandMetric
-            label="Fleet Presence"
-            value={`${activeFleetCount}`}
-            meta={scanningFleetCount > 0 ? `${scanningFleetCount} scanning` : 'local command presence'}
-            tone={activeFleetCount > 0 ? 'cyan' : 'slate'}
-          />
-          <CommandMetric
-            label="Belts Active"
-            value={`${activeBeltCount}/${systemBeltIds.length}`}
-            meta={systemBeltIds.length > 0 ? 'mining belts online' : 'no ore belts'}
-            tone={activeBeltCount > 0 ? 'amber' : systemBeltIds.length > 0 ? 'slate' : 'slate'}
-          />
-          <CommandMetric
-            label="Anomalies"
-            value={`${revealedCount}`}
-            meta={`${systemAnomalies.length} signatures tracked`}
-            tone={revealedCount > 0 ? 'violet' : 'slate'}
-          />
-          <CommandMetric
-            label="Corp Presence"
-            value={isOutpostHq ? 'Outpost HQ' : isHqSystem ? 'Station HQ' : outpostDef ? 'Outpost' : stationDef ? 'Station' : 'Unclaimed'}
-            meta={isRegisteredHere ? 'registered access' : stationDef ? 'local services available' : 'field operations only'}
-            tone={isOutpostHq || isHqSystem ? 'emerald' : stationDef || outpostDef ? 'cyan' : 'slate'}
-          />
-        </div>
-        <ActivityBar active={activeFleetCount > 0 || activeBeltCount > 0 || revealedCount > 0} rate={activityRate} color={revealedCount > 0 ? 'violet' : activeBeltCount > 0 ? 'amber' : 'cyan'} label="System load" valueLabel={revealedCount > 0 ? `${revealedCount} signatures` : activeBeltCount > 0 ? `${activeBeltCount} active belts` : `${activeFleetCount} fleets`} />
-      </div>
-
       {outpostDef && (
         <div style={{
           padding: '6px 16px', flexShrink: 0,
@@ -1659,60 +1698,58 @@ function SystemPanelInner() {
         </div>
       )}
 
-      {/* ── Fleets in system ── */}
-      {localFleets.length > 0 && (
-        <div style={{
-          padding: '6px 16px',
-          borderBottom: '1px solid rgba(22,30,52,0.6)',
-          display: 'flex', gap: 8, flexWrap: 'wrap', flexShrink: 0,
-          background: 'rgba(3,5,16,0.4)',
-        }}>
-          <span style={{ fontSize: 8, color: '#334155', textTransform: 'uppercase', letterSpacing: '0.08em', alignSelf: 'center' }}>
-            Fleets here:
-          </span>
-          {localFleets.map(fleet => (
-            <span key={fleet.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-              <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#22d3ee', flexShrink: 0 }} />
-              <NavTag entityType="fleet" entityId={fleet.id} label={fleet.name} />
-            </span>
-          ))}
-        </div>
-      )}
-
       {/* ── Tab bar ── */}
       <div style={{
         display: 'flex', borderBottom: '1px solid rgba(22,30,52,0.8)', flexShrink: 0,
         background: 'rgba(3,5,16,0.5)',
+        justifyContent: 'space-between',
+        alignItems: 'center',
       }}>
-        {(['orrery', 'anomalies'] as const).map(tab => {
-          const isActive = activeTab === tab;
-          return (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              style={{
-                padding: '6px 14px', fontSize: 9, cursor: 'pointer',
-                fontWeight: isActive ? 700 : 400, letterSpacing: '0.08em', textTransform: 'uppercase',
-                color: isActive ? '#ffe47a' : '#334155',
-                borderTop: 'none', borderLeft: 'none', borderRight: 'none',
-                borderBottom: isActive ? '2px solid #ffe47a' : '2px solid transparent',
-                background: 'transparent',
-                display: 'flex', alignItems: 'center', gap: 5,
-              }}
-            >
-              {tab === 'orrery' ? 'Orrery' : 'Anomalies'}
-              {tab === 'anomalies' && revealedCount > 0 && (
-                <span style={{
-                  fontSize: 8, padding: '0px 4px', borderRadius: 8,
-                  background: 'rgba(168,85,247,0.25)', color: '#a855f7',
-                  border: '1px solid rgba(168,85,247,0.3)',
-                }}>
-                  {revealedCount}
-                </span>
-              )}
-            </button>
-          );
-        })}
+        <div style={{ display: 'flex' }}>
+          {(['orrery', 'anomalies'] as const).map(tab => {
+            const isActive = activeTab === tab;
+            return (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                style={{
+                  padding: '6px 14px', fontSize: 9, cursor: 'pointer',
+                  fontWeight: isActive ? 700 : 400, letterSpacing: '0.08em', textTransform: 'uppercase',
+                  color: isActive ? '#ffe47a' : '#334155',
+                  borderTop: 'none', borderLeft: 'none', borderRight: 'none',
+                  borderBottom: isActive ? '2px solid #ffe47a' : '2px solid transparent',
+                  background: 'transparent',
+                  display: 'flex', alignItems: 'center', gap: 5,
+                }}
+              >
+                {tab === 'orrery' ? 'System View' : 'Anomalies'}
+                {tab === 'anomalies' && revealedCount > 0 && (
+                  <span style={{
+                    fontSize: 8, padding: '0px 4px', borderRadius: 8,
+                    background: 'rgba(168,85,247,0.25)', color: '#a855f7',
+                    border: '1px solid rgba(168,85,247,0.3)',
+                  }}>
+                    {revealedCount}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+        {activeTab === 'orrery' && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingRight: 12 }}>
+            <span style={{ fontSize: 8, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Local Intel</span>
+            <span style={{ fontSize: 9, color: activeFleetCount > 0 ? '#67e8f9' : '#64748b', fontFamily: 'monospace' }}>
+              Fleets {activeFleetCount}
+            </span>
+            <span style={{ fontSize: 9, color: activeBeltCount > 0 ? '#fcd34d' : '#64748b', fontFamily: 'monospace' }}>
+              Belts {activeBeltCount}/{systemBeltIds.length}
+            </span>
+            <span style={{ fontSize: 9, color: isOutpostHq || isHqSystem ? '#86efac' : stationDef || outpostDef ? '#67e8f9' : '#64748b', fontFamily: 'monospace' }}>
+              {isOutpostHq ? 'Outpost HQ' : isHqSystem ? 'Station HQ' : outpostDef ? 'Outpost' : stationDef ? 'Station' : 'Field'}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* ── Warp banner ── */}
@@ -1745,207 +1782,372 @@ function SystemPanelInner() {
       {/* ── Orrery tab: orrery + detail ── */}
       {activeTab === 'orrery' && (
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-        {/* Canvas orrery — fills available space */}
-        <div ref={orreryWrapRef} style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
-          <OrreryCanvas
-            bodies={system.bodies}
-            starColor={system.starColor}
-            starSize={system.starSize}
-            selectedId={selectedBodyId}
-            onSelect={id => {
+        <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+          <SystemSceneCanvas
+            system={system}
+            selectedBodyId={selectedBodyId}
+            pinnedFleetId={pinnedFleetId}
+            fleets={localFleets}
+            miningLinks={miningLinks}
+            structures={structureMarkers}
+            onSelectBody={id => {
               setSelectedBodyId(prev => (id === null || prev === id) ? null : id);
               setPinnedFleetId(null);
             }}
-            fleets={localFleets}
-            systemId={system.id}
-            pinnedFleetId={pinnedFleetId}
-            onFleetHover={(fleetId, x, y) => {
-              setHovFleetId(fleetId);
-              setTooltipPos({ x, y });
-            }}
-            onFleetLeave={() => setHovFleetId(null)}
             onFleetClick={fleetId => {
               setPinnedFleetId(prev => prev === fleetId ? null : fleetId);
               setSelectedBodyId(null);
             }}
+            onHoverChange={target => setSceneHover(target)}
           />
 
-          {/* Fleet tooltip — hover preview or pinned detail card */}
-          {(hovFleetId || pinnedFleetId) && (() => {
-            const activeId = pinnedFleetId ?? hovFleetId;
-            const fleet = localFleets.find(f => f.id === activeId);
-            if (!fleet) return null;
-            const isPinned   = !!pinnedFleetId;
-            const ships      = fleet.shipIds.map(id => state.systems.fleet.ships[id]).filter(Boolean);
+          <div style={{
+            position: 'absolute',
+            right: 14,
+            top: 14,
+            display: 'flex',
+            flexWrap: 'wrap',
+            justifyContent: 'flex-end',
+            gap: 8,
+            maxWidth: 'min(46vw, 460px)',
+            pointerEvents: 'none',
+          }}>
+            <SceneIntelPill
+              label="Fleet Presence"
+              value={scanningFleetCount > 0 ? `${activeFleetCount} · ${scanningFleetCount} scanning` : `${activeFleetCount} local`}
+              tone={activeFleetCount > 0 ? 'cyan' : 'slate'}
+            />
+            <SceneIntelPill
+              label="Belts"
+              value={systemBeltIds.length > 0 ? `${activeBeltCount}/${systemBeltIds.length} active` : 'No belts'}
+              tone={activeBeltCount > 0 ? 'amber' : 'slate'}
+            />
+            <SceneIntelPill
+              label="Corp Presence"
+              value={isOutpostHq ? 'Outpost HQ' : isHqSystem ? 'Station HQ' : outpostDef ? 'Outpost' : stationDef ? 'Station' : 'Field Ops'}
+              tone={isOutpostHq || isHqSystem ? 'emerald' : stationDef || outpostDef ? 'cyan' : 'slate'}
+            />
+          </div>
 
-            return (
-              <div
-                style={{
-                  position: 'fixed',
-                  left: tooltipPos.x + 16,
-                  top: tooltipPos.y - 10,
-                  zIndex: 9999,
-                  width: isPinned ? 220 : 168,
-                  padding: isPinned ? '10px 12px' : '8px 10px',
-                  borderRadius: 7,
-                  background: 'rgba(4,8,24,0.97)',
-                  border: isPinned ? '1px solid rgba(251,191,36,0.4)' : '1px solid rgba(34,211,238,0.35)',
-                  boxShadow: isPinned
-                    ? '0 0 20px rgba(251,191,36,0.10)'
-                    : '0 0 14px rgba(34,211,238,0.10)',
-                  pointerEvents: isPinned ? 'auto' : 'none',
-                  display: 'flex', flexDirection: 'column', gap: 6,
-                }}
-              >
-                {/* Header row */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{
-                    width: 7, height: 7, borderRadius: 1, flexShrink: 0,
-                    background: fleet.isScanning ? '#22d3ee' : '#0e7490',
-                    transform: 'rotate(45deg)',
-                    boxShadow: fleet.isScanning ? '0 0 5px #22d3ee' : 'none',
-                  }} />
-                  <span style={{ flex: 1, fontSize: 11, fontWeight: 700, color: isPinned ? '#fbbf24' : '#22d3ee' }}>
-                    {fleet.name}
+          {localFleets.length > 0 && (
+            <div style={{
+              position: 'absolute',
+              left: 14,
+              bottom: 14,
+              maxWidth: 'min(52vw, 540px)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 7,
+              padding: '8px 10px',
+              borderRadius: 10,
+              border: '1px solid rgba(22,30,52,0.72)',
+              background: 'rgba(2,6,23,0.64)',
+              boxShadow: '0 16px 26px rgba(2,6,23,0.28)',
+              backdropFilter: 'blur(10px)',
+            }}>
+              <div style={{ fontSize: 8, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Local Fleets</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {localFleets.map(fleet => (
+                  <span key={fleet.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                    <span style={{ width: 5, height: 5, borderRadius: '50%', background: fleet.isScanning ? '#a78bfa' : '#22d3ee', flexShrink: 0 }} />
+                    <NavTag entityType="fleet" entityId={fleet.id} label={fleet.name} />
                   </span>
-                  {isPinned && (
-                    <button
-                      onClick={() => setPinnedFleetId(null)}
-                      style={{
-                        width: 16, height: 16, borderRadius: 3, flexShrink: 0,
-                        border: '1px solid rgba(251,191,36,0.3)',
-                        background: 'rgba(120,70,0,0.2)',
-                        color: '#fbbf24', fontSize: 9, cursor: 'pointer',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        padding: 0, lineHeight: 1,
-                      }}
-                    >✕</button>
-                  )}
-                </div>
+                ))}
+              </div>
+            </div>
+          )}
 
-                {/* Status row */}
-                <div style={{ fontSize: 9, color: '#475569' }}>
-                  {ships.length} ship{ships.length !== 1 ? 's' : ''}
-                  <span style={{ color: fleet.isScanning ? '#22d3ee' : '#334155', marginLeft: 6 }}>
-                    ● {fleet.isScanning ? 'Scanning' : 'Idle'}
-                  </span>
-                </div>
-
-                {isPinned && (
+          {sceneHover && !pinnedFleetId && (
+            <div style={{
+              position: 'absolute',
+              left: sceneHover.x + 18,
+              top: sceneHover.y - 12,
+              width: 190,
+              pointerEvents: 'none',
+              borderRadius: 8,
+              border: '1px solid rgba(34,211,238,0.24)',
+              background: 'rgba(2,6,23,0.9)',
+              boxShadow: '0 16px 30px rgba(2,6,23,0.45)',
+              padding: '9px 11px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 4,
+            }}>
+              {hoveredBody && (
+                <>
+                  <div style={{ fontSize: 8, color: '#334155', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Object Intel</div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: hoveredBody.type === 'asteroid-belt' ? '#fbbf24' : '#e2e8f0' }}>{hoveredBody.name}</div>
+                  <div style={{ fontSize: 9, color: '#94a3b8' }}>{bodyTypeLabel(hoveredBody.type)}</div>
+                  <div style={{ fontSize: 8, color: '#64748b' }}>
+                    {hoveredBody.type === 'asteroid-belt'
+                      ? `${hoveredBody.beltIds.length} deposits catalogued`
+                      : `Orbit radius ${hoveredBody.orbitRadius.toFixed(0)} AU`}
+                  </div>
+                  <div style={{ fontSize: 8, color: '#22d3ee80', textTransform: 'uppercase', letterSpacing: '0.08em', marginTop: 2 }}>
+                    Click to inspect
+                  </div>
+                </>
+              )}
+              {hoveredFleet && (() => {
+                const ships = hoveredFleet.shipIds.map(id => state.systems.fleet.ships[id]).filter(Boolean);
+                return (
                   <>
-                    {/* Ship list */}
-                    {ships.length > 0 && (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 3, borderTop: '1px solid rgba(22,30,52,0.6)', paddingTop: 6 }}>
-                        {ships.map(ship => {
-                          const hull = HULL_DEFINITIONS[ship.shipDefinitionId];
-                          return (
-                            <div key={ship.id} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                              <span style={{
-                                width: 5, height: 5, borderRadius: '50%', flexShrink: 0,
-                                background: ship.hullDamage > 50 ? '#f87171' : ship.hullDamage > 20 ? '#fbbf24' : '#4ade80',
-                              }} />
-                              <span style={{ flex: 1, fontSize: 9, color: '#94a3b8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                {ship.customName ?? hull?.name ?? ship.shipDefinitionId}
-                              </span>
-                              {ship.hullDamage > 0 && (
-                                <span style={{ fontSize: 8, color: '#f87171', fontFamily: 'monospace' }}>
-                                  {ship.hullDamage.toFixed(0)}% dmg
-                                </span>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-
-                    {/* Actions */}
-                    <div style={{ display: 'flex', gap: 5, borderTop: '1px solid rgba(22,30,52,0.6)', paddingTop: 6 }}>
-                      <button
-                        onClick={() => setFleetScanning(fleet.id, !fleet.isScanning)}
-                        style={{
-                          flex: 1, padding: '3px 0', borderRadius: 3, cursor: 'pointer', fontSize: 8, fontWeight: 700,
-                          border: fleet.isScanning ? '1px solid rgba(248,113,113,0.4)' : '1px solid rgba(34,211,238,0.35)',
-                          color: fleet.isScanning ? '#f87171' : '#22d3ee',
-                          background: fleet.isScanning ? 'rgba(127,29,29,0.2)' : 'rgba(8,51,68,0.25)',
-                        }}
-                      >
-                        {fleet.isScanning ? '◼ Stop Scan' : '◉ Scan'}
-                      </button>
-                      <NavTag entityType="fleet" entityId={fleet.id} label="Open" />
+                    <div style={{ fontSize: 8, color: '#334155', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Fleet Contact</div>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: '#67e8f9' }}>{hoveredFleet.name}</div>
+                    <div style={{ fontSize: 9, color: '#94a3b8' }}>{ships.length} ship{ships.length !== 1 ? 's' : ''}</div>
+                    <div style={{ fontSize: 8, color: hoveredFleet.isScanning ? '#a78bfa' : '#64748b' }}>
+                      {hoveredFleet.isScanning ? 'Active scan sweep' : 'Holding local orbit'}
+                    </div>
+                    <div style={{ fontSize: 8, color: '#22d3ee80', textTransform: 'uppercase', letterSpacing: '0.08em', marginTop: 2 }}>
+                      Click to pin
                     </div>
                   </>
-                )}
-
-                {!isPinned && (
-                  <div style={{
-                    fontSize: 8, color: '#22d3ee50',
-                    borderTop: '1px solid rgba(22,30,52,0.5)', paddingTop: 4,
-                    letterSpacing: '0.07em', textTransform: 'uppercase',
-                  }}>
-                    Click to pin
+                );
+              })()}
+              {hoveredStructure && (
+                <>
+                  <div style={{ fontSize: 8, color: '#334155', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Structure Intel</div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: hoveredStructure.tone === 'emerald' ? '#86efac' : '#67e8f9' }}>
+                    {hoveredStructure.label}
                   </div>
-                )}
-              </div>
-            );
-          })()}
+                  <div style={{ fontSize: 8, color: '#94a3b8' }}>{hoveredStructure.detail}</div>
+                </>
+              )}
+            </div>
+          )}
         </div>
 
-        {/* Detail sidebar */}
         <div style={{
-          width: 230, borderLeft: '1px solid rgba(22,30,52,0.8)',
-          padding: '12px 12px', display: 'flex', flexDirection: 'column', gap: 10,
-          background: 'rgba(3,5,16,0.95)', overflowY: 'auto', flexShrink: 0,
+          width: 292,
+          borderLeft: '1px solid rgba(22,30,52,0.8)',
+          padding: '12px 12px 14px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 10,
+          background: 'rgba(3,5,16,0.96)',
+          overflowY: 'auto',
+          flexShrink: 0,
         }}>
           <div style={{
-            padding: '8px 10px',
-            borderRadius: 6,
+            padding: '10px 12px',
+            borderRadius: 8,
             border: '1px solid rgba(22,30,52,0.7)',
-            background: 'rgba(6,9,20,0.55)',
+            background: 'linear-gradient(180deg, rgba(7,12,26,0.88), rgba(4,7,18,0.92))',
             display: 'flex',
             flexDirection: 'column',
-            gap: 4,
+            gap: 5,
           }}>
-            <div style={{ fontSize: 8, color: '#334155', letterSpacing: '0.1em', textTransform: 'uppercase' }}>System Intel</div>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 10, fontWeight: 700, color: selectedBody ? '#fbbf24' : '#cbd5e1' }}>
-                  {selectedBody ? selectedBody.name : system.name}
-                </div>
-                <div style={{ fontSize: 9, color: '#64748b' }}>{selectedBodyLabel}</div>
-              </div>
+              <div style={{ fontSize: 8, color: '#475569', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Adaptive Inspector</div>
               <span style={{
                 fontSize: 8,
                 padding: '2px 6px',
-                borderRadius: 4,
-                color: '#67e8f9',
-                border: '1px solid rgba(34,211,238,0.22)',
-                background: 'rgba(8,51,68,0.18)',
-                textTransform: 'uppercase',
+                borderRadius: 999,
+                color: selectedBody ? '#fbbf24' : pinnedFleet ? '#67e8f9' : sceneHover ? '#c4b5fd' : '#94a3b8',
+                border: `1px solid ${selectedBody ? 'rgba(251,191,36,0.25)' : pinnedFleet ? 'rgba(34,211,238,0.22)' : sceneHover ? 'rgba(167,139,250,0.24)' : 'rgba(71,85,105,0.26)'}`,
+                background: selectedBody ? 'rgba(120,70,0,0.16)' : pinnedFleet ? 'rgba(8,51,68,0.18)' : sceneHover ? 'rgba(49,46,129,0.16)' : 'rgba(15,23,42,0.35)',
                 letterSpacing: '0.08em',
+                textTransform: 'uppercase',
                 fontWeight: 700,
               }}>
-                {activeTab}
+                {selectedBody ? 'Selected Body' : pinnedFleet ? 'Pinned Fleet' : sceneHover ? 'Hover Preview' : 'System Summary'}
               </span>
+            </div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: selectedBody ? '#fbbf24' : pinnedFleet ? '#67e8f9' : '#e2e8f0' }}>
+              {selectedBody ? selectedBody.name : pinnedFleet ? pinnedFleet.name : hoveredBody ? hoveredBody.name : hoveredFleet ? hoveredFleet.name : hoveredStructure ? hoveredStructure.label : system.name}
+            </div>
+            <div style={{ fontSize: 9, color: '#64748b', lineHeight: 1.5 }}>
+              {selectedBody
+                ? selectedBodyLabel
+                : pinnedFleet
+                  ? `${pinnedFleet.shipIds.length} ship${pinnedFleet.shipIds.length !== 1 ? 's' : ''} in local command orbit`
+                  : hoveredBody
+                    ? bodyTypeLabel(hoveredBody.type)
+                    : hoveredFleet
+                      ? `${hoveredFleet.isScanning ? 'Scanning' : 'Idle'} fleet contact`
+                      : hoveredStructure
+                        ? hoveredStructure.detail
+                        : `${system.starType}-type star · ${system.bodies.length} bodies · ${systemBeltIds.length} ore belts`}
             </div>
           </div>
 
-          {/* Body list — moons grouped under parents */}
-          <div>
-            <div style={{ fontSize: 8, color: '#334155', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 4 }}>
-              Celestial Bodies
+          {selectedBody ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+                gap: 8,
+              }}>
+                <CommandMetric
+                  label="Orbit"
+                  value={selectedBody.type === 'moon' ? 'Satellite' : `${selectedBody.orbitRadius.toFixed(0)} AU`}
+                  meta={selectedBody.type === 'asteroid-belt' ? `${selectedBody.beltIds.length} deposits` : 'orbital track'}
+                  tone={selectedBody.type === 'asteroid-belt' ? 'amber' : 'cyan'}
+                />
+                <CommandMetric
+                  label="Class"
+                  value={bodyTypeLabel(selectedBody.type)}
+                  meta={selectedBody.type === 'asteroid-belt' ? 'resource field' : 'celestial profile'}
+                  tone={selectedBody.type === 'asteroid-belt' ? 'amber' : 'slate'}
+                />
+              </div>
+              <div style={{ borderTop: '1px solid rgba(22,30,52,0.5)', paddingTop: 10 }}>
+                <BodyDetail body={selectedBody} inWarp={inWarp} maxOrbit={maxOrbit} systemId={system.id} />
+              </div>
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          ) : pinnedFleet ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+                gap: 8,
+              }}>
+                <CommandMetric
+                  label="Status"
+                  value={pinnedFleet.isScanning ? 'Scanning' : 'Holding'}
+                  meta="local task posture"
+                  tone={pinnedFleet.isScanning ? 'violet' : 'cyan'}
+                />
+                <CommandMetric
+                  label="Ships"
+                  value={`${pinnedFleet.shipIds.length}`}
+                  meta="assigned hulls"
+                  tone={pinnedFleet.shipIds.length > 0 ? 'cyan' : 'slate'}
+                />
+              </div>
+              <div style={{
+                padding: '10px 12px',
+                borderRadius: 8,
+                border: '1px solid rgba(22,30,52,0.6)',
+                background: 'rgba(6,9,20,0.48)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 7,
+              }}>
+                <div style={{ fontSize: 8, color: '#475569', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Fleet Detail</div>
+                {pinnedFleet.shipIds.map(shipId => {
+                  const ship = state.systems.fleet.ships[shipId];
+                  if (!ship) return null;
+                  const hull = HULL_DEFINITIONS[ship.shipDefinitionId];
+                  return (
+                    <div key={ship.id} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{
+                        width: 6,
+                        height: 6,
+                        borderRadius: '50%',
+                        flexShrink: 0,
+                        background: ship.hullDamage > 50 ? '#f87171' : ship.hullDamage > 20 ? '#fbbf24' : '#4ade80',
+                      }} />
+                      <span style={{ flex: 1, minWidth: 0, fontSize: 9, color: '#cbd5e1', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {ship.customName ?? hull?.name ?? ship.shipDefinitionId}
+                      </span>
+                      <span style={{ fontSize: 8, color: '#64748b', fontFamily: 'monospace' }}>
+                        {ship.hullDamage > 0 ? `${ship.hullDamage.toFixed(0)}% dmg` : 'ready'}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button
+                  onClick={() => setFleetScanning(pinnedFleet.id, !pinnedFleet.isScanning)}
+                  style={{
+                    flex: 1,
+                    padding: '6px 0',
+                    borderRadius: 6,
+                    cursor: 'pointer',
+                    fontSize: 9,
+                    fontWeight: 700,
+                    border: pinnedFleet.isScanning ? '1px solid rgba(248,113,113,0.4)' : '1px solid rgba(34,211,238,0.3)',
+                    color: pinnedFleet.isScanning ? '#f87171' : '#22d3ee',
+                    background: pinnedFleet.isScanning ? 'rgba(127,29,29,0.18)' : 'rgba(8,51,68,0.2)',
+                  }}
+                >
+                  {pinnedFleet.isScanning ? 'Stop Scan' : 'Begin Scan'}
+                </button>
+                <div style={{ display: 'flex', alignItems: 'center' }}>
+                  <NavTag entityType="fleet" entityId={pinnedFleet.id} label="Open Fleet" />
+                </div>
+              </div>
+            </div>
+          ) : sceneHover ? (
+            <div style={{
+              padding: '10px 12px',
+              borderRadius: 8,
+              border: '1px solid rgba(22,30,52,0.6)',
+              background: 'rgba(6,9,20,0.48)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 6,
+            }}>
+              <div style={{ fontSize: 8, color: '#475569', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Live Hover</div>
+              {hoveredBody && (
+                <>
+                  <div style={{ fontSize: 10, color: '#cbd5e1', lineHeight: 1.45 }}>
+                    {hoveredBody.type === 'asteroid-belt'
+                      ? `${hoveredBody.beltIds.length} deposits tracked in this belt cluster.`
+                      : `Projected orbit: ${hoveredBody.orbitRadius.toFixed(0)} AU from the primary.`}
+                  </div>
+                  <div style={{ fontSize: 8, color: '#22d3ee80', letterSpacing: '0.08em', textTransform: 'uppercase' }}>Click to lock inspection</div>
+                </>
+              )}
+              {hoveredFleet && (
+                <>
+                  <div style={{ fontSize: 10, color: '#cbd5e1', lineHeight: 1.45 }}>
+                    {hoveredFleet.shipIds.length} ship{hoveredFleet.shipIds.length !== 1 ? 's' : ''} holding in-system. {hoveredFleet.isScanning ? 'Scanner array active.' : 'No active sweep.'}
+                  </div>
+                  <div style={{ fontSize: 8, color: '#22d3ee80', letterSpacing: '0.08em', textTransform: 'uppercase' }}>Click to pin fleet</div>
+                </>
+              )}
+              {hoveredStructure && (
+                <div style={{ fontSize: 10, color: '#cbd5e1', lineHeight: 1.45 }}>{hoveredStructure.detail}</div>
+              )}
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{
+                padding: '10px 12px',
+                borderRadius: 8,
+                border: '1px solid rgba(22,30,52,0.6)',
+                background: 'rgba(6,9,20,0.48)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 8,
+              }}>
+                <div style={{ fontSize: 8, color: '#475569', letterSpacing: '0.1em', textTransform: 'uppercase' }}>System Brief</div>
+                <div style={{ fontSize: 10, color: '#cbd5e1', lineHeight: 1.5 }}>
+                  Drag to orbit the scene, shift-drag to pan the tactical table, and hover planets, belts, fleets, or structures for live intel.
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}>
+                  <CommandMetric label="Security" value={secLabel(system.security)} meta="regional posture" tone={system.security === 'highsec' ? 'emerald' : system.security === 'lowsec' ? 'amber' : 'violet'} />
+                  <CommandMetric label="Services" value={outpostDef ? 'Outpost' : stationDef ? 'Station' : 'Field'} meta={isDocked ? 'docked' : stationDef ? 'dockable' : 'remote ops'} tone={outpostDef || stationDef ? 'cyan' : 'slate'} />
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div style={{
+            padding: '10px 12px',
+            borderRadius: 8,
+            border: '1px solid rgba(22,30,52,0.6)',
+            background: 'rgba(6,9,20,0.48)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 6,
+          }}>
+            <div style={{ fontSize: 8, color: '#475569', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Celestial Directory</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
               {(() => {
-                // Build moon → parentId lookup
                 const moonParent = new Map<string, string>();
-                system.bodies.forEach(b => {
-                  const m = b.id.match(/^(body-\d+)-moon$/);
-                  if (m) moonParent.set(b.id, m[1]);
+                system.bodies.forEach(body => {
+                  const match = body.id.match(/^(body-\d+)-moon$/);
+                  if (match) moonParent.set(body.id, match[1]);
                 });
-                const topLevel = system.bodies.filter(b => !moonParent.has(b.id));
+                const topLevel = system.bodies.filter(body => !moonParent.has(body.id));
 
                 const renderBodyRow = (body: CelestialBody, indent: boolean) => {
-                  const isSel  = body.id === selectedBodyId;
+                  const isSel = body.id === selectedBodyId;
+                  const isHover = hoveredBody?.id === body.id;
                   const isBelt = body.type === 'asteroid-belt';
                   const hasActiveBelts = isBelt && body.beltIds.some(id =>
                     localFleets.some(fleet =>
@@ -1961,52 +2163,48 @@ function SystemPanelInner() {
                   return (
                     <div
                       key={body.id}
-                      onClick={() => setSelectedBodyId(prev => prev === body.id ? null : body.id)}
+                      onClick={() => {
+                        setSelectedBodyId(prev => prev === body.id ? null : body.id);
+                        setPinnedFleetId(null);
+                      }}
                       style={{
                         paddingLeft: indent ? 18 : 8,
-                        paddingRight: 8, paddingTop: 4, paddingBottom: 4,
-                        borderRadius: 4, cursor: 'pointer',
-                        display: 'flex', alignItems: 'center', gap: 7,
-                        border: isSel ? '1px solid rgba(251,191,36,0.3)' : '1px solid transparent',
-                        background: isSel ? 'rgba(120,80,0,0.15)' : 'rgba(6,9,20,0.3)',
-                        transition: 'all 0.1s',
+                        paddingRight: 8,
+                        paddingTop: 5,
+                        paddingBottom: 5,
+                        borderRadius: 6,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 7,
+                        border: isSel ? '1px solid rgba(251,191,36,0.28)' : isHover ? '1px solid rgba(34,211,238,0.16)' : '1px solid transparent',
+                        background: isSel ? 'rgba(120,80,0,0.14)' : isHover ? 'rgba(8,51,68,0.14)' : 'rgba(2,6,23,0.35)',
                       }}
                     >
-                      {indent && (
-                        <span style={{ fontSize: 8, color: '#334155', flexShrink: 0, marginRight: -3 }}>↳</span>
-                      )}
+                      {indent && <span style={{ fontSize: 8, color: '#334155', flexShrink: 0, marginRight: -3 }}>↳</span>}
                       <span style={{
                         width: indent ? 5 : 7,
                         height: indent ? 5 : 7,
                         borderRadius: isBelt ? 0 : '50%',
-                        background: body.color, flexShrink: 0,
+                        background: body.color,
                         border: isBelt ? `2px solid ${body.color}` : 'none',
+                        flexShrink: 0,
                       }} />
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{
-                          fontSize: indent ? 8 : 9,
-                          color: isSel ? '#fbbf24' : indent ? '#64748b' : '#94a3b8',
-                          fontWeight: isSel ? 700 : 400,
-                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                        }}>
+                        <div style={{ fontSize: indent ? 8 : 9, color: isSel ? '#fbbf24' : '#cbd5e1', fontWeight: isSel ? 700 : 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {body.name}
                         </div>
-                        {!indent && (
-                          <div style={{ fontSize: 8, color: '#334155' }}>{bodyTypeLabel(body.type)}</div>
-                        )}
+                        <div style={{ fontSize: 8, color: '#475569' }}>{bodyTypeLabel(body.type)}</div>
                       </div>
-                      {hasActiveBelts && (
-                        <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#22d3ee', flexShrink: 0 }} />
-                      )}
+                      {hasActiveBelts && <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#22d3ee', flexShrink: 0 }} />}
                     </div>
                   );
                 };
 
                 return topLevel.map(body => {
-                  const moonId = body.id + '-moon';
-                  const moon   = system.bodies.find(b => b.id === moonId);
+                  const moon = system.bodies.find(candidate => candidate.id === `${body.id}-moon`);
                   return (
-                    <div key={body.id}>
+                    <div key={body.id} style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                       {renderBodyRow(body, false)}
                       {moon && renderBodyRow(moon, true)}
                     </div>
@@ -2016,26 +2214,17 @@ function SystemPanelInner() {
             </div>
           </div>
 
-          {/* Selected body detail */}
-          {selectedBody ? (
-            <div style={{ borderTop: '1px solid rgba(22,30,52,0.5)', paddingTop: 10 }}>
-              <BodyDetail body={selectedBody} inWarp={inWarp} maxOrbit={maxOrbit} systemId={system.id} />
-            </div>
-          ) : (
-            <div style={{ fontSize: 9, color: '#1e293b', textAlign: 'center', padding: '12px 0', lineHeight: 1.4 }}>
-              Click a body in the orrery or list to view details
-            </div>
-          )}
-
-          {/* No belts in system message */}
           {systemBeltIds.length === 0 && (
             <div style={{
-              marginTop: 'auto', padding: '8px 10px', borderRadius: 5,
-              border: '1px solid rgba(239,68,68,0.2)',
-              background: 'rgba(127,29,29,0.1)',
-              fontSize: 9, color: '#6b2424', lineHeight: 1.4,
+              padding: '8px 10px',
+              borderRadius: 6,
+              border: '1px solid rgba(239,68,68,0.18)',
+              background: 'rgba(127,29,29,0.08)',
+              fontSize: 9,
+              color: '#7f1d1d',
+              lineHeight: 1.45,
             }}>
-              No asteroid belts detected in this system. Travel to another system to mine.
+              No asteroid belts detected in this system. Use the star map to browse for a richer extraction target.
             </div>
           )}
         </div>

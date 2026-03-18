@@ -50,6 +50,54 @@ export interface ResourceDefinition {
   isHidden?: boolean;
 }
 
+export type RewardSourceType = 'combat' | 'mining' | 'anomaly' | 'mission';
+
+export type ItemRarity = 'common' | 'uncommon' | 'rare' | 'epic';
+
+export interface RewardItemRolls {
+  effects?: Record<string, number>;
+}
+
+export interface RewardItemSource {
+  type: RewardSourceType;
+  id: string;
+  name: string;
+  acquiredAt: number;
+}
+
+export interface RewardInventoryItem {
+  id: string;
+  definitionId: string;
+  rarity: ItemRarity;
+  quantity: number;
+  stackable: boolean;
+  source: RewardItemSource;
+  rolls?: RewardItemRolls;
+}
+
+export interface RewardHistoryItemEntry {
+  definitionId: string;
+  rarity: ItemRarity;
+  quantity: number;
+}
+
+export interface RewardHistoryEntry {
+  id: string;
+  timestamp: number;
+  sourceType: RewardSourceType;
+  sourceId: string;
+  sourceName: string;
+  creditsEarned: number;
+  resourceRewards: Record<string, number>;
+  itemRewards: RewardHistoryItemEntry[];
+}
+
+export interface RewardsState {
+  inventory: RewardInventoryItem[];
+  history: RewardHistoryEntry[];
+  discoveredDefinitionIds: Record<string, boolean>;
+}
+
 // ─── Skills ────────────────────────────────────────────────────────────────
 
 export type SkillCategory = 'spaceship' | 'mining' | 'industry' | 'science' | 'electronics' | 'trade';
@@ -612,6 +660,7 @@ export interface GameSystems {
   manufacturing: ManufacturingState;
   market: MarketState;
   fleet: FleetState;
+  rewards: RewardsState;
   structures: StructuresState;
   factions: FactionsState;
 }

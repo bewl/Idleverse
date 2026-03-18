@@ -151,6 +151,20 @@ Datacores are rare loot resources obtained from NPC combat. They are consumed by
 
 ---
 
+# Premium Reward Items
+
+Premium reward items are not part of the flat `resources` dictionary. They are stored in `GameState.systems.rewards.inventory` as save-backed item instances so rare drops can carry rarity, source metadata, stackability, and future rolled stats.
+
+| Item ID | Name | Rarity | Source | Notes |
+|---|---|---|---|---|
+| `syndicate-signal-fragment` | Syndicate Signal Fragment | Uncommon | Lowsec/nullsec Syndicate combat | Stackable collectible |
+| `ghost-signal-array` | Ghost Signal Array | Epic | Syndicate elite combat drops | Prototype module item |
+| `veldris-blood-seal` | Veldris Blood Seal | Uncommon | Lowsec/nullsec Veldris combat | Stackable collectible |
+| `marauder-overdrive-injector` | Marauder Overdrive Injector | Epic | Veldris elite combat drops | Prototype module item |
+| `encrypted-doctrine-shard` | Encrypted Doctrine Shard | Rare | Shared first-pass combat pools | Stackable research collectible |
+
+---
+
 # Tier 4 – Ships
 
 Ships are the end products of manufacturing. Each manufactured ship spawns a `ShipInstance` in the fleet system.
@@ -222,6 +236,11 @@ NPC Combat Loot
             └─ BPO level up → T2 BPO at level 5
                  └─ Blueprint Copy → BPC
                       └─ T2 Manufacturing (consumed per job)
+  └─ Premium Reward Items
+       └─ Reward Inventory (`systems.rewards.inventory`)
+            ├─ Collectible chase items
+            ├─ Prototype module drops
+            └─ Future mining/anomaly jackpot rewards
 ```
 
 ## Hull Repair Loop

@@ -407,6 +407,26 @@ DEFEAT (adjusted < 1.0):
   no loot, no bounty
 ```
 
+First-pass reward resolution now splits combat payout into two lanes:
+
+```text
+resourceChanceMultiplier = doctrineLootMult × corpHqLootQualityMultiplier
+itemChanceMultiplier     = 1 + max(0, resourceChanceMultiplier - 1) × 0.35
+```
+
+- Resource loot keeps the existing full combat loot multiplier path.
+- Premium item drops use a damped multiplier so loot-quality bonuses still matter without flooding the chase pool.
+- Example: `lootMult = 1.5` and `hq bonus = 1.2` gives `resourceChanceMultiplier = 1.8`, but `itemChanceMultiplier = 1.28`.
+
+## First-Pass Combat Chase Drop Rates
+
+| Source Pool | Stackable Chase Drops | Epic Chase Drop |
+|---|---|---|
+| Lowsec Syndicate | Signal Fragment 18%, Doctrine Shard 4.5% | Ghost Signal Array 1.2% |
+| Nullsec Syndicate | Signal Fragment 24%, Doctrine Shard 7.5% | Ghost Signal Array 2.0% |
+| Lowsec Veldris | Blood Seal 18%, Doctrine Shard 4.0% | Marauder Overdrive Injector 1.2% |
+| Nullsec Veldris | Blood Seal 24%, Doctrine Shard 7.5% | Marauder Overdrive Injector 2.0% |
+
 ---
 
 # Progression Pacing Targets

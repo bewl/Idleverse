@@ -4,7 +4,6 @@ import { ORE_BELTS, BELT_ORDER } from '@/game/systems/mining/mining.config';
 import { RESOURCE_REGISTRY } from '@/game/resources/resourceRegistry';
 import { formatCredits, formatResourceAmount } from '@/game/resources/resourceRegistry';
 import { FlairProgressBar } from '@/ui/components/FlairProgressBar';
-import { ActivityBar } from '@/ui/effects/ActivityBar';
 import { StatTooltip } from '@/ui/tooltip/StatTooltip';
 import { NavTag } from '@/ui/components/NavTag';
 import { GameDropdown, type DropdownOption } from '@/ui/components/GameDropdown';
@@ -387,12 +386,9 @@ function AutoRefineryCard({ oreId }: { oreId: string }) {
           </div>
           <YieldPreview oreId={oreId} />
 
-          <div className="mt-2">
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-[8px] uppercase tracking-widest text-slate-600">Refinery Activity</span>
-              <span className="text-[9px] font-mono text-slate-500">{readyBatches} staged</span>
-            </div>
-            <ActivityBar active={active} rate={Math.min(1, readyBatches / 5)} color={enabled ? 'cyan' : 'amber'} label="Line status" valueLabel={enabled ? `${readyBatches} staged` : 'line idle'} />
+          <div className="mt-2 flex items-center justify-between rounded-lg border border-slate-700/20 bg-slate-950/20 px-2.5 py-2 text-[10px] text-slate-400">
+            <span>{enabled ? 'Automatic surplus conversion is armed for this line.' : 'Line stays manual until armed.'}</span>
+            <span className="font-mono text-slate-500">{readyBatches} staged</span>
           </div>
 
           {/* Threshold slider */}
@@ -617,8 +613,13 @@ function ManualQueue() {
             {activeJob.isAuto && <span className="ml-1.5 text-[9px] text-slate-600">[auto]</span>}
           </div>
           <FlairProgressBar value={progressPct / 100} color="violet" label="Batch progress" valueLabel={`${Math.round(progressPct)}%`} />
-          <div className="mt-2">
-            <ActivityBar active rate={Math.min(1, progressPct / 100)} color="violet" label="Batch status" valueLabel={`${Math.ceil(BATCH_TIME_SECONDS - activeJob.progress)}s left`} />
+          <div className="mt-2 flex flex-wrap gap-1.5 text-[9px]">
+            <span className="rounded-full border border-violet-700/30 bg-violet-950/20 px-2 py-0.5 font-mono text-violet-300">
+              {Math.round(progressPct)}% refined
+            </span>
+            <span className="rounded-full border border-slate-700/30 bg-slate-950/30 px-2 py-0.5 font-mono text-slate-400">
+              {Math.ceil(BATCH_TIME_SECONDS - activeJob.progress)}s remaining
+            </span>
           </div>
           <div className="mt-2 rounded border border-slate-700/20 bg-slate-950/20 px-2 py-1.5 text-[10px] text-slate-400">
             <span className="text-[8px] uppercase tracking-widest text-slate-600 block mb-1">Yield Preview</span>
@@ -707,7 +708,6 @@ export function ReprocessingPanel() {
     const have = state.resources[id] ?? 0;
     return (state.systems.reprocessing.autoTargets?.[id] ?? false) && have - threshold >= BATCH_SIZE_BASE;
   }).length;
-  const activeRate = Math.min(1, Math.max(queue.length / 6, readyAutoCount / Math.max(1, oreIds.length), Math.max(0, efficiency - 1)));
   const laneEntries = useMemo<RefineryLaneEntry[]>(() => {
     return oreIds
       .map(oreId => {
@@ -823,7 +823,9 @@ export function ReprocessingPanel() {
             <CommandMetric label="Auto Lines" value={`${autoEnabledCount}`} meta={readyAutoCount > 0 ? `${readyAutoCount} ready to fire` : 'none staged'} tone={autoEnabledCount > 0 ? 'amber' : 'slate'} />
             <CommandMetric label="Ore Types" value={`${oreIds.length}`} meta="processable today" tone="emerald" />
           </div>
-          <ActivityBar active={queue.length > 0 || readyAutoCount > 0} rate={activeRate} color={queue.length > 0 ? 'violet' : 'cyan'} label="Refinery load" valueLabel={queue.length > 0 ? `${queue.length} staged` : `${readyAutoCount} auto-ready`} />
+            <div className="rounded-lg border border-slate-700/20 bg-slate-950/20 px-2.5 py-2 text-[10px] text-slate-400">
+              Queue depth and armed auto-lines already show whether the refinery is idle, staged, or actively feeding throughput.
+            </div>
         </div>
       </div>
 

@@ -190,16 +190,18 @@ function InjectButton({ label, onClick, disabled }: { label: string; onClick: ()
     <button
       onClick={onClick}
       disabled={disabled}
+      className="legacy-panel-btn"
       style={{
         padding: '2px 5px', fontSize: 9, fontFamily: 'monospace', fontWeight: 600,
-        border: '1px solid rgba(34,211,238,0.25)', borderRadius: 3,
-        background: 'rgba(8,51,68,0.5)', color: disabled ? '#334155' : '#67e8f9',
-        cursor: disabled ? 'not-allowed' : 'pointer',
-        transition: 'background 0.1s',
+        '--legacy-border': 'rgba(34,211,238,0.25)',
+        '--legacy-bg': 'rgba(8,51,68,0.5)',
+        '--legacy-color': disabled ? '#334155' : '#67e8f9',
+        '--legacy-hover-border': 'rgba(103,232,249,0.48)',
+        '--legacy-hover-bg': 'rgba(8,51,68,0.82)',
+        '--legacy-hover-color': '#cffafe',
+        '--legacy-radius': '3px',
         whiteSpace: 'nowrap',
-      }}
-      onMouseEnter={e => { if (!disabled) (e.currentTarget as HTMLButtonElement).style.background = 'rgba(8,51,68,0.9)'; }}
-      onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(8,51,68,0.5)'; }}
+      } as React.CSSProperties}
     >
       {label}
     </button>
@@ -256,7 +258,7 @@ function ResourceRow({ id }: { id: string }) {
         {fmtAmount(amount)}
       </span>
       <div style={{ display: 'flex', gap: 2, marginLeft: 'auto', flexShrink: 0 }}>
-        <button onClick={set0} style={{ padding: '1px 4px', fontSize: 8, fontFamily: 'monospace', border: '1px solid rgba(127,29,29,0.4)', borderRadius: 2, background: 'rgba(69,10,10,0.3)', color: '#f87171', cursor: 'pointer' }}>×0</button>
+        <button onClick={set0} className="legacy-panel-btn" style={{ padding: '1px 4px', fontSize: 8, fontFamily: 'monospace', '--legacy-border': 'rgba(127,29,29,0.4)', '--legacy-bg': 'rgba(69,10,10,0.3)', '--legacy-color': '#f87171', '--legacy-hover-border': 'rgba(248,113,113,0.5)', '--legacy-hover-bg': 'rgba(69,10,10,0.48)', '--legacy-hover-color': '#fecaca', '--legacy-radius': '2px' } as React.CSSProperties}>×0</button>
         {increments.map(n => (
           <InjectButton key={n} label={fmtIncrement(n)} onClick={() => add(n)} />
         ))}
@@ -284,11 +286,12 @@ function ResourcesTab() {
     <div>
       <button
         onClick={injectAll}
+        className="legacy-panel-btn"
         style={{
           width: '100%', padding: '5px 0', fontSize: 9, fontFamily: 'monospace', fontWeight: 700,
-          letterSpacing: '0.08em', border: '1px solid rgba(245,158,11,0.35)', borderRadius: 4,
-          background: 'rgba(120,53,15,0.3)', color: '#fbbf24', cursor: 'pointer', marginBottom: 2,
-        }}
+          letterSpacing: '0.08em', marginBottom: 2,
+          '--legacy-border': 'rgba(245,158,11,0.35)', '--legacy-bg': 'rgba(120,53,15,0.3)', '--legacy-color': '#fbbf24', '--legacy-hover-border': 'rgba(251,191,36,0.52)', '--legacy-hover-bg': 'rgba(120,53,15,0.48)', '--legacy-hover-color': '#fde68a', '--legacy-radius': '4px',
+        } as React.CSSProperties}
       >
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><ThemedIcon icon="skills" size={12} tone="#fbbf24" interactive />INJECT +50K ALL RESOURCES + 10M ISK</span>
       </button>
@@ -497,10 +500,10 @@ function UnlocksTab() {
   return (
     <div>
       <div style={{ display: 'flex', gap: 4, marginBottom: 6 }}>
-        <button onClick={unlockAll} style={{ flex: 1, padding: '5px 0', fontSize: 9, fontFamily: 'monospace', fontWeight: 700, border: '1px solid rgba(34,197,94,0.3)', borderRadius: 4, background: 'rgba(5,46,22,0.4)', color: '#4ade80', cursor: 'pointer' }}>
+        <button onClick={unlockAll} className="legacy-panel-btn" style={{ flex: 1, padding: '5px 0', fontSize: 9, fontFamily: 'monospace', fontWeight: 700, '--legacy-border': 'rgba(34,197,94,0.3)', '--legacy-bg': 'rgba(5,46,22,0.4)', '--legacy-color': '#4ade80', '--legacy-hover-border': 'rgba(74,222,128,0.5)', '--legacy-hover-bg': 'rgba(5,46,22,0.58)', '--legacy-hover-color': '#bbf7d0', '--legacy-radius': '4px' } as React.CSSProperties}>
           UNLOCK ALL
         </button>
-        <button onClick={lockAll} style={{ flex: 1, padding: '5px 0', fontSize: 9, fontFamily: 'monospace', fontWeight: 700, border: '1px solid rgba(127,29,29,0.35)', borderRadius: 4, background: 'rgba(69,10,10,0.2)', color: '#f87171', cursor: 'pointer' }}>
+        <button onClick={lockAll} className="legacy-panel-btn" style={{ flex: 1, padding: '5px 0', fontSize: 9, fontFamily: 'monospace', fontWeight: 700, '--legacy-border': 'rgba(127,29,29,0.35)', '--legacy-bg': 'rgba(69,10,10,0.2)', '--legacy-color': '#f87171', '--legacy-hover-border': 'rgba(248,113,113,0.48)', '--legacy-hover-bg': 'rgba(69,10,10,0.38)', '--legacy-hover-color': '#fecaca', '--legacy-radius': '4px' } as React.CSSProperties}>
           LOCK ALL
         </button>
       </div>
@@ -517,15 +520,18 @@ function UnlocksTab() {
                   key={id}
                   onClick={() => toggle(id)}
                   title={id}
+                  className="legacy-panel-btn"
                   style={{
                     padding: '4px 6px', fontSize: 9, fontFamily: 'monospace', textAlign: 'left',
-                    border: `1px solid ${active ? 'rgba(34,197,94,0.35)' : 'rgba(30,41,59,0.5)'}`,
-                    borderRadius: 3,
-                    background: active ? 'rgba(5,46,22,0.3)' : 'rgba(15,23,42,0.5)',
-                    color: active ? '#4ade80' : '#475569',
-                    cursor: 'pointer', transition: 'all 0.1s',
+                    '--legacy-border': active ? 'rgba(34,197,94,0.35)' : 'rgba(30,41,59,0.5)',
+                    '--legacy-bg': active ? 'rgba(5,46,22,0.3)' : 'rgba(15,23,42,0.5)',
+                    '--legacy-color': active ? '#4ade80' : '#475569',
+                    '--legacy-hover-border': active ? 'rgba(74,222,128,0.5)' : 'rgba(148,163,184,0.32)',
+                    '--legacy-hover-bg': active ? 'rgba(5,46,22,0.48)' : 'rgba(15,23,42,0.76)',
+                    '--legacy-hover-color': active ? '#bbf7d0' : '#cbd5e1',
+                    '--legacy-radius': '3px',
                     overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                  }}
+                  } as React.CSSProperties}
                 >
                   {active ? '▣' : '□'} {shortLabel}
                 </button>
@@ -578,14 +584,17 @@ function ScenariosTab() {
               </span>
               <button
                 onClick={() => apply(scenario)}
+                className="legacy-panel-btn"
                 style={{
                   padding: '2px 10px', fontSize: 9, fontFamily: 'monospace', fontWeight: 700,
-                  border: `1px solid ${isApplied ? 'rgba(34,197,94,0.5)' : `${scenario.color}50`}`,
-                  borderRadius: 3,
-                  background: isApplied ? 'rgba(5,46,22,0.5)' : `${scenario.color}18`,
-                  color: isApplied ? '#4ade80' : scenario.color,
-                  cursor: 'pointer', transition: 'all 0.15s',
-                }}
+                  '--legacy-border': isApplied ? 'rgba(34,197,94,0.5)' : `${scenario.color}50`,
+                  '--legacy-bg': isApplied ? 'rgba(5,46,22,0.5)' : `${scenario.color}18`,
+                  '--legacy-color': isApplied ? '#4ade80' : scenario.color,
+                  '--legacy-hover-border': isApplied ? 'rgba(74,222,128,0.62)' : `${scenario.color}88`,
+                  '--legacy-hover-bg': isApplied ? 'rgba(5,46,22,0.62)' : `${scenario.color}2e`,
+                  '--legacy-hover-color': isApplied ? '#bbf7d0' : scenario.color,
+                  '--legacy-radius': '3px',
+                } as React.CSSProperties}
               >
                 {isApplied ? 'Applied' : 'Apply'}
               </button>
@@ -615,23 +624,21 @@ function ScenariosTab() {
                 useGameStore.getState().clearSave();
                 setWipePending(false);
               }}
+              className="legacy-panel-btn"
               style={{
                 padding: '3px 10px', fontSize: 9, fontFamily: 'monospace', fontWeight: 700,
-                border: '1px solid rgba(239,68,68,0.6)', borderRadius: 3,
-                background: 'rgba(127,29,29,0.5)', color: '#fca5a5',
-                cursor: 'pointer',
-              }}
+                '--legacy-border': 'rgba(239,68,68,0.6)', '--legacy-bg': 'rgba(127,29,29,0.5)', '--legacy-color': '#fca5a5', '--legacy-hover-border': 'rgba(248,113,113,0.74)', '--legacy-hover-bg': 'rgba(127,29,29,0.66)', '--legacy-hover-color': '#fee2e2', '--legacy-radius': '3px',
+              } as React.CSSProperties}
             >
               Yes, wipe it
             </button>
             <button
               onClick={() => setWipePending(false)}
+              className="legacy-panel-btn"
               style={{
                 padding: '3px 8px', fontSize: 9, fontFamily: 'monospace',
-                border: '1px solid rgba(71,85,105,0.4)', borderRadius: 3,
-                background: 'rgba(15,23,42,0.6)', color: '#64748b',
-                cursor: 'pointer',
-              }}
+                '--legacy-border': 'rgba(71,85,105,0.4)', '--legacy-bg': 'rgba(15,23,42,0.6)', '--legacy-color': '#64748b', '--legacy-hover-border': 'rgba(148,163,184,0.4)', '--legacy-hover-bg': 'rgba(15,23,42,0.78)', '--legacy-hover-color': '#cbd5e1', '--legacy-radius': '3px',
+              } as React.CSSProperties}
             >
               Cancel
             </button>
@@ -639,12 +646,11 @@ function ScenariosTab() {
         ) : (
           <button
             onClick={() => setWipePending(true)}
+            className="legacy-panel-btn"
             style={{
               padding: '3px 12px', fontSize: 9, fontFamily: 'monospace', fontWeight: 700,
-              border: '1px solid rgba(239,68,68,0.35)', borderRadius: 3,
-              background: 'rgba(69,10,10,0.3)', color: '#f87171',
-              cursor: 'pointer',
-            }}
+              '--legacy-border': 'rgba(239,68,68,0.35)', '--legacy-bg': 'rgba(69,10,10,0.3)', '--legacy-color': '#f87171', '--legacy-hover-border': 'rgba(248,113,113,0.52)', '--legacy-hover-bg': 'rgba(69,10,10,0.44)', '--legacy-hover-color': '#fecaca', '--legacy-radius': '3px',
+            } as React.CSSProperties}
           >
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><ThemedIcon icon="warning" size={12} tone="#f87171" interactive />Wipe Save</span>
           </button>
@@ -675,14 +681,17 @@ function TimeControls() {
           <button
             key={s}
             onClick={() => setDevTimeScale(s)}
+            className="legacy-panel-btn"
             style={{
               flex: 1, padding: '3px 0', fontSize: 8, fontFamily: 'monospace', fontWeight: 700,
-              border: `1px solid ${devTimeScale === s ? 'rgba(245,158,11,0.5)' : 'rgba(30,41,59,0.5)'}`,
-              borderRadius: 3,
-              background: devTimeScale === s ? 'rgba(120,53,15,0.45)' : 'rgba(15,23,42,0.6)',
-              color: devTimeScale === s ? '#fbbf24' : '#475569',
-              cursor: 'pointer',
-            }}
+              '--legacy-border': devTimeScale === s ? 'rgba(245,158,11,0.5)' : 'rgba(30,41,59,0.5)',
+              '--legacy-bg': devTimeScale === s ? 'rgba(120,53,15,0.45)' : 'rgba(15,23,42,0.6)',
+              '--legacy-color': devTimeScale === s ? '#fbbf24' : '#475569',
+              '--legacy-hover-border': devTimeScale === s ? 'rgba(251,191,36,0.62)' : 'rgba(148,163,184,0.34)',
+              '--legacy-hover-bg': devTimeScale === s ? 'rgba(120,53,15,0.58)' : 'rgba(15,23,42,0.76)',
+              '--legacy-hover-color': devTimeScale === s ? '#fde68a' : '#cbd5e1',
+              '--legacy-radius': '3px',
+            } as React.CSSProperties}
           >
             {s}×
           </button>
@@ -694,12 +703,11 @@ function TimeControls() {
           <button
             key={secs}
             onClick={() => tickForward(secs)}
+            className="legacy-panel-btn"
             style={{
               flex: 1, padding: '3px 0', fontSize: 8, fontFamily: 'monospace', fontWeight: 700,
-              border: '1px solid rgba(34,211,238,0.2)', borderRadius: 3,
-              background: 'rgba(8,51,68,0.3)', color: '#22d3ee',
-              cursor: 'pointer',
-            }}
+              '--legacy-border': 'rgba(34,211,238,0.2)', '--legacy-bg': 'rgba(8,51,68,0.3)', '--legacy-color': '#22d3ee', '--legacy-hover-border': 'rgba(103,232,249,0.48)', '--legacy-hover-bg': 'rgba(8,51,68,0.48)', '--legacy-hover-color': '#cffafe', '--legacy-radius': '3px',
+            } as React.CSSProperties}
           >
             {label}
           </button>

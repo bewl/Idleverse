@@ -198,7 +198,8 @@ export function buildTickNotifications(
   for (const [fleetId, fleet] of Object.entries(nextState.systems.fleet.fleets)) {
     const previousFleet = previousState.systems.fleet.fleets[fleetId];
     if (!previousFleet) continue;
-    if (previousFleet.currentSystemId !== fleet.currentSystemId) {
+    const isMiningAutomationArrival = Boolean(previousFleet.miningOriginSystemId || fleet.miningOriginSystemId);
+    if (previousFleet.currentSystemId !== fleet.currentSystemId && !isMiningAutomationArrival) {
       const systemName = (() => {
         try {
           return getSystemById(nextState.galaxy.seed, fleet.currentSystemId).name;

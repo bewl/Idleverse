@@ -216,6 +216,12 @@ export function createInitialState(): GameState {
         discoveries: [],
       },
 
+      rewards: {
+        inventory: [],
+        history: [],
+        discoveredDefinitionIds: {},
+      },
+
       structures: {
         levels: {},
       },

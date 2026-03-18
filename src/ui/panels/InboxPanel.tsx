@@ -114,35 +114,38 @@ export function InboxPanel() {
               className="rounded-lg border border-slate-800/80 bg-slate-950/70 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-300 transition-colors hover:border-amber-500/35 hover:text-amber-100"
               onClick={archiveReadNotifications}
             >
-              Archive Read
+              Dismiss Read
             </button>
           </div>
         </div>
       </section>
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(18rem,0.85fr)]">
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(18rem,0.85fr)] xl:items-stretch">
         <section className="rounded-2xl border border-slate-800/80 bg-slate-950/60 p-4">
           <div className="mb-3 text-[10px] font-semibold uppercase tracking-[0.28em] text-slate-500">
             Visible Feed · {visibleEntries.length}
           </div>
-          <NotificationList
-            entries={visibleEntries}
-            galaxySeed={galaxySeed}
-            activeView={activeView}
-            selectedId={selectedEntry?.id ?? null}
-            onSelect={(entry) => {
-              markNotificationRead(entry.id);
-              setPanelState('inbox', { selectedNotificationId: entry.id });
-            }}
-            onArchive={(entry) => archiveNotification(entry.id)}
-            onRestore={(entry) => restoreNotification(entry.id)}
-          />
+          <div className="max-h-[32rem] overflow-y-auto pr-1 xl:max-h-[calc(100dvh-21rem)]">
+            <NotificationList
+              entries={visibleEntries}
+              galaxySeed={galaxySeed}
+              activeView={activeView}
+              compact
+              selectedId={selectedEntry?.id ?? null}
+              onSelect={(entry) => {
+                markNotificationRead(entry.id);
+                setPanelState('inbox', { selectedNotificationId: entry.id });
+              }}
+              onArchive={(entry) => archiveNotification(entry.id)}
+              onRestore={(entry) => restoreNotification(entry.id)}
+            />
+          </div>
         </section>
 
         <aside className="rounded-2xl border border-slate-800/80 bg-slate-950/60 p-4">
           <div className="text-[10px] font-semibold uppercase tracking-[0.28em] text-slate-500">Selected Entry</div>
           {selectedEntry ? (
-            <div className="mt-3 flex flex-col gap-3">
+            <div className="mt-3 flex max-h-[32rem] flex-col gap-3 overflow-y-auto pr-1 xl:max-h-[calc(100dvh-21rem)]">
               <div>
                 <div className="text-base font-semibold text-slate-100">{selectedEntry.title}</div>
                 <div className="mt-1 text-[11px] text-slate-400">{selectedEntry.body}</div>
@@ -172,7 +175,7 @@ export function InboxPanel() {
                     className="rounded-lg border border-slate-800/80 bg-slate-950/70 px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-300 transition-colors hover:border-red-500/35 hover:text-red-200"
                     onClick={() => archiveNotification(selectedEntry.id)}
                   >
-                    Archive Entry
+                    Dismiss Entry
                   </button>
                 ) : (
                   <button

@@ -166,6 +166,7 @@ For detailed specs see `Idleverse_SYSTEM_BLUEPRINTS.md`. For the upcoming pipeli
 - Fleet Management (ships, pilots, named fleets, doctrines, fleet commanders, wing commanders, fleet cargo and wing cargo holds)
 - Fleet Cargo & Auto-Haul (non-wing fleets use `fleet.cargoHold`; fleets with one or more hauling wings distribute cargo across available `wing.cargoHold`s and auto-dispatch ready hauling wings independently)
 - Fleet Combat (NPC pirate groups, patrol/raid orders, hull damage, loot, bounty)
+- Reward Inventory & Drop Framework (save-backed premium item inventory, shared reward resolver, combat chase drops, reward history)
 - Corp Identity (state.corp: name + foundedAt; OverviewPanel = corp command center with HQ card)
 - Factions (rep tracking, docking, Corp HQ registration)
 - Pilots (individual crew with skills, morale, training focus, skill queue)

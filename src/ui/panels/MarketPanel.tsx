@@ -18,7 +18,6 @@ import { GameDropdown, type DropdownOption } from '@/ui/components/GameDropdown'
 import { SystemUnlockCard } from '@/ui/components/SystemUnlockCard';
 import { useUiStore } from '@/stores/uiStore';
 import { isTutorialStepCurrent } from '@/game/progression/tutorialSequence';
-import { ActivityBar } from '@/ui/effects/ActivityBar';
 
 // ─── Resource categories to display in market ─────────────────────────────
 
@@ -809,10 +808,6 @@ function TradeRoutesTab({
   const transitRoutes = routes.filter(route => route.inTransit > 0).length;
   const profitableRoutes = routes.filter(route => (route.lastRunProfit ?? 0) > 0).length;
   const readyFleets = fleets.filter(fleet => !fleet.fleetOrder && !fleet.combatOrder).length;
-  const activityRate = Math.min(1, Math.max(
-    routes.length > 0 ? activeRoutes / Math.max(1, maxRoutes || routes.length) : 0,
-    transitRoutes / Math.max(1, routes.length),
-  ));
   const routeAnalytics = useMemo<RouteAnalyticsEntry[]>(() => {
     return routes
       .map(route => {
@@ -944,7 +939,6 @@ function TradeRoutesTab({
             <CommandMetric label="Profitful" value={`${profitableRoutes}`} meta="positive last run" tone={profitableRoutes > 0 ? 'amber' : 'slate'} />
             <CommandMetric label="Trade Level" value={`T${tradeLevel}`} meta="route capacity gate" tone="violet" />
           </div>
-          <ActivityBar active={activeRoutes > 0 || transitRoutes > 0} rate={activityRate} color={transitRoutes > 0 ? 'cyan' : 'green'} label="Route load" valueLabel={transitRoutes > 0 ? `${transitRoutes} in transit` : `${activeRoutes} active`} />
         </div>
 
         <div className="flex items-center justify-between">
@@ -1170,11 +1164,6 @@ export function MarketPanel() {
   const [focusResourceId, setFocusResourceId] = useState(() => focusCandidates[0] ?? listedResourceIds[0] ?? 'ferrite');
   const activeRoutes = routes.filter(route => route.enabled).length;
   const transitRoutes = routes.filter(route => route.inTransit > 0).length;
-  const activityRate = Math.min(1, Math.max(
-    Math.min(1, activeRoutes / Math.max(1, routes.length || 1)),
-    Math.min(1, autoReadyCount / Math.max(1, autoEnabledCount || 1)),
-    Math.min(1, (tradeMultiplier - 1) / 0.5),
-  ));
 
   useEffect(() => {
     const nextFocus = focusCandidates[0] ?? listedResourceIds[0] ?? 'ferrite';
@@ -1308,7 +1297,6 @@ export function MarketPanel() {
             <CommandMetric label="Auto-Sell" value={`${autoEnabledCount}`} meta={autoReadyCount > 0 ? `${autoReadyCount} ready to liquidate` : 'no armed surplus'} tone={autoReadyCount > 0 ? 'emerald' : autoEnabledCount > 0 ? 'amber' : 'slate'} />
             <CommandMetric label="Trade Routes" value={`${activeRoutes}`} meta={transitRoutes > 0 ? `${transitRoutes} hauling now` : routes.length > 0 ? `${routes.length} configured` : 'no logistics lines'} tone={transitRoutes > 0 ? 'cyan' : activeRoutes > 0 ? 'violet' : 'slate'} />
           </div>
-          <ActivityBar active={autoReadyCount > 0 || transitRoutes > 0 || activeRoutes > 0} rate={activityRate} color={transitRoutes > 0 ? 'cyan' : autoReadyCount > 0 ? 'green' : 'amber'} label="Market load" valueLabel={transitRoutes > 0 ? `${transitRoutes} hauling` : autoReadyCount > 0 ? `${autoReadyCount} ready` : `${activeRoutes} routes`} />
         </div>
       </div>
 
@@ -1340,7 +1328,6 @@ export function MarketPanel() {
                 <CommandMetric label="Auto Ready" value={`${autoReadyCount}`} meta={autoEnabledCount > 0 ? `${autoEnabledCount} auto lines armed` : 'no automation armed'} tone={autoReadyCount > 0 ? 'emerald' : 'slate'} />
                 <CommandMetric label="Routes Online" value={`${activeRoutes}`} meta={transitRoutes > 0 ? `${transitRoutes} in motion` : 'listings only'} tone={activeRoutes > 0 ? 'cyan' : 'slate'} />
               </div>
-              <ActivityBar active={autoReadyCount > 0} rate={Math.min(1, autoReadyCount / Math.max(1, autoEnabledCount || 1))} color={autoReadyCount > 0 ? 'green' : 'amber'} label="Auto-sell load" valueLabel={autoEnabledCount > 0 ? `${autoReadyCount}/${autoEnabledCount} ready` : 'none armed'} />
             </div>
 
             <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-3 px-4">

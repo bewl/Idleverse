@@ -27,6 +27,7 @@ export interface NpcGroupDef {
   systemId: string;
   name: string;
   factionId: FactionId;
+  rewardSourceId?: string;
   /** Effective combat strength. Fleet must overcome this to win. */
   strength: number;
   /** ISK bounty awarded on destruction. */

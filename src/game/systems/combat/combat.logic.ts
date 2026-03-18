@@ -12,6 +12,8 @@ import { generateGalaxy } from '@/game/galaxy/galaxy.gen';
 import { getCorpHqBonusFromState } from '@/game/systems/factions/faction.logic';
 import { computeRoleAdjustedCombatStats } from '@/game/systems/fleet/fleet.logic';
 import { getHaulingWings, getOperationalFleetShipIds, getWingCurrentSystemId, getWingDispatchShipIds, hasActiveEscortWing } from '@/game/systems/fleet/wings.logic';
+import { recordResolvedRewards, resolveRewards } from '@/game/systems/rewards/rewardEngine';
+import { buildCombatRewardSourceId } from '@/game/systems/rewards/rewardRegistry';
 
 // ─── String → seed helper ───────────────────────────────────────────────────
 
@@ -57,6 +59,7 @@ export function generateNpcGroupsForSystem(
       systemId,
       name,
       factionId: cfg.factionId,
+      rewardSourceId: buildCombatRewardSourceId(secKey, cfg.factionId),
       strength,
       bounty: Math.round(strength * cfg.bountyMultiplier),
       lootTable: cfg.lootTable,
@@ -110,6 +113,7 @@ interface CombatResult {
   avgHullDamage: number;
   bountyEarned: number;
   lootGained: Record<string, number>;
+  itemDrops: GameState['systems']['rewards']['inventory'];
 }
 
 /**
@@ -123,7 +127,7 @@ export function resolveCombat(
   nowMs: number,
 ): CombatResult {
   const fleet = state.systems.fleet.fleets[fleetId];
-  if (!fleet) return { victory: false, avgHullDamage: 30, bountyEarned: 0, lootGained: {} };
+  if (!fleet) return { victory: false, avgHullDamage: 30, bountyEarned: 0, lootGained: {}, itemDrops: [] };
 
   const fleetShips = getOperationalFleetShipIds(fleet)
     .map(id => state.systems.fleet.ships[id])
@@ -140,7 +144,7 @@ function resolveCombatForShips(
   npcGroup: NpcGroupDef,
   nowMs: number,
 ): CombatResult {
-  if (fleetShips.length === 0) return { victory: false, avgHullDamage: 30, bountyEarned: 0, lootGained: {} };
+  if (fleetShips.length === 0) return { victory: false, avgHullDamage: 30, bountyEarned: 0, lootGained: {}, itemDrops: [] };
 
   const combatStats = computeRoleAdjustedCombatStats(fleet, fleetShips);
   const fleetRating = combatStats.effectiveDPS;
@@ -168,23 +172,29 @@ function resolveCombatForShips(
   }
 
   if (!victory) {
-    return { victory, avgHullDamage, bountyEarned: 0, lootGained: {} };
+    return { victory, avgHullDamage, bountyEarned: 0, lootGained: {}, itemDrops: [] };
   }
 
-  // Loot rolls on victory
-  const lootGained: Record<string, number> = {};
-  for (const entry of npcGroup.lootTable) {
-    if (rng() < entry.chance * combatStats.lootQualityMult * hqLootMultiplier) {
-      const qty = randInt(rng, entry.minQty, entry.maxQty);
-      lootGained[entry.resourceId] = (lootGained[entry.resourceId] ?? 0) + qty;
-    }
-  }
+  const resourceChanceMultiplier = combatStats.lootQualityMult * hqLootMultiplier;
+  const itemChanceMultiplier = 1 + Math.max(0, resourceChanceMultiplier - 1) * 0.35;
+  const resolvedRewards = resolveRewards({
+    sourceType: 'combat',
+    sourceId: npcGroup.rewardSourceId ?? buildCombatRewardSourceId('lowsec', npcGroup.factionId),
+    sourceName: npcGroup.name,
+    nowMs,
+    resourceEntries: npcGroup.lootTable,
+    resourceChanceMultiplier,
+    resourceQuantityMultiplier: 1,
+    itemChanceMultiplier,
+    nextRandom: rng,
+  });
 
   return {
     victory,
     avgHullDamage,
     bountyEarned: npcGroup.bounty,
-    lootGained,
+    lootGained: resolvedRewards.resources,
+    itemDrops: resolvedRewards.items,
   };
 }
 
@@ -243,6 +253,7 @@ export function tickEscortedHaulingWingCombat(state: GameState): CombatTickResul
       }
 
       let resources = { ...s.resources };
+      let rewardsState = s.systems.rewards;
       if (result.victory) {
         for (const [resourceId, qty] of Object.entries(result.lootGained)) {
           resources[resourceId] = (resources[resourceId] ?? 0) + qty;
@@ -250,6 +261,20 @@ export function tickEscortedHaulingWingCombat(state: GameState): CombatTickResul
         if (result.bountyEarned > 0) {
           resources.credits = (resources.credits ?? 0) + result.bountyEarned;
         }
+        rewardsState = recordResolvedRewards(
+          rewardsState,
+          {
+            sourceType: 'combat',
+            sourceId: target.rewardSourceId ?? `combat-convoy-${target.factionId}`,
+            sourceName: `${target.name} (Escort Response)`,
+            nowMs,
+          },
+          {
+            resources: result.lootGained,
+            items: result.itemDrops,
+          },
+          result.bountyEarned,
+        );
       }
 
       let newNpcGroupStates = { ...s.galaxy.npcGroupStates };
@@ -291,6 +316,7 @@ export function tickEscortedHaulingWingCombat(state: GameState): CombatTickResul
         },
         systems: {
           ...s.systems,
+          rewards: rewardsState,
           fleet: {
             ...s.systems.fleet,
             ships: updatedShips,
@@ -375,6 +401,7 @@ export function tickCombat(state: GameState, deltaSeconds: number): CombatTickRe
 
     // Apply loot to cargo resources
     let resources = { ...s.resources };
+    let rewardsState = s.systems.rewards;
     if (result.victory) {
       for (const [resourceId, qty] of Object.entries(result.lootGained)) {
         resources = {
@@ -389,6 +416,20 @@ export function tickCombat(state: GameState, deltaSeconds: number): CombatTickRe
           credits: (resources.credits ?? 0) + result.bountyEarned,
         };
       }
+      rewardsState = recordResolvedRewards(
+        rewardsState,
+        {
+          sourceType: 'combat',
+          sourceId: target.rewardSourceId ?? `combat-${target.factionId}`,
+          sourceName: target.name,
+          nowMs,
+        },
+        {
+          resources: result.lootGained,
+          items: result.itemDrops,
+        },
+        result.bountyEarned,
+      );
     }
 
     // Mark NPC group dead with respawn timer
@@ -440,6 +481,7 @@ export function tickCombat(state: GameState, deltaSeconds: number): CombatTickRe
       },
       systems: {
         ...s.systems,
+        rewards: rewardsState,
         fleet: {
           ...s.systems.fleet,
           ships: updatedShips,
