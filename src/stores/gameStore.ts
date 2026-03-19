@@ -209,6 +209,7 @@ interface GameStore {
   // Persistence
   saveToStorage: () => void;
   loadFromStorage: () => void;
+  reconcileElapsedTime: (showSummary?: boolean) => void;
   dismissOfflineSummary: () => void;
   clearSave: () => void;
   completeTutorialStep: (stepId?: import('@/types/game.types').TutorialStepId) => void;
@@ -1218,6 +1219,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
             [fleetId]: {
               ...fleet,
               miningOriginSystemId: fleet.currentSystemId,
+              hqOffloadStartedAt: null,
             },
           },
         },
@@ -1704,6 +1706,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
       escortWingId: null,
       isDispatched: false,
       haulingOriginSystemId: null,
+      hqOffloadStartedAt: null,
+      recentTransitArrival: null,
       lastEscortCombatAt: 0,
     };
 
@@ -2141,10 +2145,19 @@ export const useGameStore = create<GameStore>((set, get) => ({
     for (const [id, fleet] of Object.entries(patchedSystems.fleet.fleets)) {
       let f = fleet.isScanning === undefined ? { ...fleet, isScanning: false } : fleet;
       if (f.cargoHold === undefined) f = { ...f, cargoHold: {} };
+      if (f.hqOffloadStartedAt === undefined) f = { ...f, hqOffloadStartedAt: null };
+      if (f.recentTransitArrival === undefined) f = { ...f, recentTransitArrival: null };
       if (!Array.isArray(f.wings)) f = { ...f, wings: [] };
       f = {
         ...f,
-        wings: (f.wings ?? []).map(wing => ({ ...wing, commanderId: wing.commanderId ?? null, cargoHold: wing.cargoHold ?? {}, lastEscortCombatAt: wing.lastEscortCombatAt ?? 0 })),
+        wings: (f.wings ?? []).map(wing => ({
+          ...wing,
+          commanderId: wing.commanderId ?? null,
+          cargoHold: wing.cargoHold ?? {},
+          hqOffloadStartedAt: wing.hqOffloadStartedAt ?? null,
+          recentTransitArrival: wing.recentTransitArrival ?? null,
+          lastEscortCombatAt: wing.lastEscortCombatAt ?? 0,
+        })),
       };
       patchedFleets4[id] = f;
     }
@@ -2191,6 +2204,22 @@ export const useGameStore = create<GameStore>((set, get) => ({
     set({
       state: newState,
       offlineSummary: summary.elapsedSeconds > 60 ? summary : null,
+    });
+  },
+
+  reconcileElapsedTime: (showSummary = false) => {
+    const { state } = get();
+    const { newState, summary } = processOfflineProgress(state, Date.now());
+    if (summary.elapsedSeconds < 1) return;
+
+    const tutorialEvaluatedState = {
+      ...newState,
+      tutorial: evaluateTutorialState(newState),
+    };
+
+    set({
+      state: tutorialEvaluatedState,
+      offlineSummary: showSummary && summary.elapsedSeconds > 60 ? summary : null,
     });
   },
 

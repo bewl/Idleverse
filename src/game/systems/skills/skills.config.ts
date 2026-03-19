@@ -107,6 +107,7 @@ export const SKILL_DEFINITIONS: Record<string, SkillDefinition> = {
     effects: [
       { modifier: 'hauler-cargo-bonus', valuePerLevel: 0.10 },
       { modifier: 'haul-speed',        valuePerLevel: 0.05 },
+      { modifier: 'cargo-transfer-speed', valuePerLevel: 0.04 },
     ],
     prerequisiteSkills: { 'spaceship-command': 1 },
     unlocks: ['recipe-ship-hauler'],

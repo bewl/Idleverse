@@ -15,7 +15,8 @@ import { tickExploration } from '@/game/systems/fleet/exploration.logic';
 import { computeFleetCargoCapacity } from '@/game/systems/fleet/fleet.logic';
 import { issueFleetGroupOrder } from '@/game/systems/fleet/fleet.orders';
 import { getCombinedCommanderBonus } from '@/game/systems/fleet/commander.logic';
-import { dispatchHaulerWing, getFleetStoredCargo, getHaulingWings, getWingCargoCapacity, getWingCargoUsed, processWingArrivalAtHQ, processWingReturn } from '@/game/systems/fleet/wings.logic';
+import { applyCargoTransferStep, dispatchHaulerWing, getFleetCargoTransferSeconds, getFleetStoredCargo, getHaulingWings, getWingCargoCapacity, getWingCargoUsed, processWingArrivalAtHQ, processWingReturn } from '@/game/systems/fleet/wings.logic';
+import { getBeltsForSystem } from '@/game/systems/mining/mining.logic';
 
 export interface TickResult {
   newState: GameState;
@@ -69,6 +70,15 @@ function distributeCargoAcrossHaulingWings(
   }
 
   return { nextWings, remainingCargo: compactRemainingCargo };
+}
+
+function getSystemBeltSet(seed: number, systemId: string, cache: Map<string, Set<string>>): Set<string> {
+  let beltSet = cache.get(systemId);
+  if (!beltSet) {
+    beltSet = new Set(getBeltsForSystem(systemId, seed));
+    cache.set(systemId, beltSet);
+  }
+  return beltSet;
 }
 
 export function runTick(state: GameState, deltaSeconds: number): TickResult {
@@ -399,6 +409,7 @@ export function runTick(state: GameState, deltaSeconds: number): TickResult {
       if (homeSystemId) {
         for (const [fleetId, fleet] of Object.entries(s.systems.fleet.fleets)) {
           if (fleet.fleetOrder) continue;
+          if (fleet.miningOriginSystemId || (fleet.hqOffloadStartedAt ?? null) !== null) continue;
           const haulingWings = getHaulingWings(fleet);
           if (haulingWings.length > 0) {
             for (const haulingWing of haulingWings) {
@@ -443,8 +454,8 @@ export function runTick(state: GameState, deltaSeconds: number): TickResult {
           const used = getFleetStoredCargo(fleet);
           if (used < capacity * 0.8) continue;
 
-          if (fleet.currentSystemId === homeSystemId) {
-            // Fleet is already at HQ — dump immediately without a haul trip
+          if (fleet.currentSystemId === homeSystemId && !fleet.miningOriginSystemId) {
+            // Fleet is already at HQ and not returning from a haul trip — dump immediately
             const newResources = { ...s.resources };
             for (const [resourceId, amount] of Object.entries(fleet.cargoHold)) {
               if (amount > 0) newResources[resourceId] = (newResources[resourceId] ?? 0) + amount;
@@ -464,7 +475,7 @@ export function runTick(state: GameState, deltaSeconds: number): TickResult {
               },
             };
           } else {
-            // Fleet is away from HQ — stamp origin and dispatch a haul trip
+            // Fleet is away from HQ, or is staging a real HQ transfer cycle — stamp origin and dispatch a haul trip
             s = {
               ...s,
               systems: {
@@ -473,7 +484,7 @@ export function runTick(state: GameState, deltaSeconds: number): TickResult {
                   ...s.systems.fleet,
                   fleets: {
                     ...s.systems.fleet.fleets,
-                    [fleetId]: { ...fleet, miningOriginSystemId: fleet.currentSystemId },
+                      [fleetId]: { ...fleet, miningOriginSystemId: fleet.currentSystemId, hqOffloadStartedAt: null },
                   },
                 },
               },
@@ -500,32 +511,64 @@ export function runTick(state: GameState, deltaSeconds: number): TickResult {
         for (const fleetId of Object.keys(s.systems.fleet.fleets)) {
           const fleet = s.systems.fleet.fleets[fleetId];
           for (const haulingWing of getHaulingWings(fleet).filter(wing => wing.isDispatched)) {
-            const updated = processWingArrivalAtHQ(s, fleetId, haulingWing.id, homeSystemId);
+            const updated = processWingArrivalAtHQ(s, fleetId, haulingWing.id, homeSystemId, nowMs);
             if (updated) s = updated;
           }
         }
 
         let newResources = s.resources;
         let newFleets = s.systems.fleet.fleets;
-        let dumpHappened = false;
+        let offloadStateChanged = false;
         for (const [fleetId, fleet] of Object.entries(newFleets)) {
           if (getHaulingWings(fleet).length > 0) continue;
           if (!fleet.miningOriginSystemId) continue; // only dump fleets that completed a haul trip
           if (fleet.currentSystemId !== homeSystemId) continue;
           if (fleet.fleetOrder) continue; // still in transit
           const held = Object.entries(fleet.cargoHold).filter(([, v]) => v > 0);
-          if (held.length === 0) continue;
-          if (!dumpHappened) {
-            newResources = { ...newResources };
-            newFleets    = { ...newFleets };
-            dumpHappened = true;
+          if (held.length === 0) {
+            if (fleet.hqOffloadStartedAt !== null && fleet.hqOffloadStartedAt !== undefined) {
+              if (!offloadStateChanged) {
+                newFleets = { ...newFleets };
+                offloadStateChanged = true;
+              }
+              newFleets[fleetId] = { ...fleet, hqOffloadStartedAt: null };
+            }
+            continue;
           }
-          for (const [resourceId, amount] of held) {
-            newResources[resourceId] = (newResources[resourceId] ?? 0) + amount;
+          const cargoUnits = held.reduce((sum, [, amount]) => sum + amount, 0);
+          const offloadStartedAt = fleet.hqOffloadStartedAt ?? null;
+          if (offloadStartedAt === null) {
+            if (!offloadStateChanged) {
+              newFleets = { ...newFleets };
+              offloadStateChanged = true;
+            }
+            newFleets[fleetId] = { ...fleet, hqOffloadStartedAt: nowMs };
+            continue;
           }
-          newFleets[fleetId] = { ...fleet, cargoHold: {} };
+          const offloadDurationMs = getFleetCargoTransferSeconds(s, fleet, cargoUnits) * 1000;
+          const transferStep = applyCargoTransferStep(
+            fleet.cargoHold,
+            newResources,
+            offloadStartedAt,
+            offloadDurationMs,
+            s.lastUpdatedAt,
+            nowMs,
+          );
+          if (transferStep.movedAny || transferStep.completed) {
+            if (!offloadStateChanged) {
+              newResources = { ...newResources };
+              newFleets = { ...newFleets };
+              offloadStateChanged = true;
+            }
+            newResources = transferStep.nextResources;
+            newFleets[fleetId] = {
+              ...fleet,
+              cargoHold: transferStep.nextCargoHold,
+              hqOffloadStartedAt: transferStep.completed ? null : offloadStartedAt,
+            };
+          }
         }
-        if (dumpHappened) {
+        if (offloadStateChanged) {
           s = {
             ...s,
             resources: newResources,
@@ -539,11 +582,73 @@ export function runTick(state: GameState, deltaSeconds: number): TickResult {
     {
       const homeSystemId = s.systems.factions.homeStationSystemId;
       if (homeSystemId) {
+        const systemBeltCache = new Map<string, Set<string>>();
+
+        for (const [fleetId, fleet] of Object.entries(s.systems.fleet.fleets)) {
+          if (getHaulingWings(fleet).length > 0) continue;
+          if (fleet.fleetOrder) continue;
+
+          const currentSystemBelts = getSystemBeltSet(s.galaxy.seed, fleet.currentSystemId, systemBeltCache);
+          let newShips = s.systems.fleet.ships;
+          let anyShipAdjusted = false;
+
+          for (const sid of fleet.shipIds) {
+            const ship = newShips[sid];
+            if (!ship?.assignedBeltId) continue;
+            if (currentSystemBelts.has(ship.assignedBeltId)) continue;
+
+            if (ship.activity === 'mining') {
+              if (!anyShipAdjusted) newShips = { ...newShips };
+              newShips[sid] = { ...ship, activity: 'idle' };
+              anyShipAdjusted = true;
+            }
+          }
+
+          if (anyShipAdjusted) {
+            s = {
+              ...s,
+              systems: {
+                ...s.systems,
+                fleet: {
+                  ...s.systems.fleet,
+                  ships: newShips,
+                },
+              },
+            };
+          }
+
+          if (fleet.currentSystemId !== homeSystemId) continue;
+          if ((fleet.hqOffloadStartedAt ?? null) !== null) continue;
+
+          const recentArrivalOriginSystemId = fleet.recentTransitArrival?.toSystemId === homeSystemId
+            ? fleet.recentTransitArrival.fromSystemId
+            : null;
+          const resolvedOriginSystemId = fleet.miningOriginSystemId ?? recentArrivalOriginSystemId;
+          if (!resolvedOriginSystemId || resolvedOriginSystemId === fleet.currentSystemId) continue;
+
+          if (resolvedOriginSystemId !== fleet.miningOriginSystemId) {
+            s = {
+              ...s,
+              systems: {
+                ...s.systems,
+                fleet: {
+                  ...s.systems.fleet,
+                  fleets: {
+                    ...s.systems.fleet.fleets,
+                    [fleetId]: { ...s.systems.fleet.fleets[fleetId], miningOriginSystemId: resolvedOriginSystemId },
+                  },
+                },
+              },
+            };
+          }
+        }
+
         for (const [fleetId, fleet] of Object.entries(s.systems.fleet.fleets)) {
           if (getHaulingWings(fleet).length > 0) continue;
           if (!fleet.miningOriginSystemId) continue;
           if (fleet.currentSystemId !== homeSystemId) continue;
           if (fleet.fleetOrder) continue;
+          if ((fleet.hqOffloadStartedAt ?? null) !== null) continue;
           const returned = issueFleetGroupOrder(s, fleetId, fleet.miningOriginSystemId);
           if (returned) s = returned;
         }
@@ -565,15 +670,23 @@ export function runTick(state: GameState, deltaSeconds: number): TickResult {
         if (!fleet.miningOriginSystemId) continue;
         if (fleet.currentSystemId !== fleet.miningOriginSystemId) continue;
         if (fleet.fleetOrder) continue;
+        const currentSystemBelts = new Set(getBeltsForSystem(fleet.currentSystemId, s.galaxy.seed));
         let newShips = s.systems.fleet.ships;
         let anyRestored = false;
+        let hasInvalidAssignedBelt = false;
         for (const sid of fleet.shipIds) {
           const ship = newShips[sid];
-          if (ship && ship.assignedBeltId && ship.activity === 'idle') {
+          if (!ship?.assignedBeltId) continue;
+          if (!currentSystemBelts.has(ship.assignedBeltId)) {
+            hasInvalidAssignedBelt = true;
+            continue;
+          }
+          if (ship.activity === 'idle') {
             newShips = { ...newShips, [sid]: { ...ship, activity: 'mining' } };
             anyRestored = true;
           }
         }
+        if (hasInvalidAssignedBelt) continue;
         s = {
           ...s,
           systems: {
@@ -583,7 +696,7 @@ export function runTick(state: GameState, deltaSeconds: number): TickResult {
               ships: anyRestored ? newShips : s.systems.fleet.ships,
               fleets: {
                 ...s.systems.fleet.fleets,
-                [fleetId]: { ...fleet, miningOriginSystemId: undefined },
+                  [fleetId]: { ...fleet, miningOriginSystemId: undefined, hqOffloadStartedAt: null },
               },
             },
           },

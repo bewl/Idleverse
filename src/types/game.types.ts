@@ -430,6 +430,12 @@ export interface ShipInstance {
 
 export type WingType = 'mining' | 'hauling' | 'combat' | 'recon' | 'industrial';
 
+export interface RecentTransitArrival {
+  fromSystemId: string;
+  toSystemId: string;
+  arrivedAt: number;
+}
+
 export interface FleetWing {
   id: string;
   name: string;
@@ -446,6 +452,10 @@ export interface FleetWing {
   isDispatched: boolean;
   /** System the wing departed from — used to issue the return trip. */
   haulingOriginSystemId: string | null;
+  /** Timestamp (ms) when HQ offloading started for this detached wing. */
+  hqOffloadStartedAt?: number | null;
+  /** Most recent completed inter-system arrival for local scene presentation. */
+  recentTransitArrival?: RecentTransitArrival | null;
   /** Timestamp (ms) of the last detached escort combat engagement for this wing convoy. */
   lastEscortCombatAt: number;
 }
@@ -477,6 +487,10 @@ export interface PlayerFleet {
   cargoHold: Record<string, number>;
   /** The system the fleet was mining when auto-haul fired. Used to return the fleet after unloading. */
   miningOriginSystemId?: string;
+  /** Timestamp (ms) when HQ offloading started for a whole-fleet auto-haul trip. */
+  hqOffloadStartedAt?: number | null;
+  /** Most recent completed inter-system arrival for local scene presentation. */
+  recentTransitArrival?: RecentTransitArrival | null;
   /** Pilot ID of the designated fleet commander, or null if none. */
   commanderId: string | null;
   /** Sub-groups of ships organized by role. Empty array = no wings defined. */

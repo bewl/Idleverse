@@ -264,6 +264,7 @@ PlayerFleet {
   shipIds, currentSystemId, fleetOrder, doctrine, combatOrder, isScanning
   cargoHold: Record<string, number>   // legacy ore hold for non-wing fleets
   miningOriginSystemId?: string       // set during haul trip; used to route return + restore mining
+  hqOffloadStartedAt?: number | null  // set while HQ unloading is in progress for whole-fleet auto-haul
   // cargoCapacity computed via computeFleetCargoCapacity(fleet, ships)
 }
 ```
@@ -305,14 +306,14 @@ Each `PlayerFleet` has a legacy `cargoHold: Record<string, number>` for non-wing
 - **Escort-aware route policy**: unescorted hauling wings now prefer the safest available route to HQ and only fall back to more direct routes when needed. Hauling wings with an active escort wing prefer direct routing first and fall back to safer paths if no direct route exists.
 - **No hauling wing present**: when the fleet cargo reaches ≥80% capacity and no active movement order exists, the original whole-fleet auto-haul path fires.
 
-- **Fleet already at HQ** (`currentSystemId === homeSystemId`): ore is dumped inline immediately into `state.resources`. No haul trip is dispatched and `miningOriginSystemId` is not set. This prevents cargo from being stripped on the same tick it was produced for stationary mining fleets.
+- **Fleet already at HQ with no active haul return** (`currentSystemId === homeSystemId` and `miningOriginSystemId` is unset): ore is dumped inline immediately into `state.resources`. No haul trip is dispatched and no `Cargo Transfer` phase is started. This keeps stationary HQ miners from pointlessly entering the transfer loop.
 - **Fleet away from HQ**: `fleet.miningOriginSystemId` is set to `fleet.currentSystemId`, and a haul route to HQ is dispatched via `issueFleetGroupOrder`.
 
-**HQ dump on arrival**: When a whole fleet arrives at the HQ system carrying ore (indicated by `miningOriginSystemId` being set), its `cargoHold` is flushed into `state.resources`. When a hauling wing arrives, `haulingWing.cargoHold` is flushed instead.
+**HQ cargo transfer on arrival**: When a whole fleet arrives at the HQ system carrying ore after a haul trip (indicated by `miningOriginSystemId` being set), or when a detached hauling wing arrives at HQ, unloading now starts a timed `Cargo Transfer` window instead of resolving instantly. The trip remains parked at HQ while cargo drains continuously into `state.resources` across the transfer window, then the return leg can begin only once the transfer completes. Transfer speed is now progression-aware: corp Industrial training, Logistics Command bonuses, and better hauling hulls all reduce HQ dwell time.
 
-**Return to origin**: After dumping, either the whole fleet or the dispatched hauling wing group is automatically sent back to its origin.
+**Return to origin**: After offloading completes, either the whole fleet or the dispatched hauling wing group is automatically sent back to its origin.
 
-**Mining restored**: When the return trip completes, ships with an `assignedBeltId` have their `activity` restored to `'mining'`, completing the round-trip loop.
+**Mining restored**: When the return trip completes, ships only resume `'mining'` if their `assignedBeltId` exists in the system they actually returned to. If an older save leaves a whole fleet stranded at HQ with remote belt assignments, the tick loop now idles those ships and only reissues the return leg from authoritative state (`miningOriginSystemId`, or the fleet's most recent arrival into HQ) instead of guessing from reused belt template IDs.
 
 **Manual haul**: FleetPanel expanded card shows a fill bar and a "Haul to HQ" button. For whole fleets without hauling wings, this now uses the same `miningOriginSystemId` round-trip stamp as auto-haul so the fleet dumps at HQ and returns to its mining system correctly.
 
@@ -639,6 +640,9 @@ across all 9 game panels.
 
 - `src/ui/panels/SystemPanel.tsx` now uses a camera-driven system view instead of the older orrery treatment. The scene supports constrained orbit camera controls, object hover cards, pinned fleet inspection, and a single adaptive inspector that swaps between system summary, hover preview, and selected-object actions.
 - `src/ui/panels/SystemSceneCanvas.tsx` is the dedicated canvas renderer for the system view. It reuses the galaxy map's camera vocabulary at system scale and renders readable spatial abstractions for bodies, ore belts, fleets, and service structures rather than purely flat orbital rings.
+- Local fleet markers in the System scene now use the same rotating fleet palette as the Fleet panel, so fleet identity stays consistent between strategic and local views.
+- Fleets leaving the current system now animate out across a fixed-duration local warp corridor, and fleet arrivals now use an authoritative recent-arrival transit snapshot recorded by the simulation before settling into orbit, so the scene no longer invents remote occupancy or arbitrary arrival edges while only truly local fleets remain interactive for system-level controls.
+- Detached hauling convoys now render as their own local traffic contacts in the System scene, with HQ arrival and cargo-transfer visuals driven by the wing's recorded arrival snapshot plus the computed transfer duration instead of disappearing during auto-haul or guessing their arrival direction in the renderer.
 
 ### `useUiStore` — UI State Store
 

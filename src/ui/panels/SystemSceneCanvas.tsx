@@ -1,9 +1,16 @@
 import { useCallback, useEffect, useRef } from 'react';
 import type { CelestialBody, StarSystem } from '@/types/galaxy.types';
 import type { PlayerFleet } from '@/types/game.types';
+import { getFleetColorByIndex } from '@/ui/utils/fleetColors';
 
 const SYSTEM_CAM_DEFAULT = { theta: 0.72, phi: 1.08, dist: 170, tx: 0, ty: 0, tz: 0 };
 const SYSTEM_WORLD_RADIUS = 118;
+const SYSTEM_FLEET_ORBIT_RADIUS = 38;
+const SYSTEM_FLEET_WARP_RADIUS = 86;
+const SYSTEM_FLEET_TRANSITION_MIN_MS = 1800;
+const SYSTEM_FLEET_TRANSITION_MAX_MS = 4200;
+const SYSTEM_FLEET_EXIT_LINGER_MS = 900;
+const SYSTEM_FLEET_ARRIVAL_SETTLE_MS = 2200;
 
 type SceneEntityKind = 'body' | 'fleet' | 'station' | 'outpost';
 
@@ -29,11 +36,30 @@ interface MiningLink {
   shipCount: number;
 }
 
+interface ConvoyContact {
+  id: string;
+  label: string;
+  fleetId: string;
+  shipCount: number;
+  colorIndex: number;
+  fromSystemId: string;
+  toSystemId: string;
+  legDepartedAt: number;
+  legDurationSeconds: number;
+  hqOffloadStartedAt: number | null;
+  hqOffloadCargoUnits: number;
+  cargoTransferDurationSeconds: number;
+  recentArrivalFromSystemId: string | null;
+  recentArrivalAt: number | null;
+}
+
 interface SystemSceneCanvasProps {
   system: StarSystem;
   selectedBodyId: string | null;
   pinnedFleetId: string | null;
   fleets: PlayerFleet[];
+  fleetColorIndexById: Record<string, number>;
+  convoyContacts: ConvoyContact[];
   miningLinks: MiningLink[];
   structures: StructureMarker[];
   onSelectBody: (bodyId: string | null) => void;
@@ -477,6 +503,8 @@ export function SystemSceneCanvas({
   selectedBodyId,
   pinnedFleetId,
   fleets,
+  fleetColorIndexById,
+  convoyContacts,
   miningLinks,
   structures,
   onSelectBody,
@@ -491,8 +519,8 @@ export function SystemSceneCanvas({
   const camRef = useRef<CamState>({ ...SYSTEM_CAM_DEFAULT });
   const dragRef = useRef({ active: false, mode: 'orbit' as 'orbit' | 'pan', startX: 0, startY: 0 });
   const camAnimRef = useRef<{ from: CamState; to: CamState; startTime: number; duration: number } | null>(null);
-  const propsRef = useRef({ system, selectedBodyId, pinnedFleetId, fleets, miningLinks, structures });
-  propsRef.current = { system, selectedBodyId, pinnedFleetId, fleets, miningLinks, structures };
+  const propsRef = useRef({ system, selectedBodyId, pinnedFleetId, fleets, fleetColorIndexById, convoyContacts, miningLinks, structures });
+  propsRef.current = { system, selectedBodyId, pinnedFleetId, fleets, fleetColorIndexById, convoyContacts, miningLinks, structures };
 
   const focusTarget = useCallback((point: ScenePoint | null, distance?: number) => {
     if (!point) return;
@@ -537,7 +565,8 @@ export function SystemSceneCanvas({
     const width = canvas.width / dpr;
     const height = canvas.height / dpr;
     const now = performance.now();
-    const { system, selectedBodyId, pinnedFleetId, fleets, miningLinks, structures } = propsRef.current;
+    const worldNow = Date.now();
+    const { system, selectedBodyId, pinnedFleetId, fleets, fleetColorIndexById, convoyContacts, miningLinks, structures } = propsRef.current;
 
     const anim = camAnimRef.current;
     if (anim) {
@@ -657,11 +686,104 @@ export function SystemSceneCanvas({
     }
 
     const fleetPointById = new Map<string, { sx: number; sy: number }>();
+    const renderedFleetEntries: Array<{
+      fleet: PlayerFleet;
+      sx: number;
+      sy: number;
+      fleetColor: string;
+      markerAlpha: number;
+      isPinned: boolean;
+      isHovered: boolean;
+      motion: 'holding' | 'departing' | 'arriving';
+      trailPoint: { sx: number; sy: number } | null;
+      interactive: boolean;
+    }> = [];
     fleets.forEach((fleet, index) => {
-      const angle = hashId(fleet.id) + index * 0.82;
-      const point = project(Math.cos(angle) * 38, 14 + (index % 3) * 2.5, Math.sin(angle) * 38);
-      if (!point) return;
-      fleetPointById.set(fleet.id, { sx: point.sx, sy: point.sy });
+      const colorIndex = fleetColorIndexById[fleet.id] ?? index;
+      const fleetColor = getFleetColorByIndex(colorIndex);
+      const orbitAngle = hashId(fleet.id) + colorIndex * 0.82;
+      const orbitPoint = project(
+        Math.cos(orbitAngle) * SYSTEM_FLEET_ORBIT_RADIUS,
+        14 + (colorIndex % 3) * 2.5,
+        Math.sin(orbitAngle) * SYSTEM_FLEET_ORBIT_RADIUS,
+      );
+      if (!orbitPoint) return;
+
+      const isHovered = hoverKey === `fleet:${fleet.id}`;
+      const isPinned = pinnedFleetId === fleet.id;
+      let drawPoint = { sx: orbitPoint.sx, sy: orbitPoint.sy };
+      let markerAlpha = 1;
+      let motion: 'holding' | 'departing' | 'arriving' = 'holding';
+      let trailPoint: { sx: number; sy: number } | null = null;
+      let interactive = fleet.currentSystemId === system.id;
+      const arrivalSnapshot = fleet.currentSystemId === system.id
+        && fleet.recentTransitArrival?.toSystemId === system.id
+        ? fleet.recentTransitArrival
+        : null;
+
+      const order = fleet.fleetOrder;
+      if (order && order.currentLeg < order.route.length - 1) {
+        const fromSystemId = order.route[order.currentLeg] ?? fleet.currentSystemId;
+        const toSystemId = order.route[order.currentLeg + 1] ?? order.destinationSystemId;
+        const legDurationMs = Math.max(1000, (order.legDurationSeconds ?? 1) * 1000);
+        const transitionDurationMs = clamp(legDurationMs * 0.32, SYSTEM_FLEET_TRANSITION_MIN_MS, SYSTEM_FLEET_TRANSITION_MAX_MS);
+        const warpAngle = hashId(`${fromSystemId}:${toSystemId}`);
+        const warpPoint = project(
+          Math.cos(warpAngle) * SYSTEM_FLEET_WARP_RADIUS,
+          17 + (colorIndex % 3) * 3.2,
+          Math.sin(warpAngle) * SYSTEM_FLEET_WARP_RADIUS,
+        );
+
+        if (warpPoint && fromSystemId === system.id) {
+          const elapsedSinceDepartureMs = Math.max(0, worldNow - order.legDepartedAt);
+          const departureProgress = clamp(elapsedSinceDepartureMs / transitionDurationMs, 0, 1);
+          const exitFadeProgress = clamp((elapsedSinceDepartureMs - transitionDurationMs) / SYSTEM_FLEET_EXIT_LINGER_MS, 0, 1);
+          if (departureProgress >= 1 && exitFadeProgress >= 1) return;
+          drawPoint = departureProgress >= 1
+            ? { sx: warpPoint.sx, sy: warpPoint.sy }
+            : {
+                sx: lerp(orbitPoint.sx, warpPoint.sx, departureProgress),
+                sy: lerp(orbitPoint.sy, warpPoint.sy, departureProgress),
+              };
+          trailPoint = { sx: orbitPoint.sx, sy: orbitPoint.sy };
+          motion = 'departing';
+          markerAlpha = departureProgress >= 1
+            ? lerp(0.46, 0, exitFadeProgress)
+            : lerp(1, 0.58, departureProgress);
+          interactive = false;
+        }
+      } else if (arrivalSnapshot) {
+        const arrivalProgress = clamp((worldNow - arrivalSnapshot.arrivedAt) / SYSTEM_FLEET_ARRIVAL_SETTLE_MS, 0, 1);
+        const arrivalWarpAngle = hashId(`${arrivalSnapshot.fromSystemId}:${arrivalSnapshot.toSystemId}`);
+        const warpPoint = project(
+          Math.cos(arrivalWarpAngle) * SYSTEM_FLEET_WARP_RADIUS,
+          17 + (colorIndex % 3) * 3.2,
+          Math.sin(arrivalWarpAngle) * SYSTEM_FLEET_WARP_RADIUS,
+        );
+        if (warpPoint && arrivalProgress < 1) {
+          drawPoint = {
+            sx: lerp(warpPoint.sx, orbitPoint.sx, arrivalProgress),
+            sy: lerp(warpPoint.sy, orbitPoint.sy, arrivalProgress),
+          };
+          trailPoint = { sx: warpPoint.sx, sy: warpPoint.sy };
+          motion = 'arriving';
+          markerAlpha = lerp(0.52, 1, arrivalProgress);
+        }
+      }
+
+      fleetPointById.set(fleet.id, drawPoint);
+      renderedFleetEntries.push({
+        fleet,
+        sx: drawPoint.sx,
+        sy: drawPoint.sy,
+        fleetColor,
+        markerAlpha,
+        isPinned,
+        isHovered,
+        motion,
+        trailPoint,
+        interactive,
+      });
     });
 
     miningLinks.forEach(link => {
@@ -825,36 +947,57 @@ export function SystemSceneCanvas({
       newHitCache.push({ kind: structure.kind, id: structure.id, sx: point.sx, sy: point.sy, r: 13 });
     });
 
-    fleets.forEach((fleet, index) => {
-      const point = fleetPointById.get(fleet.id);
-      if (!point) return;
-      const isHovered = hoverKey === `fleet:${fleet.id}`;
-      const isPinned = pinnedFleetId === fleet.id;
+    renderedFleetEntries.forEach((entry, index) => {
+      const { fleet, sx, sy, fleetColor, markerAlpha, isPinned, isHovered, motion, trailPoint, interactive } = entry;
       const pulse = Math.sin(now / 320 + index) * 0.22 + 0.78;
 
       ctx.save();
-      ctx.globalAlpha = pulse * (isPinned ? 1 : 0.88);
-      const glow = ctx.createRadialGradient(point.sx, point.sy, 0, point.sx, point.sy, 18);
-      glow.addColorStop(0, fleet.isScanning ? 'rgba(167,139,250,0.52)' : 'rgba(34,211,238,0.32)');
-      glow.addColorStop(1, 'rgba(34,211,238,0)');
+      ctx.globalAlpha = pulse * markerAlpha * (isPinned ? 1 : 0.88);
+      const glow = ctx.createRadialGradient(sx, sy, 0, sx, sy, 18);
+      glow.addColorStop(0, colorToRgba(fleetColor, fleet.isScanning ? 0.54 : 0.34));
+      glow.addColorStop(1, colorToRgba(fleetColor, 0));
       ctx.fillStyle = glow;
       ctx.beginPath();
-      ctx.arc(point.sx, point.sy, 18, 0, Math.PI * 2);
+      ctx.arc(sx, sy, 18, 0, Math.PI * 2);
       ctx.fill();
+
+      if (trailPoint && motion !== 'holding') {
+        const trailGradient = ctx.createLinearGradient(trailPoint.sx, trailPoint.sy, sx, sy);
+        trailGradient.addColorStop(0, colorToRgba(fleetColor, motion === 'arriving' ? 0.16 : 0.42));
+        trailGradient.addColorStop(1, colorToRgba(fleetColor, 0));
+        ctx.strokeStyle = trailGradient;
+        ctx.lineWidth = motion === 'arriving' ? 1.3 : 1.7;
+        ctx.setLineDash(motion === 'arriving' ? [3, 3] : []);
+        ctx.beginPath();
+        ctx.moveTo(trailPoint.sx, trailPoint.sy);
+        ctx.lineTo(sx, sy);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+
+      if (fleet.isScanning) {
+        ctx.strokeStyle = 'rgba(196,181,253,0.66)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(sx, sy, 10 + Math.sin(now / 220 + index) * 1.4, 0, Math.PI * 2);
+        ctx.stroke();
+      }
 
       if (isPinned) {
         ctx.strokeStyle = '#fbbf24';
         ctx.lineWidth = 1.4;
         ctx.beginPath();
-        ctx.arc(point.sx, point.sy, 12, 0, Math.PI * 2);
+        ctx.arc(sx, sy, 12, 0, Math.PI * 2);
         ctx.stroke();
       }
 
-      ctx.translate(point.sx, point.sy);
+      ctx.translate(sx, sy);
       ctx.rotate(Math.PI / 4);
       const size = isPinned || isHovered ? 5.5 : 4.5;
-      ctx.fillStyle = fleet.isScanning ? '#a78bfa' : '#0f766e';
-      ctx.strokeStyle = fleet.isScanning ? '#c4b5fd' : '#67e8f9';
+      ctx.fillStyle = colorToRgba(fleetColor, (motion === 'arriving' ? 0.72 : 0.88) * markerAlpha);
+      ctx.strokeStyle = motion === 'departing' || motion === 'arriving'
+        ? colorToRgba(fleetColor, markerAlpha >= 0.95 ? 1 : Math.max(0.62, markerAlpha))
+        : '#e2e8f0';
       ctx.lineWidth = 0.9;
       ctx.fillRect(-size, -size, size * 2, size * 2);
       ctx.strokeRect(-size, -size, size * 2, size * 2);
@@ -864,11 +1007,140 @@ export function SystemSceneCanvas({
         ctx.font = '10px monospace';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'bottom';
-        ctx.fillStyle = isPinned ? '#fbbf24' : '#67e8f9';
-        ctx.fillText(fleet.name, point.sx, point.sy - 12);
+        ctx.fillStyle = isPinned ? '#fbbf24' : fleetColor;
+        ctx.fillText(fleet.name, sx, sy - 12);
       }
 
-      newHitCache.push({ kind: 'fleet', id: fleet.id, sx: point.sx, sy: point.sy, r: 14 });
+      if (interactive) {
+        newHitCache.push({ kind: 'fleet', id: fleet.id, sx, sy, r: 14 });
+      }
+    });
+
+    convoyContacts.forEach((contact, index) => {
+      const convoyColor = getFleetColorByIndex(contact.colorIndex);
+      const orbitAngle = hashId(`${contact.fleetId}:${contact.id}:convoy`) + contact.colorIndex * 0.66;
+      const orbitPoint = project(
+        Math.cos(orbitAngle) * (SYSTEM_FLEET_ORBIT_RADIUS + 10),
+        11 + (contact.colorIndex % 2) * 3,
+        Math.sin(orbitAngle) * (SYSTEM_FLEET_ORBIT_RADIUS + 10),
+      );
+      if (!orbitPoint) return;
+
+      const warpAngle = hashId(`${contact.fromSystemId}:${contact.toSystemId}:${contact.id}`);
+      const warpPoint = project(
+        Math.cos(warpAngle) * (SYSTEM_FLEET_WARP_RADIUS + 8),
+        20 + (contact.colorIndex % 3) * 2.4,
+        Math.sin(warpAngle) * (SYSTEM_FLEET_WARP_RADIUS + 8),
+      );
+      if (!warpPoint) return;
+
+      let drawPoint = { sx: orbitPoint.sx, sy: orbitPoint.sy };
+      let trailPoint: { sx: number; sy: number } | null = null;
+      let alpha = 0.82;
+      let offloading = false;
+      const arrivalSnapshot = contact.recentArrivalFromSystemId && contact.recentArrivalAt !== null
+        ? {
+            fromSystemId: contact.recentArrivalFromSystemId,
+            arrivedAt: contact.recentArrivalAt,
+          }
+        : null;
+
+      if (arrivalSnapshot && worldNow - arrivalSnapshot.arrivedAt < SYSTEM_FLEET_ARRIVAL_SETTLE_MS) {
+        const arrivalProgress = clamp((worldNow - arrivalSnapshot.arrivedAt) / SYSTEM_FLEET_ARRIVAL_SETTLE_MS, 0, 1);
+        const arrivalWarpAngle = hashId(`${arrivalSnapshot.fromSystemId}:${system.id}:${contact.id}`);
+        const arrivalWarpPoint = project(
+          Math.cos(arrivalWarpAngle) * (SYSTEM_FLEET_WARP_RADIUS + 8),
+          20 + (contact.colorIndex % 3) * 2.4,
+          Math.sin(arrivalWarpAngle) * (SYSTEM_FLEET_WARP_RADIUS + 8),
+        );
+        if (!arrivalWarpPoint) return;
+        drawPoint = {
+          sx: lerp(arrivalWarpPoint.sx, orbitPoint.sx, arrivalProgress),
+          sy: lerp(arrivalWarpPoint.sy, orbitPoint.sy, arrivalProgress),
+        };
+        trailPoint = { sx: arrivalWarpPoint.sx, sy: arrivalWarpPoint.sy };
+        alpha = lerp(0.48, 0.94, arrivalProgress);
+        offloading = !!contact.hqOffloadStartedAt;
+      } else if (contact.hqOffloadStartedAt) {
+        offloading = true;
+        const offloadDurationMs = Math.max(1000, contact.cargoTransferDurationSeconds * 1000);
+        const offloadProgress = clamp((worldNow - contact.hqOffloadStartedAt) / offloadDurationMs, 0, 1);
+        drawPoint = { sx: orbitPoint.sx, sy: orbitPoint.sy };
+        alpha = lerp(0.92, 0.55, offloadProgress);
+      } else {
+        const legDurationMs = Math.max(1000, contact.legDurationSeconds * 1000);
+        const transitionDurationMs = clamp(legDurationMs * 0.32, SYSTEM_FLEET_TRANSITION_MIN_MS, SYSTEM_FLEET_TRANSITION_MAX_MS);
+        if (contact.fromSystemId === system.id) {
+          const elapsedSinceDepartureMs = Math.max(0, worldNow - contact.legDepartedAt);
+          const departureProgress = clamp(elapsedSinceDepartureMs / transitionDurationMs, 0, 1);
+          const exitFadeProgress = clamp((elapsedSinceDepartureMs - transitionDurationMs) / SYSTEM_FLEET_EXIT_LINGER_MS, 0, 1);
+          if (departureProgress >= 1 && exitFadeProgress >= 1) return;
+          drawPoint = departureProgress >= 1
+            ? { sx: warpPoint.sx, sy: warpPoint.sy }
+            : {
+                sx: lerp(orbitPoint.sx, warpPoint.sx, departureProgress),
+                sy: lerp(orbitPoint.sy, warpPoint.sy, departureProgress),
+              };
+          trailPoint = { sx: orbitPoint.sx, sy: orbitPoint.sy };
+          alpha = departureProgress >= 1
+            ? lerp(0.4, 0, exitFadeProgress)
+            : lerp(0.95, 0.56, departureProgress);
+        } else if (contact.toSystemId === system.id) {
+          const arrivalStartAt = contact.legDepartedAt + Math.max(0, legDurationMs - transitionDurationMs);
+          const arrivalProgress = clamp((worldNow - arrivalStartAt) / transitionDurationMs, 0, 1);
+          if (arrivalProgress <= 0) return;
+          drawPoint = {
+            sx: lerp(warpPoint.sx, orbitPoint.sx, arrivalProgress),
+            sy: lerp(warpPoint.sy, orbitPoint.sy, arrivalProgress),
+          };
+          trailPoint = { sx: warpPoint.sx, sy: warpPoint.sy };
+          alpha = lerp(0.48, 0.94, arrivalProgress);
+        }
+      }
+
+      ctx.save();
+      ctx.globalAlpha = alpha * (0.82 + Math.sin(now / 260 + index) * 0.08);
+      const glow = ctx.createRadialGradient(drawPoint.sx, drawPoint.sy, 0, drawPoint.sx, drawPoint.sy, offloading ? 16 : 14);
+      glow.addColorStop(0, colorToRgba(convoyColor, offloading ? 0.58 : 0.36));
+      glow.addColorStop(1, colorToRgba(convoyColor, 0));
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.arc(drawPoint.sx, drawPoint.sy, offloading ? 16 : 14, 0, Math.PI * 2);
+      ctx.fill();
+
+      if (trailPoint) {
+        const trailGradient = ctx.createLinearGradient(trailPoint.sx, trailPoint.sy, drawPoint.sx, drawPoint.sy);
+        trailGradient.addColorStop(0, colorToRgba(convoyColor, offloading ? 0.2 : 0.44));
+        trailGradient.addColorStop(1, colorToRgba(convoyColor, 0));
+        ctx.strokeStyle = trailGradient;
+        ctx.lineWidth = 1.2;
+        ctx.setLineDash([3, 3]);
+        ctx.beginPath();
+        ctx.moveTo(trailPoint.sx, trailPoint.sy);
+        ctx.lineTo(drawPoint.sx, drawPoint.sy);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+
+      if (offloading) {
+        ctx.strokeStyle = colorToRgba(convoyColor, 0.72);
+        ctx.lineWidth = 1;
+        ctx.setLineDash([2, 3]);
+        ctx.beginPath();
+        ctx.arc(drawPoint.sx, drawPoint.sy, 10 + Math.sin(now / 180 + index) * 1.6, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+
+      ctx.translate(drawPoint.sx, drawPoint.sy);
+      ctx.rotate(Math.PI / 4);
+      const size = offloading ? 4.2 : 3.8;
+      ctx.fillStyle = colorToRgba(convoyColor, offloading ? 0.64 : 0.84);
+      ctx.strokeStyle = colorToRgba(convoyColor, 0.96);
+      ctx.lineWidth = 0.9;
+      ctx.fillRect(-size, -size, size * 2, size * 2);
+      ctx.strokeRect(-size, -size, size * 2, size * 2);
+      ctx.restore();
     });
 
     ctx.restore();

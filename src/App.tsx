@@ -7,6 +7,7 @@ import { GameLayout } from '@/ui/layouts/GameLayout';
 function App() {
   const tick = useGameStore(s => s.tick);
   const loadFromStorage = useGameStore(s => s.loadFromStorage);
+  const reconcileElapsedTime = useGameStore(s => s.reconcileElapsedTime);
   const saveToStorage = useGameStore(s => s.saveToStorage);
   const autoSave = useGameStore(s => s.state.settings.autoSave);
   const autoSaveInterval = useGameStore(s => s.state.settings.autoSaveInterval);
@@ -26,6 +27,26 @@ function App() {
     }, 1000);
     return () => clearInterval(id);
   }, [tick]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return;
+
+    const reconcileNow = () => {
+      reconcileElapsedTime(false);
+    };
+
+    const handleVisibilityChange = () => {
+      if (!document.hidden) reconcileNow();
+    };
+
+    window.addEventListener('focus', reconcileNow);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener('focus', reconcileNow);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [reconcileElapsedTime]);
 
   // Auto-save
   useEffect(() => {

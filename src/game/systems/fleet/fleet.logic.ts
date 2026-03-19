@@ -513,6 +513,8 @@ export function createPlayerFleet(
     maxJumpRangeLY: computeFleetJumpRange(state, shipIds),
     doctrine: 'balanced',
     cargoHold: {},
+    hqOffloadStartedAt: null,
+    recentTransitArrival: null,
     commanderId: null,
     wings: [{
       id: defaultWingId,
@@ -524,6 +526,8 @@ export function createPlayerFleet(
       escortWingId: null,
       isDispatched: false,
       haulingOriginSystemId: null,
+      hqOffloadStartedAt: null,
+      recentTransitArrival: null,
       lastEscortCombatAt: 0,
     }],
   };

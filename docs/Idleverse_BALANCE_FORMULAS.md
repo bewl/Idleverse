@@ -308,6 +308,41 @@ haulingShipBonus = Σ (0.05 × hull.baseCargoMultiplier) per piloted hauling shi
 haulInterval = max(MIN_HAUL_SECONDS, floor(BASE_HAUL_SECONDS × (1 - totalReduction)))
 ```
 
+## HQ Cargo Transfer Duration Formula
+
+When an auto-haul trip reaches Corp HQ from another system, cargo no longer transfers instantly. The fleet or hauling wing enters a `Cargo Transfer` phase, stays parked at HQ for a computed duration, then only begins the return leg once that transfer completes.
+
+```
+baseTransferSeconds = clamp(
+  BASE_HAUL_OFFLOAD_SECONDS + cargoUnits × HAUL_OFFLOAD_SECONDS_PER_UNIT,
+  BASE_HAUL_OFFLOAD_SECONDS,
+  MAX_HAUL_OFFLOAD_SECONDS,
+)
+
+totalTransferReduction = min(
+  MAX_HAUL_OFFLOAD_SPEED_REDUCTION,
+  modifiers['cargo-transfer-speed'] + commanderTransferBonus + haulerHullTransferBonus,
+)
+
+cargoTransferSeconds = clamp(
+  baseTransferSeconds × (1 - totalTransferReduction),
+  MIN_HAUL_OFFLOAD_SECONDS,
+  MAX_HAUL_OFFLOAD_SECONDS,
+)
+```
+
+Where:
+
+- `BASE_HAUL_OFFLOAD_SECONDS = 8`
+- `MIN_HAUL_OFFLOAD_SECONDS = 3`
+- `HAUL_OFFLOAD_SECONDS_PER_UNIT = 1 / 250`
+- `MAX_HAUL_OFFLOAD_SECONDS = 24`
+- `MAX_HAUL_OFFLOAD_SPEED_REDUCTION = 0.70`
+- `cargoUnits` is the total quantity currently stored in the arriving fleet or hauling wing cargo hold
+- `modifiers['cargo-transfer-speed']` currently comes from corp-level Industrial training
+- `commanderTransferBonus` comes from Logistics Command on the active fleet or hauling-wing commander
+- `haulerHullTransferBonus` is derived from the cargo profile of the ships performing the transfer
+
 ---
 
 # Warp Travel Formula

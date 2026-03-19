@@ -1,5 +1,13 @@
 import { ORE_BELTS } from '@/game/systems/mining/mining.config';
-import { getHaulingWings, getWingByShipId, getWingCargoUsed, getWingCurrentSystemId, getWingDispatchShipIds } from '@/game/systems/fleet/wings.logic';
+import {
+  getFleetCargoTransferSeconds,
+  getHaulingWings,
+  getWingByShipId,
+  getWingCargoTransferSeconds,
+  getWingCargoUsed,
+  getWingCurrentSystemId,
+  getWingDispatchShipIds,
+} from '@/game/systems/fleet/wings.logic';
 import type { GameState, PlayerFleet, FleetWing } from '@/types/game.types';
 
 export type FleetActivityTone = 'cyan' | 'amber' | 'emerald' | 'violet' | 'slate' | 'rose';
@@ -17,6 +25,15 @@ function unique<T>(values: T[]): T[] {
 
 function getBeltLabel(beltId: string): string {
   return ORE_BELTS[beltId]?.name ?? beltId;
+}
+
+function formatRemainingEta(seconds: number): string {
+  if (seconds <= 0) return '0s';
+  if (seconds < 60) return `${Math.ceil(seconds)}s`;
+  const wholeSeconds = Math.ceil(seconds);
+  const minutes = Math.floor(wholeSeconds / 60);
+  const remainingSeconds = wholeSeconds % 60;
+  return remainingSeconds > 0 ? `${minutes}m ${remainingSeconds}s` : `${minutes}m`;
 }
 
 function getMiningBeltIdsForWing(state: GameState, fleet: PlayerFleet, wing: FleetWing): string[] {
@@ -194,9 +211,13 @@ export function describeFleetActivity(
   }
 
   if (homeSystemId && fleet.currentSystemId === homeSystemId && fleet.miningOriginSystemId) {
+    const cargoUnits = Object.values(fleet.cargoHold ?? {}).reduce((sum, quantity) => sum + quantity, 0);
+    const transferEtaSeconds = fleet.hqOffloadStartedAt
+      ? Math.max(0, getFleetCargoTransferSeconds(state, fleet, cargoUnits) - ((Date.now() - fleet.hqOffloadStartedAt) / 1000))
+      : getFleetCargoTransferSeconds(state, fleet, cargoUnits);
     return {
-      shortLabel: 'At HQ',
-      detail: `At ${getSystemName(homeSystemId)} to unload cargo before returning`,
+      shortLabel: 'Cargo Transfer',
+      detail: `Transferring cargo at ${getSystemName(homeSystemId)} (${formatRemainingEta(transferEtaSeconds)} remaining)`,
       tone: 'amber',
       dotClass: 'bg-amber-400 animate-pulse',
     };
@@ -279,9 +300,12 @@ export function describeWingActivity(
 
       const wingSystemId = getWingCurrentSystemId(fleet, wing, state.systems.fleet.ships);
       if (homeSystemId && wingSystemId === homeSystemId) {
+        const transferEtaSeconds = wing.hqOffloadStartedAt
+          ? Math.max(0, getWingCargoTransferSeconds(state, fleet, wing) - ((Date.now() - wing.hqOffloadStartedAt) / 1000))
+          : getWingCargoTransferSeconds(state, fleet, wing);
         return {
-          shortLabel: 'At HQ',
-          detail: `Docked at ${getSystemName(homeSystemId)} and unloading cargo`,
+          shortLabel: 'Cargo Transfer',
+          detail: `Cargo transfer at ${getSystemName(homeSystemId)} (${formatRemainingEta(transferEtaSeconds)} remaining)`,
           tone: 'amber',
           dotClass: 'bg-amber-400 animate-pulse',
         };

@@ -23,6 +23,7 @@ import { COMMANDER_SKILL_DEFINITIONS, COMMANDER_BONUS_LABELS } from '@/game/syst
 import { commanderSkillEtaSeconds, getCombinedCommanderBonus } from '@/game/systems/fleet/commander.logic';
 import { getEscortWing, getFleetStoredCargo, getFleetStorageCapacity, getHaulingWingEffectiveSecurityFilter, getOperationalFleetShipIds, getWingCargoCapacity, getWingCargoTotals, getWingCargoUsed, getWingCurrentSystemId, getWingDispatchShipIds, hasActiveEscortWing, hasDispatchedHaulingWing } from '@/game/systems/fleet/wings.logic';
 import { describeFleetActivity, describeWingActivity } from '@/ui/utils/fleetActivity';
+import { FLEET_COLOURS } from '@/ui/utils/fleetColors';
 import { ThemedIcon, splitIconLabel } from '@/ui/components/ThemedIcon';
 import { getTutorialFleetTravelContext, isTutorialStepCurrent } from '@/game/progression/tutorialSequence';
 
@@ -53,7 +54,6 @@ const FLEET_ROLE_FULL: Record<ShipRole, string> = {
 const FLEET_ROLE_COLOR: Record<ShipRole, string> = {
   tank: '#4ade80', dps: '#f87171', support: '#60a5fa', scout: '#a78bfa', unassigned: '#475569',
 };
-const FLEET_COLOURS = ['#a78bfa', '#fb923c', '#34d399', '#f472b6', '#60a5fa'];
 const WING_LABELS: Record<WingType, string> = {
   mining: 'Mining', hauling: 'Hauling', combat: 'Combat', recon: 'Recon', industrial: 'Industrial',
 };

@@ -5,7 +5,7 @@ import { tickCommanderSkillTraining, getCombinedCommanderBonus } from './command
 import { IDLE_REPAIR_RATE_PER_SEC } from '@/game/balance/constants';
 import { ORE_BELTS } from '@/game/systems/mining/mining.config';
 import { getSystemById } from '@/game/galaxy/galaxy.gen';
-import { getBeltRichnessForSystem } from '@/game/systems/mining/mining.logic';
+import { getBeltRichnessForSystem, getBeltsForSystem } from '@/game/systems/mining/mining.logic';
 import { getCorpHqBonusFromState, getHomeStationDefinition } from '@/game/systems/factions/faction.logic';
 import { getOperationalFleetShipIds, getWingByShipId } from './wings.logic';
 
@@ -64,6 +64,16 @@ export function tickFleet(state: GameState, deltaSeconds: number): FleetTickResu
   const homeStation = getHomeStationDefinition(state);
   const hqBonus = getCorpHqBonusFromState(state);
   const systemFactionCache = new Map<string, import('@/types/faction.types').FactionId | null>();
+  const systemBeltCache = new Map<string, Set<string>>();
+
+  const getSystemBeltSet = (systemId: string): Set<string> => {
+    let beltSet = systemBeltCache.get(systemId);
+    if (!beltSet) {
+      beltSet = new Set(getBeltsForSystem(systemId, state.galaxy.seed));
+      systemBeltCache.set(systemId, beltSet);
+    }
+    return beltSet;
+  };
 
   // Build map: pilotId → fleet for fast commander lookup.
   // Wing commanders train command skills too; a fleet commander can also be a wing commander.
@@ -141,6 +151,9 @@ export function tickFleet(state: GameState, deltaSeconds: number): FleetTickResu
     // Determine which belts to mine: use the ship's assigned belt if set,
     // otherwise contribute to nothing (belt assignment required for fleet ships).
     if (!ship.assignedBeltId) continue;
+
+    const miningSystemId = fleetGroupForShip?.currentSystemId ?? ship.systemId;
+    if (!getSystemBeltSet(miningSystemId).has(ship.assignedBeltId)) continue;
 
     const beltDef = ORE_BELTS[ship.assignedBeltId];
     if (!beltDef) continue;

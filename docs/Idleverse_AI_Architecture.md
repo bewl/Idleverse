@@ -128,6 +128,7 @@ src/
     components/     — shared UI primitives (GameTooltip, GameDropdown, NavTag, SystemUnlockCard, NotificationCenter, TutorialOverlay)
     dev/            — DevPanel (cheat/debug panel)
     effects/        — StarField, StarfieldBackground
+    hooks/          — viewport and device-capability helpers for responsive panel layouts
     layouts/        — GameLayout (nav + panel switcher)
     panels/
       InboxPanel.tsx
@@ -150,7 +151,9 @@ src/
 
     Older inline-styled controls in `StarMapPanel` and `DevPanel` are now being normalized onto shared `legacy-panel-btn` styling in `src/index.css` so hover and focus behavior stays consistent even before those panels receive a fuller visual refactor.
 
-    `SystemPanel` now splits into a presentation shell plus a dedicated `SystemSceneCanvas` renderer. The panel still owns browsing state, selected-body state, anomaly mode, docking/POS actions, and mining-assignment detail, while the new canvas owns constrained orbit camera controls, hit-testing, hover targeting, and scene rendering for bodies, fleets, and local structures. This keeps the operational logic in the panel while isolating the camera-heavy rendering path into its own file.
+    `GameLayout` now uses the horizontal bottom navigation bar as the primary navigation shell at all screen sizes. The old large-screen left sidebar path is no longer the default shell, so panel content should assume a persistent bottom navigation reserve instead of relying on a desktop-only side rail. Responsive layout branching should happen from shared viewport hooks in `ui/hooks`, not by reintroducing panel-local shell assumptions.
+
+    `SystemPanel` now splits into a presentation shell plus a dedicated `SystemSceneCanvas` renderer. The panel still owns browsing state, selected-body state, anomaly mode, docking/POS actions, mining-assignment detail, and the derivation of local convoy contacts, while the new canvas owns constrained orbit camera controls, hit-testing, and scene rendering for bodies, fleets, and local structures. Arrival presentation is now simulation-backed: fleets and hauling wings record `recentTransitArrival` snapshots in save-backed state, and the canvas only consumes that state instead of inventing arrival previews on its own. This keeps the operational logic in the panel while isolating the camera-heavy rendering path into its own file.
 
 ### Folder Intent
 
@@ -245,6 +248,12 @@ Key components:
 - `StatTooltip.tsx` — modifier breakdown tooltip (wraps GameTooltip)
 - `UpgradeCard.tsx`, `ProgressBar.tsx`, `FlairProgressBar.tsx` — panel building blocks
 
+#### `ui/hooks`
+
+Shared viewport and input-capability hooks live here.
+
+`useResponsiveViewport.ts` is now the preferred source of truth for phone/tablet/desktop breakpoints, compact-layout detection, and coarse-pointer detection. Responsive panels should branch from this hook instead of scattering raw `window.innerWidth` checks through render logic.
+
 #### `ui/dev`
 
 Development-only panel (`DevPanel.tsx`). Gated by `import.meta.env.DEV` — Vite strips it
@@ -331,6 +340,8 @@ Use `PanelInfoSection.tsx` for any non-interactive explanatory content that shou
 `panelStates` stores restorable per-panel view context such as active tabs, current selections, and intra-panel modes. Use it for UI state that should come back when the player returns through breadcrumbs or entity-tag navigation, but should still remain outside persistent simulation state.
 
 The Star Map uses that split directly: `panelStates.starmap` stores selection and route-planner context such as `selectedId`, `rightTab`, `routeFrom`, `routeTo`, `routeFilter`, and `routeFleetId`, while the actual in-transit position continues to come from save-backed fleet `fleetOrder` state. On remount, the panel rebuilds the highlighted route from the selected fleet's live order instead of relying on stale component-local route state.
+
+Because the Star Map redraws a canvas scene on hover, click, route updates, and camera motion, panel-level lookup caches are required there rather than optional polish. `StarMapPanel` should memoize a `systemById` index once per generated galaxy and route click/hover/route rendering lookups through that cache instead of repeating linear scans across the full system array inside draw loops. The canvas redraw itself should also remain event-driven: redraw on real visual input changes, camera motion, or transit animation, not on every React render. Recurring transit and warp animation should use a capped redraw cadence rather than an unrestricted full-map RAF loop.
 
 The Fleet panel now uses the same pattern for wing inspection. `panelStates.fleet.selectedWingId` stores the currently inspected wing for the expanded fleet card, while `focusTarget` and local `focusedWingId` continue to represent transient navigation or tutorial emphasis. That split lets a wing navigation target auto-open the owning fleet and select the correct wing detail pane without turning tutorial focus into the long-lived source of truth for the panel.
 
@@ -744,7 +755,7 @@ Offline progress is critical for an idle game.
 ### Requirements
 
 - saves must store a timestamp
-- resume flow should compute elapsed time
+- resume flow should compute elapsed time on save-load and again when the app regains focus after browser throttling or background suspension
 - offline gains should be bounded if needed
 - automation and queue completion rules should still make sense offline
 

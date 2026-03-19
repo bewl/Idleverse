@@ -112,6 +112,16 @@ export const MODIFIER_REGISTRY: Record<string, ModifierMeta> = {
     formula: 'Interval = Base ÷ (1 + bonus)',
   },
 
+  'cargo-transfer-speed': {
+    key: 'cargo-transfer-speed',
+    label: 'Cargo Transfer Speed',
+    description: 'Reduces the time a hauling group spends transferring cargo at HQ after arriving from another system.',
+    unit: 'percent',
+    baseValue: 0,
+    affectedSystems: ['Whole-fleet HQ cargo transfer duration', 'Detached hauling-wing HQ transfer duration'],
+    formula: 'Transfer Time = Cargo-scaled base × (1 - bonus), capped by minimum transfer time',
+  },
+
   'deep-ore-yield': {
     key: 'deep-ore-yield',
     label: 'Deep Ore Yield',

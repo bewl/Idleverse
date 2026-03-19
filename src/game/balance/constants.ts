@@ -35,4 +35,25 @@ export const BASE_SHIP_CARGO_M3 = 500;
 export const BASE_HAUL_SECONDS = 120;
 /** Minimum auto-haul interval in seconds regardless of upgrades. */
 export const MIN_HAUL_SECONDS = 10;
+/** Minimum time spent offloading cargo at HQ after a haul trip arrives. */
+export const BASE_HAUL_OFFLOAD_SECONDS = 8;
+/** Absolute floor for cargo transfer time after all bonuses are applied. */
+export const MIN_HAUL_OFFLOAD_SECONDS = 3;
+/** Additional seconds added per cargo unit being offloaded. */
+export const HAUL_OFFLOAD_SECONDS_PER_UNIT = 1 / 250;
+/** Maximum HQ offload time regardless of cargo volume. */
+export const MAX_HAUL_OFFLOAD_SECONDS = 24;
+/** Maximum percentage reduction allowed from cargo-transfer-speed sources. */
+export const MAX_HAUL_OFFLOAD_SPEED_REDUCTION = 0.7;
+/** Hull-based cargo-transfer reduction per point of base cargo multiplier. */
+export const HAULER_TRANSFER_HULL_BONUS_PER_MULTIPLIER = 0.02;
+/** Cap on hull-derived cargo-transfer reduction. */
+export const MAX_HAULER_TRANSFER_HULL_BONUS = 0.24;
+
+export function computeHaulOffloadSeconds(cargoUnits: number, speedReduction = 0): number {
+  const scaled = BASE_HAUL_OFFLOAD_SECONDS + Math.max(0, cargoUnits) * HAUL_OFFLOAD_SECONDS_PER_UNIT;
+  const cappedReduction = Math.min(MAX_HAUL_OFFLOAD_SPEED_REDUCTION, Math.max(0, speedReduction));
+  const adjusted = scaled * (1 - cappedReduction);
+  return Math.min(MAX_HAUL_OFFLOAD_SECONDS, Math.max(MIN_HAUL_OFFLOAD_SECONDS, adjusted));
+}
 

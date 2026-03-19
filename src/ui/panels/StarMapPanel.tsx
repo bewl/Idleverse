@@ -16,6 +16,7 @@ import { getAliveNpcGroupsInSystem } from '@/game/systems/combat/combat.logic';
 import { GameDropdown, type DropdownOption } from '@/ui/components/GameDropdown';
 import { NavTag } from '@/ui/components/NavTag';
 import { useUiStore } from '@/stores/uiStore';
+import { useResponsiveViewport } from '@/ui/hooks/useResponsiveViewport';
 import {
   generateGalaxy, getSystemById, systemDistance,
   SECTOR_GRID_SIZE, sectorId, systemSector, buildSectors,
@@ -44,6 +45,8 @@ const SECTOR_SVG_W = 800;
 const SECTOR_SVG_H = 560;
 const ISO_CX = SECTOR_SVG_W / 2;
 const ISO_CY = 280;
+const MAP_TRANSIT_REDRAW_MS = 180;
+const MAP_WARP_REDRAW_MS = 180;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -119,6 +122,14 @@ const ACTIVITY_ICON: Partial<Record<FleetActivity, string>> = {
 // suppress unused-variable lint for ACTIVITY_ICON (used in future tooltip)
 void ACTIVITY_ICON;
 
+interface DrawerSheetProps {
+  title: string;
+  eyebrow?: string;
+  open: boolean;
+  onClose: () => void;
+  children: React.ReactNode;
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function secColor(s: SystemSecurity | string) {
@@ -185,7 +196,11 @@ function makeSystemFilter(
   };
 }
 
-function buildActiveRouteFromPath(allSystems: StarSystem[], path: string[]): ActiveRoute | null {
+function buildSystemLookup(allSystems: StarSystem[]): Map<string, StarSystem> {
+  return new Map(allSystems.map(system => [system.id, system]));
+}
+
+function buildActiveRouteFromPath(systemById: Map<string, StarSystem>, path: string[]): ActiveRoute | null {
   if (path.length < 2) return null;
 
   const seen = new Set<string>();
@@ -194,7 +209,7 @@ function buildActiveRouteFromPath(allSystems: StarSystem[], path: string[]): Act
   let totalLy = 0;
 
   for (let index = 0; index < path.length; index += 1) {
-    const system = allSystems.find(entry => entry.id === path[index]);
+    const system = systemById.get(path[index]);
     if (!system) return null;
 
     const sector = systemSector(system);
@@ -205,7 +220,7 @@ function buildActiveRouteFromPath(allSystems: StarSystem[], path: string[]): Act
     }
 
     if (index === 0) continue;
-    const previousSystem = allSystems.find(entry => entry.id === path[index - 1]);
+    const previousSystem = systemById.get(path[index - 1]);
     if (!previousSystem) return null;
     legSecurity.push(system.security);
     totalLy += unitsToLy(systemDistance(previousSystem, system));
@@ -364,6 +379,7 @@ export interface GalaxyGridHandle {
 
 const GalaxyGridView = forwardRef<GalaxyGridHandle, {
   allSystems:         StarSystem[];
+  systemById:         Map<string, StarSystem>;
   sectors:            GalacticSector[];
   currentSystemId:    string;
   visitedSystems:     Record<string, boolean>;
@@ -384,6 +400,7 @@ const GalaxyGridView = forwardRef<GalaxyGridHandle, {
   onHoverChange?:     (hover: HoverPreview | null) => void;
 }>(function GalaxyGridView({
   allSystems,
+  systemById,
   sectors: _sectors,
   currentSystemId,
   visitedSystems,
@@ -412,18 +429,20 @@ const GalaxyGridView = forwardRef<GalaxyGridHandle, {
   const hovId      = useRef<string | null>(null);
   const mousePos   = useRef<{ x: number; y: number } | null>(null);
   const rafId      = useRef(0);
+  const redrawTimeoutId = useRef<number | null>(null);
   const projCache  = useRef<Array<{ id: string; sx: number; sy: number }>>([]);
   const hoverPreviewRef = useRef<HoverPreview | null>(null);
+  const scheduleRedrawRef = useRef<(delayMs?: number) => void>(() => undefined);
 
   // Props ref — lets the RAF callback always see latest values without re-creating draw
   const propsRef = useRef({
-    allSystems, currentSystemId, visitedSystems, zSlice,
+    allSystems, systemById, currentSystemId, visitedSystems, zSlice,
     filters, searchQuery, selectedId, reachable, jumpRangeLY,
     overlay, fleetShips, playerFleets, activeRoute,
     warpState, warpFromSystem, warpToSystem, onHoverChange,
   });
   propsRef.current = {
-    allSystems, currentSystemId, visitedSystems, zSlice,
+    allSystems, systemById, currentSystemId, visitedSystems, zSlice,
     filters, searchQuery, selectedId, reachable, jumpRangeLY,
     overlay, fleetShips, playerFleets, activeRoute,
     warpState, warpFromSystem, warpToSystem, onHoverChange,
@@ -434,6 +453,15 @@ const GalaxyGridView = forwardRef<GalaxyGridHandle, {
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
+    let nextDrawDelayMs: number | null = null;
+
+    const requestNextDraw = (delayMs = 0) => {
+      if (nextDrawDelayMs === null) {
+        nextDrawDelayMs = delayMs;
+        return;
+      }
+      nextDrawDelayMs = Math.min(nextDrawDelayMs, delayMs);
+    };
 
     // Camera fly-to animation (smooth cubic ease-out lerp)
     const anim = camAnim.current;
@@ -448,7 +476,7 @@ const GalaxyGridView = forwardRef<GalaxyGridHandle, {
         ty:    anim.from.ty    + (anim.to.ty    - anim.from.ty)    * ease,
         tz:    anim.from.tz    + (anim.to.tz    - anim.from.tz)    * ease,
       };
-      if (t < 1) rafId.current = requestAnimationFrame(draw);
+      if (t < 1) requestNextDraw(0);
       else { cam.current = { ...anim.to }; camAnim.current = null; }
     }
 
@@ -456,7 +484,7 @@ const GalaxyGridView = forwardRef<GalaxyGridHandle, {
     const W   = canvas.width  / dpr;
     const H   = canvas.height / dpr;
     const {
-      allSystems, currentSystemId, visitedSystems, zSlice,
+      allSystems, systemById, currentSystemId, visitedSystems, zSlice,
       filters, searchQuery, selectedId, reachable, jumpRangeLY,
       overlay, fleetShips, playerFleets, activeRoute,
       warpState, warpFromSystem, warpToSystem, onHoverChange,
@@ -541,8 +569,8 @@ const GalaxyGridView = forwardRef<GalaxyGridHandle, {
         ctx.lineWidth = 1.2;
         ctx.setLineDash([4, 3]);
         for (let i = 0; i < route.length - 1; i++) {
-          const sa = allSystems.find(s => s.id === route[i]);
-          const sb = allSystems.find(s => s.id === route[i + 1]);
+          const sa = systemById.get(route[i]);
+          const sb = systemById.get(route[i + 1]);
           if (!sa || !sb) continue;
           const pa = project(...sysToWorld(sa));
           const pb = project(...sysToWorld(sb));
@@ -550,7 +578,7 @@ const GalaxyGridView = forwardRef<GalaxyGridHandle, {
           ctx.beginPath(); ctx.moveTo(pa.sx, pa.sy); ctx.lineTo(pb.sx, pb.sy); ctx.stroke();
         }
         // Destination ring
-        const destSys = allSystems.find(s => s.id === ship.fleetOrder!.destinationSystemId);
+        const destSys = systemById.get(ship.fleetOrder.destinationSystemId);
         if (destSys) {
           const pd = project(...sysToWorld(destSys));
           if (pd) {
@@ -804,8 +832,8 @@ const GalaxyGridView = forwardRef<GalaxyGridHandle, {
         if (!fleet.fleetOrder) return;
         const { route, currentLeg, legDepartedAt } = fleet.fleetOrder;
         if (currentLeg >= route.length - 1) return;
-        const fromSys = allSystems.find(s => s.id === route[currentLeg]);
-        const toSys   = allSystems.find(s => s.id === route[currentLeg + 1]);
+        const fromSys = systemById.get(route[currentLeg]);
+        const toSys = systemById.get(route[currentLeg + 1]);
         if (!fromSys || !toSys) return;
         const pa = project(...sysToWorld(fromSys));
         const pb = project(...sysToWorld(toSys));
@@ -861,8 +889,8 @@ const GalaxyGridView = forwardRef<GalaxyGridHandle, {
         const order = ship.fleetOrder!;
         const { route, currentLeg, legDepartedAt } = order;
         if (currentLeg >= route.length - 1) return;
-        const fromSys = allSystems.find(s => s.id === route[currentLeg]);
-        const toSys   = allSystems.find(s => s.id === route[currentLeg + 1]);
+        const fromSys = systemById.get(route[currentLeg]);
+        const toSys = systemById.get(route[currentLeg + 1]);
         if (!fromSys || !toSys) return;
         const pa = project(...sysToWorld(fromSys));
         const pb = project(...sysToWorld(toSys));
@@ -890,7 +918,7 @@ const GalaxyGridView = forwardRef<GalaxyGridHandle, {
         void ci;
       });
 
-      if (anyInTransit) rafId.current = requestAnimationFrame(draw);
+      if (anyInTransit) requestNextDraw(MAP_TRANSIT_REDRAW_MS);
     }
 
     // ── 5. Route polyline — color-coded by security tier of each leg ─────────
@@ -902,8 +930,8 @@ const GalaxyGridView = forwardRef<GalaxyGridHandle, {
       };
       ctx.save();
       for (let i = 0; i < activeRoute.path.length - 1; i++) {
-        const sa = allSystems.find(s => s.id === activeRoute.path[i]);
-        const sb = allSystems.find(s => s.id === activeRoute.path[i + 1]);
+        const sa = systemById.get(activeRoute.path[i]);
+        const sb = systemById.get(activeRoute.path[i + 1]);
         if (!sa || !sb) continue;
         const pa = project(...sysToWorld(sa));
         const pb = project(...sysToWorld(sb));
@@ -928,7 +956,7 @@ const GalaxyGridView = forwardRef<GalaxyGridHandle, {
         }
       }
       // Origin marker (cyan ring)
-      const originSys = allSystems.find(s => s.id === activeRoute.fromId);
+      const originSys = systemById.get(activeRoute.fromId);
       if (originSys) {
         const po = project(...sysToWorld(originSys));
         if (po) {
@@ -938,7 +966,7 @@ const GalaxyGridView = forwardRef<GalaxyGridHandle, {
         }
       }
       // Destination marker (gold bullseye)
-      const destSys = allSystems.find(s => s.id === activeRoute.toId);
+      const destSys = systemById.get(activeRoute.toId);
       if (destSys) {
         const pd = project(...sysToWorld(destSys));
         if (pd) {
@@ -992,12 +1020,12 @@ const GalaxyGridView = forwardRef<GalaxyGridHandle, {
         ctx.fillStyle = 'rgba(251,191,36,0.85)';
         ctx.fillText('PLAYER', 0, -sz - 2);
         ctx.restore();
-        rafId.current = requestAnimationFrame(draw);
+        requestNextDraw(MAP_WARP_REDRAW_MS);
       }
     }
 
     // ── 7. Hover preview anchor for React overlay ────────────────────────
-    const hovSys = hovId.current ? allSystems.find(s => s.id === hovId.current) : null;
+    const hovSys = hovId.current ? (systemById.get(hovId.current) ?? null) : null;
     const hovPos = hovId.current ? projCache.current.find(p => p.id === hovId.current) : null;
     if (onHoverChange) {
       const nextHover = hovSys && hovPos ? {
@@ -1030,11 +1058,15 @@ const GalaxyGridView = forwardRef<GalaxyGridHandle, {
     ctx.restore();
 
     ctx.restore(); // DPR scale
+
+    if (nextDrawDelayMs !== null) {
+      scheduleRedrawRef.current(nextDrawDelayMs);
+    }
   }, []);
 
   useImperativeHandle(ref, () => ({
     focusSystem(systemId: string, options) {
-      const sys = propsRef.current.allSystems.find(s => s.id === systemId);
+      const sys = propsRef.current.systemById.get(systemId);
       if (!sys) return;
       const [wx, wy, wz] = sysToWorld(sys);
       const c = cam.current;
@@ -1051,14 +1083,31 @@ const GalaxyGridView = forwardRef<GalaxyGridHandle, {
         startTime: performance.now(),
         duration: options?.durationMs ?? 700,
       };
-      rafId.current = requestAnimationFrame(draw);
+      scheduleRedrawRef.current();
     },
-  }), [draw]);
+  }), []);
 
-  const scheduleRedraw = useCallback(() => {
+  const clearScheduledRedraw = useCallback(() => {
     cancelAnimationFrame(rafId.current);
-    rafId.current = requestAnimationFrame(draw);
-  }, [draw]);
+    if (redrawTimeoutId.current !== null) {
+      window.clearTimeout(redrawTimeoutId.current);
+      redrawTimeoutId.current = null;
+    }
+  }, []);
+
+  const scheduleRedraw = useCallback((delayMs = 0) => {
+    clearScheduledRedraw();
+    if (delayMs <= 0) {
+      rafId.current = requestAnimationFrame(draw);
+      return;
+    }
+    redrawTimeoutId.current = window.setTimeout(() => {
+      redrawTimeoutId.current = null;
+      rafId.current = requestAnimationFrame(draw);
+    }, delayMs);
+  }, [clearScheduledRedraw, draw]);
+
+  scheduleRedrawRef.current = scheduleRedraw;
 
   // Canvas size sync via ResizeObserver
   useEffect(() => {
@@ -1078,12 +1127,35 @@ const GalaxyGridView = forwardRef<GalaxyGridHandle, {
     sync();
     const ro = new ResizeObserver(sync);
     ro.observe(wrapper);
-    return () => ro.disconnect();
-  }, [scheduleRedraw]);
+    return () => {
+      ro.disconnect();
+      clearScheduledRedraw();
+    };
+  }, [clearScheduledRedraw, scheduleRedraw]);
 
-  // Redraw on any prop change (warp ticker etc.)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { scheduleRedraw(); });
+  // Redraw when visual inputs change.
+  useEffect(() => {
+    scheduleRedraw();
+  }, [
+    activeRoute,
+    allSystems,
+    currentSystemId,
+    fleetShips,
+    filters,
+    jumpRangeLY,
+    overlay,
+    playerFleets,
+    reachable,
+    scheduleRedraw,
+    searchQuery,
+    selectedId,
+    systemById,
+    visitedSystems,
+    warpFromSystem,
+    warpState,
+    warpToSystem,
+    zSlice,
+  ]);
 
   // Scroll zoom (non-passive so we can preventDefault)
   useEffect(() => {
@@ -1153,7 +1225,7 @@ const GalaxyGridView = forwardRef<GalaxyGridHandle, {
     if (!wasDrag && hovId.current) {
       onSystemClick(hovId.current);
       // Smoothly pan camera to centre on the clicked system (keep orbit + distance)
-      const sys = propsRef.current.allSystems.find(s => s.id === hovId.current);
+      const sys = propsRef.current.systemById.get(hovId.current);
       if (sys) {
         const [wx, wy, wz] = sysToWorld(sys);
         const c = cam.current;
@@ -1163,10 +1235,10 @@ const GalaxyGridView = forwardRef<GalaxyGridHandle, {
           startTime: performance.now(),
           duration: 600,
         };
-        rafId.current = requestAnimationFrame(draw);
+        scheduleRedraw();
       }
     }
-  }, [onSystemClick, draw]);
+  }, [onSystemClick, scheduleRedraw]);
 
   const onMouseLeave = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     drag.current.active = false; drag.current.moved = false;
@@ -1185,7 +1257,7 @@ const GalaxyGridView = forwardRef<GalaxyGridHandle, {
   const onDblClick = useCallback(() => {
     if (hovId.current) {
       // Fly in close to the hovered system
-      const sys = propsRef.current.allSystems.find(s => s.id === hovId.current);
+      const sys = propsRef.current.systemById.get(hovId.current);
       if (sys) {
         const [wx, wy, wz] = sysToWorld(sys);
         camAnim.current = {
@@ -1194,7 +1266,7 @@ const GalaxyGridView = forwardRef<GalaxyGridHandle, {
           startTime: performance.now(),
           duration: 950,
         };
-        rafId.current = requestAnimationFrame(draw);
+        scheduleRedraw();
         return;
       }
     }
@@ -1205,8 +1277,8 @@ const GalaxyGridView = forwardRef<GalaxyGridHandle, {
       startTime: performance.now(),
       duration: 700,
     };
-    rafId.current = requestAnimationFrame(draw);
-  }, [draw]);
+    scheduleRedraw();
+  }, [scheduleRedraw]);
 
   return (
     <div ref={wrapperRef} style={{ width: '100%', height: '100%', overflow: 'hidden' }}>
@@ -1225,10 +1297,72 @@ const GalaxyGridView = forwardRef<GalaxyGridHandle, {
 
 // ─── Filter Panel ─────────────────────────────────────────────────────────────
 
-function FilterPanel({ filters, onChange }: { filters: MapFilters; onChange: (f: MapFilters) => void }) {
+function DrawerSheet({ title, eyebrow, open, onClose, children }: DrawerSheetProps) {
+  if (!open) return null;
+
+  return (
+    <div style={{ position: 'absolute', inset: 0, zIndex: 24 }}>
+      <button
+        type="button"
+        aria-label={`Close ${title}`}
+        className="starmap-sheet-backdrop"
+        onClick={onClose}
+      />
+      <div className="starmap-sheet">
+        <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 8 }}>
+          <span className="starmap-sheet-handle" />
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '8px 14px 10px', borderBottom: '1px solid rgba(22,30,52,0.7)' }}>
+          <div style={{ minWidth: 0 }}>
+            {eyebrow && (
+              <div style={{ fontSize: 8, color: '#475569', letterSpacing: '0.14em', textTransform: 'uppercase', marginBottom: 3 }}>
+                {eyebrow}
+              </div>
+            )}
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#e2e8f0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {title}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="legacy-panel-btn"
+            style={{
+              padding: '3px 8px',
+              fontSize: 9,
+              '--legacy-border': 'rgba(71,85,105,0.28)',
+              '--legacy-bg': 'rgba(6,9,20,0.45)',
+              '--legacy-color': '#94a3b8',
+              '--legacy-hover-border': 'rgba(148,163,184,0.36)',
+              '--legacy-hover-bg': 'rgba(15,23,42,0.78)',
+              '--legacy-hover-color': '#e2e8f0',
+            } as React.CSSProperties}
+          >
+            Close
+          </button>
+        </div>
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FilterPanel({
+  filters,
+  onChange,
+  layout = 'rail',
+}: {
+  filters: MapFilters;
+  onChange: (f: MapFilters) => void;
+  layout?: 'rail' | 'sheet';
+}) {
   function toggle(key: keyof MapFilters) {
     onChange({ ...filters, [key]: !filters[key] });
   }
+
+  const inSheet = layout === 'sheet';
 
   const checkBtn = (active: boolean, color: string): React.CSSProperties => ({
     width: 12, height: 12, borderRadius: 2, flexShrink: 0,
@@ -1260,30 +1394,32 @@ function FilterPanel({ filters, onChange }: { filters: MapFilters; onChange: (f:
 
   return (
     <div style={{
-      width: 168, borderRight: '1px solid rgba(22,30,52,0.8)',
-      background: 'rgba(3,5,16,0.95)', overflowY: 'auto',
+      width: inSheet ? '100%' : 168,
+      borderRight: inSheet ? 'none' : '1px solid rgba(22,30,52,0.8)',
+      background: inSheet ? 'transparent' : 'rgba(3,5,16,0.95)', overflowY: 'auto',
       display: 'flex', flexDirection: 'column', flexShrink: 0,
+      paddingBottom: inSheet ? 12 : 0,
     }}>
       <div style={{
-        padding: '7px 12px', borderBottom: '1px solid rgba(22,30,52,0.6)',
+        padding: inSheet ? '10px 14px 8px' : '7px 12px', borderBottom: '1px solid rgba(22,30,52,0.6)',
         fontSize: 8, fontWeight: 700, color: '#334155', letterSpacing: '0.12em', textTransform: 'uppercase',
       }}>
         MAP FILTERS
       </div>
 
       {sections.map(section => (
-        <div key={section.title} style={{ padding: '7px 12px', borderBottom: '1px solid rgba(22,30,52,0.35)' }}>
+        <div key={section.title} style={{ padding: inSheet ? '10px 14px' : '7px 12px', borderBottom: '1px solid rgba(22,30,52,0.35)' }}>
           <div style={{ fontSize: 8, color: '#334155', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 5 }}>
             {section.title}
           </div>
           {section.keys.map(key => {
             const row = rows.find(r => r.key === key)!;
             return (
-              <label key={key} className="starmap-filter-row" style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+              <label key={key} className="starmap-filter-row" style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', padding: inSheet ? '4px 0' : undefined }}>
                 <span className="starmap-filter-check" style={checkBtn(filters[key] as boolean, row.color)} onClick={() => toggle(key)}>
                   <span style={checkInner(filters[key] as boolean, row.color)} />
                 </span>
-                <span style={{ fontSize: 10, color: (filters[key] as boolean) ? row.color : '#475569' }}>
+                <span style={{ fontSize: inSheet ? 11 : 10, color: (filters[key] as boolean) ? row.color : '#475569' }}>
                   {row.label}
                 </span>
               </label>
@@ -1293,7 +1429,7 @@ function FilterPanel({ filters, onChange }: { filters: MapFilters; onChange: (f:
       ))}
 
       {/* Legend */}
-      <div style={{ padding: '7px 12px' }}>
+      <div style={{ padding: inSheet ? '10px 14px' : '7px 12px' }}>
         <div style={{ fontSize: 8, color: '#334155', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 6 }}>
           Legend
         </div>
@@ -2467,9 +2603,12 @@ function StarMapPanelInner() {
   const fleetShipsRecord  = useGameStore(s => s.state.systems.fleet.ships);
   const fleetFleetsRecord = useGameStore(s => s.state.systems.fleet.fleets);
   const maxFleets         = useGameStore(s => s.state.systems.fleet.maxFleets);
+  const viewport = useResponsiveViewport();
+  const useDrawerPanels = viewport.starmapUsesDrawerPanels;
   const seed = galaxy.seed;
 
   const allSystems   = useMemo(() => generateGalaxy(seed), [seed]);
+  const systemById   = useMemo(() => buildSystemLookup(allSystems), [allSystems]);
   const sectors      = useMemo(() => buildSectors(allSystems), [allSystems]);
   const fleetShips   = useMemo(() => Object.values(fleetShipsRecord), [fleetShipsRecord]);
   const playerFleets = useMemo(() => Object.values(fleetFleetsRecord), [fleetFleetsRecord]);
@@ -2495,8 +2634,8 @@ function StarMapPanelInner() {
   const [selectedId,   setSelectedId]   = useState<string | null>(() => savedPanelState.selectedId ?? null);
   const [zSlice,       setZSlice]       = useState(galaxy.galacticSliceZ ?? 0.5);
   const [searchQuery,  setSearchQuery]  = useState('');
-  const [showFilters,  setShowFilters]  = useState(true);
-  const [showRight,    setShowRight]    = useState(true);
+  const [showFilters,  setShowFilters]  = useState(() => !useDrawerPanels);
+  const [showRight,    setShowRight]    = useState(() => !useDrawerPanels);
   const [rightTab,    setRightTab]    = useState<'intel' | 'route'>(() => savedPanelState.rightTab ?? 'intel');
   const [filters, setFilters] = useState<MapFilters>({
     highsec: true, lowsec: true, nullsec: true,
@@ -2515,6 +2654,7 @@ function StarMapPanelInner() {
   const [overlay,        setOverlay]        = useState<OverlayMode>('default');
   const [hoverPreview,   setHoverPreview]   = useState<HoverPreview | null>(null);
   const gridRef = useRef<GalaxyGridHandle>(null);
+  const previousDrawerModeRef = useRef(useDrawerPanels);
   const tutorialStarterFleetId = useMemo(() => {
     if (fleetFleetsRecord['fleet-starter']) return 'fleet-starter';
     return playerFleets[0]?.id ?? null;
@@ -2552,6 +2692,25 @@ function StarMapPanelInner() {
     setPanelState('starmap', { selectedId, rightTab, routeFrom, routeTo, routeFilter, routeFleetId });
   }, [selectedId, rightTab, routeFrom, routeTo, routeFilter, routeFleetId, setPanelState]);
 
+  useEffect(() => {
+    if (previousDrawerModeRef.current === useDrawerPanels) return;
+    previousDrawerModeRef.current = useDrawerPanels;
+
+    if (useDrawerPanels) {
+      setShowFilters(false);
+      setShowRight(selectedId !== null || rightTab === 'route');
+      return;
+    }
+
+    setShowFilters(true);
+    setShowRight(true);
+  }, [rightTab, selectedId, useDrawerPanels]);
+
+  useEffect(() => {
+    if (!useDrawerPanels && !viewport.isCoarsePointer) return;
+    setHoverPreview(null);
+  }, [useDrawerPanels, viewport.isCoarsePointer]);
+
   // Warp ticker
   const warp    = galaxy.warp;
   const nowRef  = useRef(Date.now());
@@ -2561,19 +2720,19 @@ function StarMapPanelInner() {
     const id = setInterval(() => { nowRef.current = Date.now(); forceUpdate(n => n + 1); }, 250);
     return () => clearInterval(id);
   }, [warp]);
-  const warpTo       = warp ? allSystems.find(s => s.id === warp.toSystemId) : null;
+  const warpTo = warp ? (systemById.get(warp.toSystemId) ?? null) : null;
   const warpProgress = warp ? getWarpProgress(warp, nowRef.current) : 0;
   const warpEta      = warp ? warpEtaSeconds(warp, nowRef.current) : 0;
 
   // Star systems for the animated player-warp arrow on the map
   const warpFromSystem = useMemo(() => {
     if (!warp) return null;
-    return allSystems.find(s => s.id === warp.fromSystemId) ?? null;
-  }, [warp, allSystems]);
+    return systemById.get(warp.fromSystemId) ?? null;
+  }, [systemById, warp]);
   const warpToSystem = useMemo(() => {
     if (!warp) return null;
-    return allSystems.find(s => s.id === warp.toSystemId) ?? null;
-  }, [warp, allSystems]);
+    return systemById.get(warp.toSystemId) ?? null;
+  }, [systemById, warp]);
 
   const reachable = useMemo(
     () => getReachableSystems(allSystems, galaxy.currentSystemId, jumpRangeLY),
@@ -2587,12 +2746,21 @@ function StarMapPanelInner() {
       setActiveRoute(null);
       setRouteComputed(false);
       setDispatchFeedback(null);
+      if (useDrawerPanels) {
+        setShowFilters(false);
+        setShowRight(true);
+      }
       return;
     }
 
-    setSelectedId(prev => prev === id ? null : id);
+    const nextSelectedId = selectedId === id ? null : id;
+    setSelectedId(nextSelectedId);
     setRightTab('intel');
-  }, [rightTab]);
+    if (useDrawerPanels) {
+      setShowFilters(false);
+      setShowRight(nextSelectedId !== null);
+    }
+  }, [rightTab, selectedId, useDrawerPanels]);
 
   const handleSetCourse = useCallback(() => {
     if (!selectedId || selectedId === galaxy.currentSystemId) return;
@@ -2608,7 +2776,7 @@ function StarMapPanelInner() {
       const seen = new Set<string>();
       const sectorPath: Array<{ gx: number; gy: number }> = [];
       for (const id of result.path) {
-        const sys = allSystems.find(s => s.id === id);
+        const sys = systemById.get(id);
         if (!sys) continue;
         const sec = systemSector(sys);
         const k = sectorId(sec.gx, sec.gy);
@@ -2620,7 +2788,7 @@ function StarMapPanelInner() {
     }
     setRouteComputed(true);
     setRightTab('route');
-  }, [routeFrom, routeTo, allSystems, jumpRangeLY, routeFilter]);
+  }, [routeFrom, routeTo, allSystems, jumpRangeLY, routeFilter, systemById]);
 
   const handleClearRoute = useCallback(() => {
     setActiveRoute(null);
@@ -2637,7 +2805,7 @@ function StarMapPanelInner() {
     }
     if (!fleet.fleetOrder) return;
 
-    const liveRoute = buildActiveRouteFromPath(allSystems, fleet.fleetOrder.route);
+    const liveRoute = buildActiveRouteFromPath(systemById, fleet.fleetOrder.route);
     if (!liveRoute) return;
 
     setRouteFrom(liveRoute.fromId);
@@ -2655,7 +2823,7 @@ function StarMapPanelInner() {
       return liveRoute;
     });
     setRouteComputed(true);
-  }, [allSystems, playerFleets, routeFleetId]);
+  }, [playerFleets, routeFleetId, systemById]);
 
   useEffect(() => {
     if (!tutorialDispatchStep) {
@@ -2708,16 +2876,138 @@ function StarMapPanelInner() {
     return dispatched;
   }, [routeTo, routeFilter, doIssueFleetGroupOrder]);
 
-  const selectedSys    = selectedId ? allSystems.find(s => s.id === selectedId) : null;
+  const selectedSys = selectedId ? (systemById.get(selectedId) ?? null) : null;
   const selectedVisited = selectedId ? !!galaxy.visitedSystems[selectedId] : false;
   const selectedDistLY  = selectedSys ? unitsToLy(systemDistance(currentSystem, selectedSys)) : null;
-  const hoveredSys = hoverPreview ? allSystems.find(s => s.id === hoverPreview.systemId) ?? null : null;
+  const hoveredSys = hoverPreview ? (systemById.get(hoverPreview.systemId) ?? null) : null;
+  const rightToggleLabel = useDrawerPanels
+    ? rightTab === 'route'
+      ? 'Route'
+      : selectedSys
+        ? 'Intel'
+        : 'Panel'
+    : 'Panel';
+
+  const handleToggleFilters = useCallback(() => {
+    if (useDrawerPanels) {
+      setShowRight(false);
+    }
+    setShowFilters(current => !current);
+  }, [useDrawerPanels]);
+
+  const handleToggleRightPanel = useCallback(() => {
+    if (useDrawerPanels) {
+      setShowFilters(false);
+    }
+    setShowRight(current => !current);
+  }, [useDrawerPanels]);
+
+  const handleRightTabChange = useCallback((tab: typeof rightTab) => {
+    setRightTab(tab);
+    if (useDrawerPanels) {
+      setShowFilters(false);
+      setShowRight(true);
+    }
+  }, [useDrawerPanels]);
+
+  const rightPanelContent = (
+    <>
+      <div style={{ display: 'flex', borderBottom: '1px solid rgba(22,30,52,0.6)', flexShrink: 0 }}>
+        {([
+          ['intel',  'Intel'],
+          ['route',  'Route'],
+        ] as [typeof rightTab, string][]).map(([tab, label]) => (
+          <button key={tab} onClick={() => handleRightTabChange(tab)} data-tutorial-anchor={tutorialDispatchStep && tab === 'route' ? 'starmap-route-tab' : undefined} className={`legacy-panel-btn ${tutorialDispatchStep && tab === 'route' ? 'tutorial-breathe relative z-[74]' : ''}`.trim()} style={{
+            flex: 1, padding: '7px 4px', fontSize: 9, fontWeight: 600,
+            letterSpacing: '0.08em', textTransform: 'uppercase',
+            '--legacy-border': 'transparent',
+            '--legacy-bg': rightTab === tab ? 'rgba(8,51,68,0.3)' : 'transparent',
+            '--legacy-color': rightTab === tab ? '#22d3ee' : '#334155',
+            '--legacy-hover-border': 'transparent',
+            '--legacy-hover-bg': rightTab === tab ? 'rgba(8,51,68,0.42)' : 'rgba(15,23,42,0.68)',
+            '--legacy-hover-color': rightTab === tab ? '#cffafe' : '#cbd5e1',
+            '--legacy-radius': '0px',
+            borderBottom: rightTab === tab ? '2px solid #22d3ee' : '2px solid transparent',
+            boxShadow: tutorialDispatchStep && tab === 'route' ? 'inset 0 0 0 1px rgba(34,211,238,0.14), 0 0 14px rgba(34,211,238,0.12)' : undefined,
+          } as React.CSSProperties}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <div style={{ padding: '10px 12px', overflowY: 'auto', flex: 1 }}>
+        {rightTab === 'intel' ? (
+          <>
+            <div style={{ paddingBottom: 10, marginBottom: 10, borderBottom: '1px solid rgba(22,30,52,0.5)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                <div>
+                  <div style={{ fontSize: 8, color: '#334155', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 3 }}>Current Location</div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: '#22d3ee' }}>{currentSystem.name}</div>
+                </div>
+                <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                  <span style={{ fontSize: 8, padding: '2px 7px', borderRadius: 999, color: secColor(currentSystem.security), border: `1px solid ${secColor(currentSystem.security)}30`, background: `${secColor(currentSystem.security)}12`, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                    {secLabel(currentSystem.security)}
+                  </span>
+                  <span style={{ fontSize: 8, padding: '2px 7px', borderRadius: 999, color: '#64748b', border: '1px solid rgba(100,116,139,0.25)', background: 'rgba(15,23,42,0.52)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                    {currentSystem.bodies.length} Bodies
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {selectedSys ? (
+              <SystemIntelPanel
+                sys={selectedSys}
+                isVisited={selectedVisited}
+                isCurrent={selectedSys.id === galaxy.currentSystemId}
+                distLY={selectedDistLY}
+                onSetCourse={handleSetCourse}
+                onSetRouteFrom={() => { setDispatchFeedback(null); setRouteFrom(selectedSys.id); setActiveRoute(null); setRouteComputed(false); handleRightTabChange('route'); }}
+                onSetRouteTo={() => { setDispatchFeedback(null); setRouteTo(selectedSys.id); setActiveRoute(null); setRouteComputed(false); handleRightTabChange('route'); }}
+              />
+            ) : (
+              <div style={{ fontSize: 9, color: '#475569', textAlign: 'left', padding: '12px 14px', border: '1px solid rgba(30,41,59,0.72)', borderRadius: 8, background: 'linear-gradient(180deg, rgba(8,12,28,0.94), rgba(4,6,18,0.9))', lineHeight: 1.5 }}>
+                {useDrawerPanels
+                  ? 'Tap a star to peek intel and route context without leaving the map.'
+                  : 'Click any star to inspect it. Hover gives fast intel, selection opens the full inspector, and double-click flies the camera in.'}
+              </div>
+            )}
+          </>
+        ) : (
+          <RoutePlanner
+            allSystems={allSystems}
+            visitedSystems={galaxy.visitedSystems}
+            currentSystemId={galaxy.currentSystemId}
+            routeFrom={routeFrom}
+            routeTo={routeTo}
+            jumpRangeLY={jumpRangeLY}
+            routeFilter={routeFilter}
+            activeRoute={activeRoute}
+            routeComputed={routeComputed}
+            onSetFrom={(id) => { setDispatchFeedback(null); setRouteFrom(id); setActiveRoute(null); setRouteComputed(false); }}
+            onSetTo={(id) => { setDispatchFeedback(null); setRouteTo(id); setActiveRoute(null); setRouteComputed(false); }}
+            onSetJumpRange={(ly) => { setDispatchFeedback(null); setJumpRangeLY(ly); }}
+            onSetFilter={(filter) => { setDispatchFeedback(null); setRouteFilter(filter); setActiveRoute(null); setRouteComputed(false); }}
+            onComputeRoute={handleComputeRoute}
+            onClearRoute={handleClearRoute}
+            fleetJumpRangeLY={fleetJumpRangeLY}
+            playerFleets={playerFleets}
+            fleetShips={fleetShips}
+            routeFleetId={routeFleetId}
+            onSetFleet={(id) => { setDispatchFeedback(null); setRouteFleetId(id); }}
+            onDispatch={handleDispatchFleet}
+            dispatchFeedback={dispatchFeedback}
+          />
+        )}
+      </div>
+    </>
+  );
 
   const Z_STEP = 0.08;
 
   return (
     <div style={{
-      display: 'flex', flexDirection: 'column', height: '100%', minHeight: 560,
+      display: 'flex', flexDirection: 'column', height: '100%', minHeight: useDrawerPanels ? 0 : 560,
       background: 'rgba(2,4,14,0.97)', border: '1px solid rgba(22,30,52,0.8)',
       borderRadius: 8, overflow: 'hidden',
     }}>
@@ -2726,6 +3016,7 @@ function StarMapPanelInner() {
       <div style={{
         padding: '8px 14px', borderBottom: '1px solid rgba(22,30,52,0.8)',
         display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0, gap: 10,
+        flexWrap: useDrawerPanels ? 'wrap' : 'nowrap',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <span style={{ fontSize: 12, fontWeight: 700, color: '#22d3ee', letterSpacing: '0.12em' }}>
@@ -2735,7 +3026,7 @@ function StarMapPanelInner() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
               <span style={{ fontSize: 9, color: '#475569' }}>⊛</span>
               <span style={{ fontSize: 9, color: '#94a3b8' }}>
-                {allSystems.find(s => s.id === selectedId)?.name ?? selectedId}
+                {systemById.get(selectedId)?.name ?? selectedId}
               </span>
               <button onClick={() => setSelectedId(null)}
                 className="legacy-panel-btn"
@@ -2745,7 +3036,7 @@ function StarMapPanelInner() {
           )}
         </div>
 
-        <div style={{ flex: 1, maxWidth: 260, position: 'relative' }}>
+        <div style={{ flex: useDrawerPanels ? '1 0 100%' : 1, maxWidth: useDrawerPanels ? '100%' : 260, minWidth: useDrawerPanels ? '100%' : 0, position: 'relative', order: useDrawerPanels ? 3 : 0 }}>
           <input
             type="text" placeholder="Search systems..." value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
@@ -2763,7 +3054,7 @@ function StarMapPanelInner() {
           )}
         </div>
 
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: useDrawerPanels ? 'space-between' : 'flex-end', width: useDrawerPanels ? '100%' : undefined }}>
           {/* Overlay mode selector */}
           <div style={{ display: 'flex', gap: 1, border: '1px solid rgba(22,30,52,0.7)', borderRadius: 4, overflow: 'hidden' }}>
             {([
@@ -2789,7 +3080,8 @@ function StarMapPanelInner() {
           </div>
           {(['Filters', 'Panel'] as const).map((label, i) => {
             const active = i === 0 ? showFilters : showRight;
-            const toggle = i === 0 ? () => setShowFilters(f => !f) : () => setShowRight(r => !r);
+            const toggle = i === 0 ? handleToggleFilters : handleToggleRightPanel;
+            const buttonLabel = i === 0 ? label : rightToggleLabel;
             return (
               <button key={label} onClick={toggle} className="legacy-panel-btn" style={{
                 fontSize: 9, padding: '3px 8px',
@@ -2800,7 +3092,7 @@ function StarMapPanelInner() {
                 '--legacy-hover-bg': active ? 'rgba(8,51,68,0.4)' : 'rgba(15,23,42,0.72)',
                 '--legacy-hover-color': active ? '#cffafe' : '#cbd5e1',
                 '--legacy-radius': '3px',
-              } as React.CSSProperties}>⊛ {label}</button>
+              } as React.CSSProperties}>⊛ {buttonLabel}</button>
             );
           })}
           <span style={{ fontSize: 8, color: '#1e293b', fontFamily: 'monospace' }}>
@@ -2829,9 +3121,9 @@ function StarMapPanelInner() {
       )}
 
       {/* Body row */}
-      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+      <div style={{ display: 'flex', flex: 1, overflow: 'hidden', minHeight: 0 }}>
 
-        {showFilters && <FilterPanel filters={filters} onChange={setFilters} />}
+        {!useDrawerPanels && showFilters && <FilterPanel filters={filters} onChange={setFilters} />}
 
         {/* Map area */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
@@ -2850,6 +3142,7 @@ function StarMapPanelInner() {
             <GalaxyGridView
               ref={gridRef}
               allSystems={allSystems}
+              systemById={systemById}
               sectors={sectors}
               currentSystemId={galaxy.currentSystemId}
               visitedSystems={galaxy.visitedSystems}
@@ -2867,9 +3160,9 @@ function StarMapPanelInner() {
               warpState={warp ?? null}
               warpFromSystem={warpFromSystem}
               warpToSystem={warpToSystem}
-              onHoverChange={setHoverPreview}
+              onHoverChange={useDrawerPanels || viewport.isCoarsePointer ? undefined : setHoverPreview}
             />
-            {hoverPreview && hoveredSys && (
+            {!useDrawerPanels && !viewport.isCoarsePointer && hoverPreview && hoveredSys && (
               <StarSystemHoverCard
                 hover={hoverPreview}
                 sys={hoveredSys}
@@ -2881,103 +3174,40 @@ function StarMapPanelInner() {
                 playerFleets={playerFleets}
               />
             )}
+            {useDrawerPanels && (
+              <>
+                <DrawerSheet
+                  title="Galaxy Filters"
+                  eyebrow="Map Controls"
+                  open={showFilters}
+                  onClose={() => setShowFilters(false)}
+                >
+                  <FilterPanel filters={filters} onChange={setFilters} layout="sheet" />
+                </DrawerSheet>
+
+                <DrawerSheet
+                  title={rightTab === 'route' ? 'Route Planner' : selectedSys ? selectedSys.name : 'System Intel'}
+                  eyebrow={rightTab === 'route' ? 'Navigation' : selectedSys ? 'Tap-to-Peek Intel' : 'Galaxy Intel'}
+                  open={showRight}
+                  onClose={() => setShowRight(false)}
+                >
+                  <div style={{ background: 'rgba(3,5,16,0.95)', minHeight: '100%' }}>
+                    {rightPanelContent}
+                  </div>
+                </DrawerSheet>
+              </>
+            )}
           </div>
         </div>
 
         {/* Right panel */}
-        {showRight && (
+        {!useDrawerPanels && showRight && (
           <div style={{
             width: 292, borderLeft: '1px solid rgba(22,30,52,0.8)',
             background: 'rgba(3,5,16,0.95)', display: 'flex', flexDirection: 'column',
             overflowY: 'auto', flexShrink: 0,
           }}>
-            <div style={{ display: 'flex', borderBottom: '1px solid rgba(22,30,52,0.6)', flexShrink: 0 }}>
-              {([
-                ['intel',  'Intel'],
-                ['route',  'Route'],
-              ] as [typeof rightTab, string][]).map(([tab, label]) => (
-                <button key={tab} onClick={() => setRightTab(tab)} data-tutorial-anchor={tutorialDispatchStep && tab === 'route' ? 'starmap-route-tab' : undefined} className={`legacy-panel-btn ${tutorialDispatchStep && tab === 'route' ? 'tutorial-breathe relative z-[74]' : ''}`.trim()} style={{
-                  flex: 1, padding: '7px 4px', fontSize: 9, fontWeight: 600,
-                  letterSpacing: '0.08em', textTransform: 'uppercase',
-                  '--legacy-border': 'transparent',
-                  '--legacy-bg': rightTab === tab ? 'rgba(8,51,68,0.3)' : 'transparent',
-                  '--legacy-color': rightTab === tab ? '#22d3ee' : '#334155',
-                  '--legacy-hover-border': 'transparent',
-                  '--legacy-hover-bg': rightTab === tab ? 'rgba(8,51,68,0.42)' : 'rgba(15,23,42,0.68)',
-                  '--legacy-hover-color': rightTab === tab ? '#cffafe' : '#cbd5e1',
-                  '--legacy-radius': '0px',
-                  borderBottom: rightTab === tab ? '2px solid #22d3ee' : '2px solid transparent',
-                  boxShadow: tutorialDispatchStep && tab === 'route' ? 'inset 0 0 0 1px rgba(34,211,238,0.14), 0 0 14px rgba(34,211,238,0.12)' : undefined,
-                } as React.CSSProperties}>
-                  {label}
-                </button>
-              ))}
-            </div>
-
-            <div style={{ padding: '10px 12px', overflowY: 'auto', flex: 1 }}>
-              {rightTab === 'intel' ? (
-                <>
-                  <div style={{ paddingBottom: 10, marginBottom: 10, borderBottom: '1px solid rgba(22,30,52,0.5)' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-                      <div>
-                        <div style={{ fontSize: 8, color: '#334155', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 3 }}>Current Location</div>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: '#22d3ee' }}>{currentSystem.name}</div>
-                      </div>
-                      <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                        <span style={{ fontSize: 8, padding: '2px 7px', borderRadius: 999, color: secColor(currentSystem.security), border: `1px solid ${secColor(currentSystem.security)}30`, background: `${secColor(currentSystem.security)}12`, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-                          {secLabel(currentSystem.security)}
-                        </span>
-                        <span style={{ fontSize: 8, padding: '2px 7px', borderRadius: 999, color: '#64748b', border: '1px solid rgba(100,116,139,0.25)', background: 'rgba(15,23,42,0.52)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-                          {currentSystem.bodies.length} Bodies
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {selectedSys ? (
-                    <SystemIntelPanel
-                      sys={selectedSys}
-                      isVisited={selectedVisited}
-                      isCurrent={selectedSys.id === galaxy.currentSystemId}
-                      distLY={selectedDistLY}
-                      onSetCourse={handleSetCourse}
-                      onSetRouteFrom={() => { setDispatchFeedback(null); setRouteFrom(selectedSys!.id); setActiveRoute(null); setRouteComputed(false); setRightTab('route'); }}
-                      onSetRouteTo={()   => { setDispatchFeedback(null); setRouteTo(selectedSys!.id); setActiveRoute(null); setRouteComputed(false); setRightTab('route'); }}
-                    />
-                  ) : (
-                    <div style={{ fontSize: 9, color: '#475569', textAlign: 'left', padding: '12px 14px', border: '1px solid rgba(30,41,59,0.72)', borderRadius: 8, background: 'linear-gradient(180deg, rgba(8,12,28,0.94), rgba(4,6,18,0.9))', lineHeight: 1.5 }}>
-                      Click any star to inspect it. Hover gives fast intel, selection opens the full inspector, and double-click flies the camera in.
-                    </div>
-                  )}
-                </>
-              ) : (
-                /* Route tab */
-                <RoutePlanner
-                  allSystems={allSystems}
-                  visitedSystems={galaxy.visitedSystems}
-                  currentSystemId={galaxy.currentSystemId}
-                  routeFrom={routeFrom}
-                  routeTo={routeTo}
-                  jumpRangeLY={jumpRangeLY}
-                  routeFilter={routeFilter}
-                  activeRoute={activeRoute}
-                  routeComputed={routeComputed}
-                  onSetFrom={(id) => { setDispatchFeedback(null); setRouteFrom(id); setActiveRoute(null); setRouteComputed(false); }}
-                  onSetTo={(id) => { setDispatchFeedback(null); setRouteTo(id); setActiveRoute(null); setRouteComputed(false); }}
-                  onSetJumpRange={(ly) => { setDispatchFeedback(null); setJumpRangeLY(ly); }}
-                  onSetFilter={(filter) => { setDispatchFeedback(null); setRouteFilter(filter); setActiveRoute(null); setRouteComputed(false); }}
-                  onComputeRoute={handleComputeRoute}
-                  onClearRoute={handleClearRoute}
-                  fleetJumpRangeLY={fleetJumpRangeLY}
-                  playerFleets={playerFleets}
-                  fleetShips={fleetShips}
-                  routeFleetId={routeFleetId}
-                  onSetFleet={(id) => { setDispatchFeedback(null); setRouteFleetId(id); }}
-                  onDispatch={handleDispatchFleet}
-                  dispatchFeedback={dispatchFeedback}
-                />
-              )}
-            </div>
+            {rightPanelContent}
           </div>
         )}
       </div>

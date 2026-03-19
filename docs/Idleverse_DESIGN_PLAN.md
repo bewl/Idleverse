@@ -77,6 +77,54 @@ One paragraph describing what this plan is trying to achieve and why it matters.
 
 ---
 
+# Initiative — Mobile-First Responsive Rollout
+> **Status:** Active
+> **Last updated:** March 2026
+> **Depends on:** Universal bottom navigation shell, current panel state persistence, Star Map redraw-performance fixes
+
+## Goal
+
+Shift the application toward a mobile-first layout model without throwing away the current desktop presentation. Phone and tablet are both first-class targets. Galaxy Map is the pilot implementation because it contains the hardest layout constraints: canvas rendering, fixed side rails, hover-only intel, and route planning controls that currently assume desktop width.
+
+## Scope
+
+- Add a shared viewport and input-capability hook for UI layout decisions.
+- Refactor Galaxy Map so narrow or coarse-pointer layouts use full-screen map presentation with slide-up drawers instead of fixed left and right rails.
+- Preserve the current desktop information density and overall visual direction as much as possible.
+- Use tap-driven intel on touch-oriented layouts instead of relying on hover-only discovery.
+- Explicitly out of scope for this first rollout slice: a whole-app panel refactor in one pass, redesigning desktop visuals, or changing underlying galaxy, fleet, or routing logic.
+
+## Implementation Outline
+
+1. Add shared viewport primitives in the UI layer so responsive branching does not depend on ad hoc `window.innerWidth` checks scattered across panels.
+2. Convert Galaxy Map into a responsive shell with desktop rails on large viewports and slide-up drawers for filters and intel/route on phone and tablet layouts.
+3. Reuse the Galaxy Map patterns across the rest of the application after the drawer, touch-target, and compact-shell behavior is validated.
+
+## Risks / Open Questions
+
+- Canvas-heavy panels can regress performance if responsive overlays accidentally reintroduce redundant redraw triggers.
+- Some existing panels still assume fixed-width desktop telemetry blocks and will need phased follow-up rather than blanket CSS tweaks.
+- Touch-friendly tap-to-peek behavior must stay readable without breaking the desktop hover workflow.
+
+## Current Decisions
+
+- Phone and tablet are equally important targets.
+- Galaxy Map stays map-first on compact layouts.
+- Filters and intel/route move into slide-up drawers on touch-oriented or narrow viewports.
+- Tap-to-peek replaces hover-only intel on touch-oriented layouts.
+- Desktop visuals should remain close to the current implementation.
+
+## Files Likely Affected
+
+- `src/ui/hooks/useResponsiveViewport.ts`
+- `src/ui/layouts/GameLayout.tsx`
+- `src/ui/panels/StarMapPanel.tsx`
+- `src/index.css`
+- `docs/Idleverse_AI_Architecture.md`
+- `docs/Idleverse_DESIGN_PLAN.md`
+
+---
+
 # Initiative — Activity Bar Cleanup
 > **Status:** ✅ Shipped — March 2026
 > **Last updated:** March 2026
@@ -483,6 +531,9 @@ Replace the old orrery presentation with a more spatial, camera-driven system vi
 - Corrected mining-link targeting so ship `assignedBeltId` resource assignments resolve onto the rendered asteroid-belt body in-system, which keeps starter-state and legacy mining overlays visible in New Aether as well as in later wing-driven setups.
 - Corrected mining-link belt anchoring so connectors resolve to the nearest visible point on the belt ring instead of the ring centroid, preventing links from visually pointing at the central star.
 - Replaced that camera-dependent contact point with a deterministic world-space belt anchor per mining lane so each connector keeps pointing at the same belt location while the player pans or rotates the scene.
+- Updated local fleet markers in the System view so they use the Fleet panel's rotating palette instead of a generic cyan/teal treatment, keeping fleet identity consistent between command surfaces.
+- Reworked the System view travel presentation so departures still use the local warp corridor, but arrivals now read from save-backed recent-arrival transit snapshots for fleets and detached hauling convoys instead of renderer-invented preview state.
+- Added detached hauling-convoy contacts to the System view so auto-haul trips and HQ cargo-transfer staging remain visible in-system instead of vanishing whenever only a hauling wing is moving.
 - Preserved the existing anomaly tab, mining assignment detail surface, fleet scanning controls, and station/outpost action flows while the presentation layer changed.
 
 ## Files Likely Affected
@@ -1218,7 +1269,7 @@ All 8 targeted panels renovated with NavTag entity links, data density additions
 | **FC-1b** — Wire fleet `oreDeltas` to `cargoHold` | ✅ Shipped | `tickRunner` applies `oreDeltas` to each fleet's `cargoHold` each tick, capped by cargo capacity |
 | **FC-1c** — Fleet cargo hold model | ✅ Shipped | `PlayerFleet.cargoHold: Record<string, number>` added; `computeFleetCargoCapacity()` in `fleet.logic.ts` |
 | **FC-1d** — Corp HQ concept | ✅ Shipped | `FactionsState.homeStationId / homeStationSystemId / registeredStations`; `setHomeStation` store action; pre-seeded with `homeStationId: 'station-home'`, `homeStationSystemId: 'home'` in `initialState.ts` |
-| **FC-1e** — Fleet auto-haul to HQ | ✅ Shipped | Full round-trip loop: fleet at HQ dumps immediately inline; fleet away stamps `miningOriginSystemId`, dispatches haul trip; on HQ arrival ore dumped + fleet dispatched back; on return `activity: 'mining'` restored per ship and `miningOriginSystemId` cleared; FleetPanel "Haul to HQ" button + fill bar |
+| **FC-1e** — Fleet auto-haul to HQ | ✅ Shipped | Full round-trip loop: fleet at HQ dumps immediately inline; fleet away stamps `miningOriginSystemId`, dispatches haul trip; on HQ arrival a timed offload window begins before cargo transfer and return dispatch; on return `activity: 'mining'` restored per ship and `miningOriginSystemId` cleared; FleetPanel "Haul to HQ" button + fill bar |
 | **FC-1f** — Clean remaining UI gates | ✅ Shipped | MiningPanel fully fleet-centric; `getCurrentSystemBeltIds` removed; `ORE_BELTS` richness wired into fleet mining yield |
 | **FC-1G** — Corp identity (state.pilot → state.corp) | ✅ Shipped | `state.corp: CorpState` replaces deprecated `state.pilot`; save migration included; OverviewPanel → CorpCard + CorpHQCard |
 | **FC-1H** — Belt skill gates | ✅ Shipped | `ORE_BELTS[beltId].requiredSkill` checked in `setShipActivity()`; `SystemPanel` shows locked belt cards with 🔒 tooltip and live fleet-assignment status for unlocked belts; dead `unlocks` arrays removed from `skills.config.ts` |
@@ -1231,8 +1282,10 @@ All 8 targeted panels renovated with NavTag entity links, data density additions
 - `getBeltRichnessForSystem(galaxy, beltId, systemId)` is a new pure function; all fleet mining applies system richness multipliers correctly
 - Deep-ore yield bonus (`deep-ore-yield` modifier) now correctly applied in fleet mining
 - `getCurrentSystemBeltIds` removed; `SystemPanel` uses `getBeltsForSystem(system.id, galaxy.seed)`
-- **Auto-haul is two-branch**: fleet already at HQ → ore dumped inline immediately (no haul trip); fleet away from HQ → `miningOriginSystemId` stamped on `PlayerFleet`, haul trip dispatched; dump block only fires for fleets with `miningOriginSystemId` set (prevents instant ore drain for stationary miners at HQ)
-- **Re-mining round-trip**: after dumping at HQ, fleet auto-dispatches back to `miningOriginSystemId`; on arrival, ships with `assignedBeltId` have `activity: 'mining'` restored and `miningOriginSystemId` cleared
+- **Auto-haul is two-branch**: fleet already at HQ with no active haul-return context → ore dumped inline immediately (no haul trip); fleet away from HQ → `miningOriginSystemId` stamped on `PlayerFleet`, haul trip dispatched; any fleet that returns to HQ with `miningOriginSystemId` set must enter `Cargo Transfer` before cargo is deposited and the return leg is issued.
+- **HQ cargo transfer now takes time**: haul trips that arrive from another system stamp an HQ transfer timer first, stay parked at HQ in `Cargo Transfer`, drain cargo continuously during that window, then dispatch the return leg only after the transfer completes.
+- **Cargo transfer speed is upgradeable**: the HQ transfer phase now scales with corp Industrial training, Logistics Command bonuses, and the hauling profile of the ships performing the transfer.
+- **Re-mining round-trip**: after offloading at HQ, fleet auto-dispatches back to `miningOriginSystemId`; on arrival, ships only resume `activity: 'mining'` if that belt exists in the destination system, and stale HQ fleets with remote belt assignments now self-heal only from authoritative transit state rather than belt-template guesses.
 - Belt skill gates: `ORE_BELTS[beltId].requiredSkill` checked in `setShipActivity()`; `SystemPanel` renders locked belt cards with a 🔒 disabled button and `GameTooltip` showing the required skill name and level, while unlocked belts now show actual fleet assignment status instead of the old `mining.targets` toggle state
 
 ---

@@ -18,6 +18,7 @@ import { SystemPanel } from '@/ui/panels/SystemPanel';
 import { ThemedIcon } from '@/ui/components/ThemedIcon';
 import { NotificationDrawer, NotificationToastStack, getUnreadNotificationCount } from '@/ui/components/NotificationCenter';
 import { TutorialOverlay } from '@/ui/components/TutorialOverlay';
+import { useResponsiveViewport } from '@/ui/hooks/useResponsiveViewport';
 import { formatResourceAmount, RESOURCE_REGISTRY } from '@/game/resources/resourceRegistry';
 import { SKILL_DEFINITIONS } from '@/game/systems/skills/skills.config';
 import { getSystemById } from '@/game/galaxy/galaxy.gen';
@@ -46,6 +47,27 @@ interface TutorialDimSegment {
   left: number;
   width: number;
   height: number;
+}
+
+const EMPTY_TUTORIAL_IDS: string[] = [];
+
+function tutorialRectEquals(left: TutorialCutoutRect, right: TutorialCutoutRect) {
+  return left.top === right.top
+    && left.left === right.left
+    && left.right === right.right
+    && left.bottom === right.bottom;
+}
+
+function tutorialAnchorRectListEquals(left: TutorialAnchorRect[], right: TutorialAnchorRect[]) {
+  if (left === right) return true;
+  if (left.length !== right.length) return false;
+
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index].id !== right[index].id) return false;
+    if (!tutorialRectEquals(left[index].rect, right[index].rect)) return false;
+  }
+
+  return true;
 }
 
 function mergeIntervals(intervals: Array<{ left: number; right: number }>) {
@@ -266,12 +288,12 @@ export function GameLayout() {
   const tutorialOverlayOpen = useUiStore(s => s.tutorialOverlayOpen);
   const openTutorialOverlay = useUiStore(s => s.openTutorialOverlay);
   const closeTutorialOverlay = useUiStore(s => s.closeTutorialOverlay);
-  const [sidebarOpen, setSidebarOpen]   = useState(true);
   const [devOpen,     setDevOpen]       = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [wipePending, setWipePending] = useState(false);
   const [tutorialVisibleRects, setTutorialVisibleRects] = useState<TutorialAnchorRect[]>([]);
   const [tutorialAllowedRects, setTutorialAllowedRects] = useState<TutorialAnchorRect[]>([]);
+  const viewport = useResponsiveViewport();
 
   const state               = useGameStore(s => s.state);
   const notifications       = useGameStore(s => s.state.notifications.entries);
@@ -302,12 +324,15 @@ export function GameLayout() {
   const tutorialPresentation = tutorialStep ? getTutorialStepPresentation(state, tutorialStep.id) : null;
   const tutorialSummary = getTutorialProgressSummary(state);
   const tutorialStepIndex = tutorialStep ? TUTORIAL_STEP_ORDER.indexOf(tutorialStep.id) + 1 : tutorialSummary.completedCount;
-  const tutorialSpotlightIds = tutorialPresentation?.spotlightIds ?? [];
-  const tutorialAllowedInteractionIds = tutorialPresentation?.allowedInteractionIds ?? [];
+  const tutorialSpotlightIds = tutorialPresentation?.spotlightIds ?? EMPTY_TUTORIAL_IDS;
+  const tutorialAllowedInteractionIds = tutorialPresentation?.allowedInteractionIds ?? EMPTY_TUTORIAL_IDS;
+  const tutorialSpotlightKey = tutorialSpotlightIds.join('|');
+  const tutorialAllowedInteractionKey = tutorialAllowedInteractionIds.join('|');
   const tutorialVisibleAnchorIds = useMemo(
     () => Array.from(new Set([...tutorialSpotlightIds, ...tutorialAllowedInteractionIds])),
-    [tutorialAllowedInteractionIds, tutorialSpotlightIds],
+    [tutorialAllowedInteractionKey, tutorialSpotlightKey],
   );
+  const tutorialVisibleAnchorKey = tutorialVisibleAnchorIds.join('|');
   const tutorialOverlayDesktopSide = useMemo<'left' | 'right'>(() => {
     if (tutorialVisibleRects.length === 0) return 'right';
 
@@ -358,8 +383,8 @@ export function GameLayout() {
 
   useEffect(() => {
     if (!tutorialActive || !tutorialOverlayOpen || tutorialVisibleAnchorIds.length === 0) {
-      setTutorialVisibleRects([]);
-      setTutorialAllowedRects([]);
+      setTutorialVisibleRects(current => (current.length === 0 ? current : []));
+      setTutorialAllowedRects(current => (current.length === 0 ? current : []));
       return;
     }
 
@@ -376,8 +401,8 @@ export function GameLayout() {
           .filter((entry): entry is { id: string; node: HTMLElement } => entry.node !== null);
 
         if (visibleNodes.length === 0) {
-          setTutorialVisibleRects([]);
-          setTutorialAllowedRects([]);
+          setTutorialVisibleRects(current => (current.length === 0 ? current : []));
+          setTutorialAllowedRects(current => (current.length === 0 ? current : []));
           return;
         }
 
@@ -395,8 +420,15 @@ export function GameLayout() {
           };
         };
 
-        setTutorialVisibleRects(visibleNodes.map(mapNodeToRect));
-        setTutorialAllowedRects(nodes.map(mapNodeToRect));
+        const nextVisibleRects = visibleNodes.map(mapNodeToRect);
+        const nextAllowedRects = nodes.map(mapNodeToRect);
+
+        setTutorialVisibleRects(current => (
+          tutorialAnchorRectListEquals(current, nextVisibleRects) ? current : nextVisibleRects
+        ));
+        setTutorialAllowedRects(current => (
+          tutorialAnchorRectListEquals(current, nextAllowedRects) ? current : nextAllowedRects
+        ));
       });
     };
 
@@ -409,7 +441,7 @@ export function GameLayout() {
       window.removeEventListener('resize', updateCutout);
       window.removeEventListener('scroll', updateCutout, true);
     };
-  }, [activePanel, tutorialActive, tutorialAllowedInteractionIds, tutorialOverlayOpen, tutorialVisibleAnchorIds]);
+  }, [activePanel, tutorialActive, tutorialAllowedInteractionKey, tutorialOverlayOpen, tutorialVisibleAnchorKey]);
 
   useEffect(() => {
     if (!didRouteSoundMount.current) {
@@ -600,13 +632,15 @@ export function GameLayout() {
   return (
     <div
       className="flex flex-col overflow-hidden relative"
+      data-viewport={viewport.isPhone ? 'phone' : viewport.isTablet ? 'tablet' : 'desktop'}
+      data-input-mode={viewport.isCoarsePointer ? 'coarse' : 'fine'}
       style={{ height: '100dvh', zIndex: 1 }}
     >
       <StarField />
 
       {/* ── Top bar ── */}
       <div
-        className="shrink-0 flex items-center justify-between px-3 sm:px-4 py-2"
+        className="shrink-0 flex flex-wrap items-center justify-between gap-2 px-3 sm:px-4 py-2"
         style={{
           background: 'rgba(3, 5, 14, 0.97)',
           borderBottom: '1px solid rgba(22, 30, 52, 0.8)',
@@ -614,16 +648,6 @@ export function GameLayout() {
         }}
       >
         <div className="flex items-center gap-3">
-          {/* Desktop sidebar toggle */}
-          <button
-            className="hidden lg:flex sidebar-collapse-btn"
-            onClick={() => setSidebarOpen(o => !o)}
-            title={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
-          >
-            <span className="text-[11px]">
-              {sidebarOpen ? '‹' : '›'}
-            </span>
-          </button>
           <span className="text-cyan-400 font-bold tracking-widest text-sm uppercase title-glow select-none">
             IDLEVERSE
           </span>
@@ -856,43 +880,14 @@ export function GameLayout() {
       )}
 
       {/* ── Body: sidebar + panel ── */}
-      <div className="flex flex-1 overflow-hidden">
-
-        {/* Desktop sidebar — hidden on mobile */}
-        {sidebarOpen && (
-          <aside
-            className="hidden lg:flex w-52 shrink-0 flex-col py-3 px-2 gap-0.5 overflow-y-auto"
-            style={{
-              background: 'rgba(3, 5, 16, 0.95)',
-              borderRight: '1px solid rgba(22, 30, 52, 0.8)',
-            }}
-          >
-            <div className="text-[9px] text-slate-700 uppercase tracking-widest px-2 mb-2 select-none">
-              Systems
-            </div>
-            {visibleNav.map(n => {
-              const isActive     = activePanel === n.id;
-              return (
-                <button
-                  key={n.id}
-                  className={isActive ? 'nav-btn-active' : 'nav-btn'}
-                  onClick={() => navigate(n.id)}
-                >
-                  <span className="mr-2 inline-flex items-center justify-center"><ThemedIcon icon={n.icon} size={16} tone={isActive ? '#67e8f9' : '#94a3b8'} interactive /></span>
-                  <span className="flex-1 text-left">{n.label}</span>
-                </button>
-              );
-            })}
-          </aside>
-        )}
-
+      <div className="flex flex-1 min-h-0 overflow-hidden">
         {/* Panel content — full width with responsive max-width */}
-        <main className={`flex-1 overscroll-contain ${['starmap', 'system', 'fleet', 'skills'].includes(activePanel) ? 'overflow-hidden' : 'overflow-y-auto'} ${(tutorialActive && tutorialStep?.panelId === activePanel) ? 'focus-pulse' : ''}`}>
+        <main className={`flex-1 min-h-0 overscroll-contain ${['starmap', 'system', 'fleet', 'skills'].includes(activePanel) ? 'overflow-hidden' : 'overflow-y-auto'} ${(tutorialActive && tutorialStep?.panelId === activePanel) ? 'focus-pulse' : ''}`}>
           {(['starmap', 'system', 'fleet', 'skills'] as PanelId[]).includes(activePanel) ? (
-            <div style={{ height: '100%' }}>{PANELS[activePanel]}</div>
+            <div style={{ height: '100%', minHeight: 0 }}>{PANELS[activePanel]}</div>
           ) : (
-            /* pb-20 on mobile so bottom nav doesn't clip content */
-            <div className="p-3 sm:p-4 lg:p-5 pb-20 lg:pb-6 w-full">
+            /* Bottom nav is always present, so keep content clear of it at every size. */
+            <div className="w-full p-3 pb-20 sm:p-4 sm:pb-20 lg:p-5 lg:pb-20">
               {PANELS[activePanel]}
             </div>
           )}
@@ -951,8 +946,8 @@ export function GameLayout() {
         />
       </div>
 
-      {/* ── Mobile bottom navigation — hidden lg+ ── */}
-      <nav className="lg:hidden shrink-0 mob-nav flex items-stretch" style={{ zIndex: 50 }}>
+      {/* ── Bottom navigation — used at every screen size ── */}
+      <nav className="shrink-0 mob-nav flex items-stretch" style={{ zIndex: 50 }}>
         {visibleNav.map(n => {
           const isActive = activePanel === n.id;
           const isTutorialTarget = tutorialActive && tutorialStep?.panelId === n.id;

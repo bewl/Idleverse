@@ -72,6 +72,17 @@
   50%       { text-shadow: 0 0 26px rgba(34,211,238,0.70), 0 0 55px rgba(34,211,238,0.22); }
 }
 
+@keyframes starmap-sheet-rise {
+  0% {
+    opacity: 0;
+    transform: translateY(22px) scale(0.985);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
 /* ── Hex grid animations ──────────────────────────────────────── */
 @keyframes hex-probe-ring {
   to { stroke-dashoffset: -52; }
@@ -566,6 +577,43 @@ a:hover .idleverse-icon--interactive .idleverse-icon__particle--c,
   transform: none;
 }
 
+.starmap-sheet-backdrop {
+  position: absolute;
+  inset: 0;
+  border: none;
+  background: linear-gradient(180deg, rgba(2, 6, 23, 0.08), rgba(2, 6, 23, 0.54));
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+
+.starmap-sheet {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 10px;
+  max-height: min(78vh, 46rem);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid rgba(34, 211, 238, 0.16);
+  border-radius: 18px 18px 12px 12px;
+  background:
+    linear-gradient(180deg, rgba(9, 14, 30, 0.98), rgba(3, 5, 16, 0.97)),
+    radial-gradient(circle at top, rgba(34, 211, 238, 0.08), transparent 56%);
+  box-shadow:
+    0 28px 60px rgba(2, 6, 23, 0.72),
+    0 0 0 1px rgba(8, 51, 68, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  animation: starmap-sheet-rise 160ms ease-out;
+}
+
+.starmap-sheet-handle {
+  width: 44px;
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(71, 85, 105, 0.72), rgba(148, 163, 184, 0.9), rgba(71, 85, 105, 0.72));
+}
+
 .tooltip-popup {
   position: fixed;
   z-index: 9999;
@@ -882,6 +930,13 @@ a:hover .idleverse-icon--interactive .idleverse-icon__particle--c,
 
   .hud-data-chip {
     min-width: 108px;
+  }
+
+  .starmap-sheet {
+    left: 8px;
+    right: 8px;
+    bottom: 8px;
+    max-height: min(82vh, 42rem);
   }
 }
 

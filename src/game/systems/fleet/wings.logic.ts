@@ -1,7 +1,12 @@
 import type { GameState, PlayerFleet, FleetWing, ShipInstance, PilotInstance } from '@/types/game.types';
 import type { FleetOrder, RouteSecurityFilter } from '@/types/faction.types';
 import { HULL_DEFINITIONS } from '@/game/systems/fleet/fleet.config';
-import { BASE_SHIP_CARGO_M3 } from '@/game/balance/constants';
+import {
+  BASE_SHIP_CARGO_M3,
+  computeHaulOffloadSeconds,
+  HAULER_TRANSFER_HULL_BONUS_PER_MULTIPLIER,
+  MAX_HAULER_TRANSFER_HULL_BONUS,
+} from '@/game/balance/constants';
 import { findRoute } from '@/game/galaxy/route.logic';
 import { generateGalaxy } from '@/game/galaxy/galaxy.gen';
 import { calcWarpDuration } from '@/game/galaxy/travel.logic';
@@ -66,6 +71,97 @@ export function getWingCargoTotals(fleet: PlayerFleet): Record<string, number> {
     }
   }
   return totals;
+}
+
+function getCargoTransferHullBonus(shipIds: string[], ships: Record<string, ShipInstance>): number {
+  const hullBonus = shipIds.reduce((sum, shipId) => {
+    const ship = ships[shipId];
+    const hull = ship ? HULL_DEFINITIONS[ship.shipDefinitionId] : null;
+    return sum + ((hull?.baseCargoMultiplier ?? 0) * HAULER_TRANSFER_HULL_BONUS_PER_MULTIPLIER);
+  }, 0);
+
+  return Math.min(MAX_HAULER_TRANSFER_HULL_BONUS, hullBonus);
+}
+
+export function getFleetCargoTransferBonus(state: GameState, fleet: PlayerFleet): number {
+  const globalBonus = state.modifiers['cargo-transfer-speed'] ?? 0;
+  const commanderBonus = getCombinedCommanderBonus(state.systems.fleet.pilots, fleet, null, 'cargo-transfer-speed');
+  const hullBonus = getCargoTransferHullBonus(fleet.shipIds, state.systems.fleet.ships);
+  return globalBonus + commanderBonus + hullBonus;
+}
+
+export function getWingCargoTransferBonus(state: GameState, fleet: PlayerFleet, wing: FleetWing): number {
+  const globalBonus = state.modifiers['cargo-transfer-speed'] ?? 0;
+  const commanderBonus = getCombinedCommanderBonus(state.systems.fleet.pilots, fleet, wing, 'cargo-transfer-speed');
+  const dispatchedShipIds = getWingDispatchShipIds(fleet, wing);
+  const transferShipIds = dispatchedShipIds.length > 0 ? dispatchedShipIds : wing.shipIds;
+  const hullBonus = getCargoTransferHullBonus(transferShipIds, state.systems.fleet.ships);
+  return globalBonus + commanderBonus + hullBonus;
+}
+
+export function getFleetCargoTransferSeconds(state: GameState, fleet: PlayerFleet, cargoUnits: number): number {
+  return computeHaulOffloadSeconds(cargoUnits, getFleetCargoTransferBonus(state, fleet));
+}
+
+export function getWingCargoTransferSeconds(state: GameState, fleet: PlayerFleet, wing: FleetWing, cargoUnits = getWingCargoUsed(wing)): number {
+  return computeHaulOffloadSeconds(cargoUnits, getWingCargoTransferBonus(state, fleet, wing));
+}
+
+export function applyCargoTransferStep(
+  cargoHold: Record<string, number>,
+  resources: Record<string, number>,
+  startedAt: number,
+  durationMs: number,
+  previousNowMs: number,
+  nowMs: number,
+): {
+  nextCargoHold: Record<string, number>;
+  nextResources: Record<string, number>;
+  completed: boolean;
+  movedAny: boolean;
+} {
+  if (durationMs <= 0) {
+    const dumpedResources = { ...resources };
+    for (const [resourceId, amount] of Object.entries(cargoHold)) {
+      if (amount > 0) dumpedResources[resourceId] = (dumpedResources[resourceId] ?? 0) + amount;
+    }
+    return { nextCargoHold: {}, nextResources: dumpedResources, completed: true, movedAny: true };
+  }
+
+  const progressBefore = Math.max(0, Math.min(1, (previousNowMs - startedAt) / durationMs));
+  const progressAfter = Math.max(0, Math.min(1, (nowMs - startedAt) / durationMs));
+
+  if (progressAfter <= progressBefore) {
+    return { nextCargoHold: cargoHold, nextResources: resources, completed: progressAfter >= 1, movedAny: false };
+  }
+
+  const remainingFractionBefore = Math.max(0, 1 - progressBefore);
+  const remainingFractionAfter = Math.max(0, 1 - progressAfter);
+  const transferFraction = progressAfter >= 1 || remainingFractionBefore <= 0
+    ? 1
+    : Math.max(0, Math.min(1, 1 - (remainingFractionAfter / remainingFractionBefore)));
+
+  let movedAny = false;
+  const nextCargoHold: Record<string, number> = {};
+  const nextResources = { ...resources };
+
+  for (const [resourceId, amount] of Object.entries(cargoHold)) {
+    if (amount <= 0) continue;
+    const moved = progressAfter >= 1 ? amount : amount * transferFraction;
+    const remaining = Math.max(0, amount - moved);
+    if (moved > 0) {
+      nextResources[resourceId] = (nextResources[resourceId] ?? 0) + moved;
+      movedAny = true;
+    }
+    if (remaining > 0.000001) nextCargoHold[resourceId] = remaining;
+  }
+
+  return {
+    nextCargoHold,
+    nextResources,
+    completed: progressAfter >= 1 || Object.keys(nextCargoHold).length === 0,
+    movedAny,
+  };
 }
 
 // ─── Wing helpers ──────────────────────────────────────────────────────────
@@ -275,7 +371,13 @@ export function dispatchHaulerWing(
 
   const updatedWings = fleet.wings.map(w =>
     w.id === haulingWing.id
-      ? { ...w, isDispatched: true, haulingOriginSystemId: fromSystem }
+      ? {
+          ...w,
+          isDispatched: true,
+          haulingOriginSystemId: fromSystem,
+          hqOffloadStartedAt: null,
+          recentTransitArrival: null,
+        }
       : w,
   );
 
@@ -306,6 +408,7 @@ export function processWingArrivalAtHQ(
   fleetId: string,
   wingId: string,
   homeSystemId: string,
+  nowMs: number,
 ): GameState | null {
   const fleet = state.systems.fleet.fleets[fleetId];
   if (!fleet) return null;
@@ -323,27 +426,112 @@ export function processWingArrivalAtHQ(
   });
   if (!allAtHQ) return null;
 
-  // Dump hauling wing cargoHold to corp resources
-  let s = state;
-  const newResources = { ...s.resources };
-  const currentFleet = s.systems.fleet.fleets[fleetId];
-  for (const [resourceId, amount] of Object.entries(haulingWing.cargoHold ?? {})) {
-    if (amount > 0) newResources[resourceId] = (newResources[resourceId] ?? 0) + amount;
-  }
-  const clearedWings = currentFleet.wings.map(wing =>
-    wing.id === haulingWing.id ? { ...wing, cargoHold: {} } : wing,
-  );
-  s = {
-    ...s,
-    resources: newResources,
-    systems: {
-      ...s.systems,
-      fleet: {
-        ...s.systems.fleet,
-        fleets: { ...s.systems.fleet.fleets, [fleetId]: { ...currentFleet, wings: clearedWings } },
+  const hauledCargoUnits = getWingCargoUsed(haulingWing);
+  const offloadStartedAt = haulingWing.hqOffloadStartedAt ?? null;
+  if (hauledCargoUnits > 0 && !offloadStartedAt) {
+    const stagedWings = fleet.wings.map(wing =>
+      wing.id === haulingWing.id
+        ? {
+            ...wing,
+            hqOffloadStartedAt: nowMs,
+            recentTransitArrival: {
+              fromSystemId: haulingWing.haulingOriginSystemId ?? homeSystemId,
+              toSystemId: homeSystemId,
+              arrivedAt: nowMs,
+            },
+          }
+        : wing,
+    );
+    return {
+      ...state,
+      systems: {
+        ...state.systems,
+        fleet: {
+          ...state.systems.fleet,
+          fleets: { ...state.systems.fleet.fleets, [fleetId]: { ...fleet, wings: stagedWings } },
+        },
       },
-    },
-  };
+    };
+  }
+  if (hauledCargoUnits > 0 && offloadStartedAt !== null) {
+    const offloadDurationMs = getWingCargoTransferSeconds(state, fleet, haulingWing, hauledCargoUnits) * 1000;
+    const transferStep = applyCargoTransferStep(
+      haulingWing.cargoHold ?? {},
+      state.resources,
+      offloadStartedAt,
+      offloadDurationMs,
+      state.lastUpdatedAt,
+      nowMs,
+    );
+
+    const progressedWings = fleet.wings.map(wing =>
+      wing.id === haulingWing.id
+        ? {
+            ...wing,
+            cargoHold: transferStep.nextCargoHold,
+            hqOffloadStartedAt: transferStep.completed ? null : offloadStartedAt,
+          }
+        : wing,
+    );
+    const progressedState = {
+      ...state,
+      resources: transferStep.nextResources,
+      systems: {
+        ...state.systems,
+        fleet: {
+          ...state.systems.fleet,
+          fleets: { ...state.systems.fleet.fleets, [fleetId]: { ...fleet, wings: progressedWings } },
+        },
+      },
+    };
+
+    if (!transferStep.completed) return progressedState;
+    let s = progressedState;
+    const currentFleet = s.systems.fleet.fleets[fleetId];
+
+    // Issue return FleetOrders to each dispatched ship
+    const returnOrigin = haulingWing.haulingOriginSystemId;
+    const updatedFleet = s.systems.fleet.fleets[fleetId];
+    const galaxy = generateGalaxy(s.galaxy.seed);
+    const jumpRange = updatedFleet.maxJumpRangeLY > 0 ? updatedFleet.maxJumpRangeLY : 10;
+    const refreshedHaulingWing = updatedFleet.wings.find(wing => wing.id === wingId && wing.type === 'hauling') ?? haulingWing;
+    const preferredSecurityFilters: RouteSecurityFilter[] = hasActiveEscortWing(updatedFleet, refreshedHaulingWing)
+      ? ['shortest', 'avoid-null', 'safest']
+      : ['safest', 'avoid-null', 'shortest'];
+    let newShips = { ...s.systems.fleet.ships };
+    for (const sid of dispatchedIds) {
+      const ship = newShips[sid];
+      if (!ship || ship.systemId === returnOrigin) continue;
+      const routeResult = findHaulingWingRoute(galaxy, homeSystemId, returnOrigin, jumpRange, preferredSecurityFilters);
+      if (routeResult) {
+        const { route, filter } = routeResult;
+        const order: FleetOrder = {
+          destinationSystemId: returnOrigin,
+          route: route.path,
+          currentLeg: 0,
+          securityFilter: filter,
+          pauseOnArrival: false,
+          legDepartedAt: Date.now(),
+        };
+        newShips = {
+          ...newShips,
+          [sid]: {
+            ...ship,
+            fleetOrder: {
+              ...order,
+              legDurationSeconds: getShipLegDurationSeconds(s, updatedFleet, ship, route.path, 0, galaxy),
+            },
+            activity: 'transport',
+          },
+        };
+      }
+    }
+
+    return { ...s, systems: { ...s.systems, fleet: { ...s.systems.fleet, ships: newShips } } };
+  }
+
+  let s = state;
+  const currentFleet = s.systems.fleet.fleets[fleetId];
 
   // Issue return FleetOrders to each dispatched ship
   const returnOrigin = haulingWing.haulingOriginSystemId;
@@ -423,7 +611,13 @@ export function processWingReturn(
 
   const updatedWings = fleet.wings.map(w =>
     w.id === haulingWing.id
-      ? { ...w, isDispatched: false, haulingOriginSystemId: null }
+      ? {
+          ...w,
+          isDispatched: false,
+          haulingOriginSystemId: null,
+          hqOffloadStartedAt: null,
+          recentTransitArrival: null,
+        }
       : w,
   );
 

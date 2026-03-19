@@ -54,6 +54,7 @@ export const COMMANDER_SKILL_DEFINITIONS: Record<string, CommanderSkillDefinitio
     effectPerLevel: [
       { key: 'commander-cargo-capacity', value: 0.08 }, // +8% per level → max +40%
       { key: 'haul-speed',               value: 0.05 }, // +5% haul speed per level → max +25%
+      { key: 'cargo-transfer-speed',     value: 0.04 }, // +4% cargo transfer speed per level → max +20%
       { key: 'warp-speed',              value: 0.02 }, // +2% warp speed per level → max +10%
     ],
     milestones: { 3: 'fast-haul' },
@@ -86,6 +87,7 @@ export const COMMANDER_BONUS_LABELS: Record<string, string> = {
   'fleet-tank':              '🛡 Fleet Tank',
   'commander-cargo-capacity': '📦 Cargo Cap',
   'haul-speed':              '🚀 Haul Speed',
+  'cargo-transfer-speed':    '📤 Cargo Transfer',
   'warp-speed':              '🌀 Warp Speed',
   'on-site-refining-yield':  '♻ On-Site Refining',
   'scan-speed':              '◉ Scan Speed',

@@ -17,7 +17,7 @@ import { getBeltsForSystem, getBeltRichnessForSystem } from '@/game/systems/mini
 import { ORE_BELTS } from '@/game/systems/mining/mining.config';
 import { RESOURCE_REGISTRY } from '@/game/resources/resourceRegistry';
 import { getOutpostInSystem, getStationInSystem } from '@/game/systems/factions/faction.logic';
-import { getOperationalFleetShipIds } from '@/game/systems/fleet/wings.logic';
+import { getOperationalFleetShipIds, getWingCargoUsed, getWingCargoTransferSeconds, getWingDispatchShipIds } from '@/game/systems/fleet/wings.logic';
 import { NavTag } from '@/ui/components/NavTag';
 import { HULL_DEFINITIONS } from '@/game/systems/fleet/fleet.config';
 import { GameTooltip } from '@/ui/components/GameTooltip';
@@ -36,6 +36,23 @@ const MOON_ORBIT_R = 28;
 const MOON_SPEED_MULT = 3.5;
 /** Parking orbit ring for fleets, as fraction of available orrery radius. */
 const FLEET_PARKING_FRAC = 0.28;
+
+interface SystemConvoyContact {
+  id: string;
+  label: string;
+  fleetId: string;
+  shipCount: number;
+  colorIndex: number;
+  fromSystemId: string;
+  toSystemId: string;
+  legDepartedAt: number;
+  legDurationSeconds: number;
+  hqOffloadStartedAt: number | null;
+  hqOffloadCargoUnits: number;
+  cargoTransferDurationSeconds: number;
+  recentArrivalFromSystemId: string | null;
+  recentArrivalAt: number | null;
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -1400,10 +1417,82 @@ function SystemPanelInner() {
           ? `Need ${stationDef.registrationCost.toLocaleString()} credits.`
           : `Register for ${stationDef.registrationCost.toLocaleString()} credits.`;
 
-  // Local fleets in this system
-  const localFleets = Object.values(state.systems.fleet.fleets).filter(
-    f => f.currentSystemId === system.id && f.shipIds.length > 0,
+  const allFleets = Object.values(state.systems.fleet.fleets);
+  const fleetColorIndexById = useMemo(
+    () => Object.fromEntries(allFleets.map((fleet, index) => [fleet.id, index])),
+    [allFleets],
   );
+  // Local fleets in this system
+  const localFleets = allFleets.filter(
+    fleet => fleet.currentSystemId === system.id && fleet.shipIds.length > 0,
+  );
+  const sceneFleets = useMemo(
+    () => localFleets,
+    [localFleets],
+  );
+  const convoyContacts = useMemo<SystemConvoyContact[]>(() => (
+    allFleets.flatMap(fleet => {
+      const colorIndex = fleetColorIndexById[fleet.id] ?? 0;
+      const fleetContacts: SystemConvoyContact[] = [];
+      (fleet.wings ?? []).forEach(wing => {
+        if (!wing.isDispatched || wing.type !== 'hauling') return [];
+        const dispatchedShipIds = getWingDispatchShipIds(fleet, wing);
+        const dispatchedShips = dispatchedShipIds
+          .map(shipId => state.systems.fleet.ships[shipId])
+          .filter(Boolean);
+        if (dispatchedShips.length === 0) return;
+
+        const representativeOrder = dispatchedShips.find(ship => ship.fleetOrder)?.fleetOrder ?? null;
+        if (representativeOrder && representativeOrder.currentLeg < representativeOrder.route.length - 1) {
+          const fromSystemId = representativeOrder.route[representativeOrder.currentLeg] ?? dispatchedShips[0].systemId;
+          const toSystemId = representativeOrder.route[representativeOrder.currentLeg + 1] ?? representativeOrder.destinationSystemId;
+          if (fromSystemId !== system.id) return;
+          fleetContacts.push({
+            id: wing.id,
+            label: wing.name,
+            fleetId: fleet.id,
+            shipCount: dispatchedShipIds.length,
+            colorIndex,
+            fromSystemId,
+            toSystemId,
+            legDepartedAt: representativeOrder.legDepartedAt,
+            legDurationSeconds: representativeOrder.legDurationSeconds ?? 1,
+            hqOffloadStartedAt: null,
+            hqOffloadCargoUnits: 0,
+            cargoTransferDurationSeconds: 0,
+            recentArrivalFromSystemId: null,
+            recentArrivalAt: null,
+          });
+          return;
+        }
+
+        const homeSystemId = state.systems.factions.homeStationSystemId;
+        if (!homeSystemId || homeSystemId !== system.id) return;
+        if (!wing.hqOffloadStartedAt || getWingCargoUsed(wing) <= 0) return;
+        fleetContacts.push({
+          id: wing.id,
+          label: wing.name,
+          fleetId: fleet.id,
+          shipCount: dispatchedShipIds.length,
+          colorIndex,
+          fromSystemId: homeSystemId,
+          toSystemId: homeSystemId,
+          legDepartedAt: wing.hqOffloadStartedAt,
+          legDurationSeconds: 0,
+          hqOffloadStartedAt: wing.hqOffloadStartedAt,
+          hqOffloadCargoUnits: getWingCargoUsed(wing),
+          cargoTransferDurationSeconds: getWingCargoTransferSeconds(state, fleet, wing),
+          recentArrivalFromSystemId: wing.recentTransitArrival?.toSystemId === homeSystemId
+            ? wing.recentTransitArrival.fromSystemId
+            : null,
+          recentArrivalAt: wing.recentTransitArrival?.toSystemId === homeSystemId
+            ? wing.recentTransitArrival.arrivedAt
+            : null,
+        });
+      });
+      return fleetContacts;
+    })
+  ), [allFleets, fleetColorIndexById, state.systems.factions.homeStationSystemId, state.systems.fleet.ships, system.id]);
   const canDeployPosHere = !inWarp && !outpostDef && posCoreCount > 0 && localFleets.length > 0;
   const deployPosTitle = inWarp
     ? 'You cannot anchor an outpost while in warp.'
@@ -1787,7 +1876,9 @@ function SystemPanelInner() {
             system={system}
             selectedBodyId={selectedBodyId}
             pinnedFleetId={pinnedFleetId}
-            fleets={localFleets}
+            fleets={sceneFleets}
+            fleetColorIndexById={fleetColorIndexById}
+            convoyContacts={convoyContacts}
             miningLinks={miningLinks}
             structures={structureMarkers}
             onSelectBody={id => {

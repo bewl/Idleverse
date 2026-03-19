@@ -301,6 +301,7 @@ export function issueFleetGroupOrder(
             ...fleet,
             maxJumpRangeLY: jumpRange,
             fleetOrder: order,
+            recentTransitArrival: null,
           },
         },
       },
@@ -437,6 +438,13 @@ export function advanceFleetOrders(
               ...fleet,
               currentSystemId: advancedOrder.currentSystemId,
               fleetOrder: advancedOrder.nextOrder,
+              recentTransitArrival: advancedOrder.arrived
+                ? {
+                    fromSystemId: order.route[order.route.length - 2] ?? fleet.currentSystemId,
+                    toSystemId: advancedOrder.currentSystemId,
+                    arrivedAt: nowMs,
+                  }
+                : fleet.recentTransitArrival ?? null,
             },
           },
         },

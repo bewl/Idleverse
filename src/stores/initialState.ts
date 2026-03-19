@@ -195,6 +195,8 @@ export function createInitialState(): GameState {
             combatOrder: null,
             isScanning: false,
             cargoHold: {},
+            hqOffloadStartedAt: null,
+            recentTransitArrival: null,
             commanderId: null,
             wings: [{
               id: 'wing-starter-mining',
@@ -206,6 +208,8 @@ export function createInitialState(): GameState {
               escortWingId: null,
               isDispatched: false,
               haulingOriginSystemId: null,
+              hqOffloadStartedAt: null,
+              recentTransitArrival: null,
               lastEscortCombatAt: 0,
             }],
           },
