@@ -10,6 +10,17 @@ import { SKILL_DEFINITIONS } from '@/game/systems/skills/skills.config';
 import { formatTrainingEta } from '@/game/systems/skills/skills.logic';
 import { generateGalaxy, getSystemBeltIds, getSystemById, systemDistance } from '@/game/galaxy/galaxy.gen';
 
+export const TUTORIAL_ENABLED = false;
+
+function createDisabledTutorialState(): TutorialState {
+  return {
+    currentStepId: null,
+    completedStepIds: [],
+    skippedAt: Date.now(),
+    completedAt: null,
+  };
+}
+
 export interface TutorialFleetTravelContext {
   starterFleetId: string | null;
   targetSystemId: string | null;
@@ -223,6 +234,10 @@ function getStarterFleetTravelStatus(state: GameState, context: TutorialFleetTra
 }
 
 export function createInitialTutorialState(): TutorialState {
+  if (!TUTORIAL_ENABLED) {
+    return createDisabledTutorialState();
+  }
+
   return {
     currentStepId: TUTORIAL_STEP_ORDER[0],
     completedStepIds: [],
@@ -449,11 +464,15 @@ export function skipTutorialState(state: GameState): TutorialState {
 }
 
 export function restartTutorialState(): TutorialState {
+  if (!TUTORIAL_ENABLED) {
+    return createDisabledTutorialState();
+  }
+
   return createInitialTutorialState();
 }
 
 export function isTutorialActive(tutorial: TutorialState): boolean {
-  return !tutorial.skippedAt && !tutorial.completedAt && tutorial.currentStepId !== null;
+  return TUTORIAL_ENABLED && !tutorial.skippedAt && !tutorial.completedAt && tutorial.currentStepId !== null;
 }
 
 export function getTutorialProgressSummary(state: GameState) {

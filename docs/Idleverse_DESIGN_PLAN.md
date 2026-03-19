@@ -90,6 +90,7 @@ Shift the application toward a mobile-first layout model without throwing away t
 
 - Add a shared viewport and input-capability hook for UI layout decisions.
 - Refactor Galaxy Map so narrow or coarse-pointer layouts use full-screen map presentation with slide-up drawers instead of fixed left and right rails.
+- Refactor System Panel so compact or coarse-pointer layouts keep the system scene primary while moving inspection detail into a bottom sheet and reflowing anomaly controls for narrow widths.
 - Preserve the current desktop information density and overall visual direction as much as possible.
 - Use tap-driven intel on touch-oriented layouts instead of relying on hover-only discovery.
 - Explicitly out of scope for this first rollout slice: a whole-app panel refactor in one pass, redesigning desktop visuals, or changing underlying galaxy, fleet, or routing logic.
@@ -98,7 +99,8 @@ Shift the application toward a mobile-first layout model without throwing away t
 
 1. Add shared viewport primitives in the UI layer so responsive branching does not depend on ad hoc `window.innerWidth` checks scattered across panels.
 2. Convert Galaxy Map into a responsive shell with desktop rails on large viewports and slide-up drawers for filters and intel/route on phone and tablet layouts.
-3. Reuse the Galaxy Map patterns across the rest of the application after the drawer, touch-target, and compact-shell behavior is validated.
+3. Apply the same responsive shell rules to System Panel so the orrery stays scene-first on compact layouts, body and fleet inspection moves into a drawer, and anomaly actions remain touch-safe without altering desktop density.
+4. Reuse the validated Galaxy Map and System Panel patterns across the rest of the application after the drawer, touch-target, and compact-shell behavior is proven in both canvas-heavy panels.
 
 ## Risks / Open Questions
 
@@ -110,9 +112,13 @@ Shift the application toward a mobile-first layout model without throwing away t
 
 - Phone and tablet are equally important targets.
 - Galaxy Map stays map-first on compact layouts.
+- System Panel stays scene-first on compact layouts.
 - Filters and intel/route move into slide-up drawers on touch-oriented or narrow viewports.
+- System inspection detail moves into a slide-up drawer on touch-oriented or narrow viewports, while the desktop right rail remains in place.
 - Tap-to-peek replaces hover-only intel on touch-oriented layouts.
 - Touch layouts must retain direct map manipulation: one-finger drag orbits the map and two-finger pinch/pan handles zoom plus camera translation.
+- The System scene mirrors the Galaxy Map touch model on compact layouts: one-finger drag orbits the scene and two-finger pinch/pan handles zoom plus camera translation.
+- The System scene should scale rendered object mass with zoom so orbit spacing and visible body or belt size stay visually coherent when the camera pulls back.
 - Desktop visuals should remain close to the current implementation.
 
 ## Files Likely Affected
@@ -120,6 +126,7 @@ Shift the application toward a mobile-first layout model without throwing away t
 - `src/ui/hooks/useResponsiveViewport.ts`
 - `src/ui/layouts/GameLayout.tsx`
 - `src/ui/panels/StarMapPanel.tsx`
+- `src/ui/panels/SystemPanel.tsx`
 - `src/index.css`
 - `docs/Idleverse_AI_Architecture.md`
 - `docs/Idleverse_DESIGN_PLAN.md`
@@ -1831,6 +1838,8 @@ Add a player-facing command inbox that preserves important gameplay events after
 > **Status:** Active
 > **Last updated:** March 2026
 > **Depends on:** Overview guidance mode, top-level shell in `GameLayout`, save/load migration, focus-target navigation
+
+Temporary rollout note: the underlying onboarding system remains implemented, but the live tour is currently gated off by a feature flag so new or restarted saves do not receive the tutorial popup while onboarding copy and flow are being revised.
 
 ## Goal
 

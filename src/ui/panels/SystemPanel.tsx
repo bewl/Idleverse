@@ -8,7 +8,7 @@
  *  • A warp-in-progress banner blocks mining toggle interaction
  */
 
-import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import { useState, useMemo, useEffect, useRef, useCallback, type ReactNode } from 'react';
 import { useGameStore } from '@/stores/gameStore';
 import { useUiStore } from '@/stores/uiStore';
 import { getSystemById } from '@/game/galaxy/galaxy.gen';
@@ -23,6 +23,7 @@ import { HULL_DEFINITIONS } from '@/game/systems/fleet/fleet.config';
 import { GameTooltip } from '@/ui/components/GameTooltip';
 import { GameDropdown, type DropdownOption } from '@/ui/components/GameDropdown';
 import { SKILL_DEFINITIONS } from '@/game/systems/skills/skills.config';
+import { useResponsiveViewport } from '@/ui/hooks/useResponsiveViewport';
 import { SystemSceneCanvas, type SystemSceneHoverTarget } from '@/ui/panels/SystemSceneCanvas';
 import type { CelestialBody } from '@/types/galaxy.types';
 import type { Anomaly, AnomalyType, PlayerFleet } from '@/types/game.types';
@@ -694,10 +695,12 @@ function SceneIntelPill({
   label,
   value,
   tone = 'slate',
+  compact = false,
 }: {
   label: string;
   value: string;
   tone?: 'cyan' | 'violet' | 'amber' | 'emerald' | 'slate';
+  compact?: boolean;
 }) {
   const toneStyles =
     tone === 'cyan'
@@ -712,16 +715,82 @@ function SceneIntelPill({
 
   return (
     <div style={{
-      padding: '6px 8px',
-      borderRadius: 999,
-      display: 'inline-flex',
-      alignItems: 'center',
-      gap: 7,
+      padding: compact ? '6px 8px' : '6px 8px',
+      borderRadius: compact ? 10 : 999,
+      display: 'flex',
+      flexDirection: compact ? 'column' : 'row',
+      alignItems: compact ? 'flex-start' : 'center',
+      gap: compact ? 2 : 7,
+      width: compact ? 'auto' : 'auto',
+      maxWidth: compact ? 132 : undefined,
+      minWidth: 0,
       backdropFilter: 'blur(10px)',
       ...toneStyles,
     }}>
-      <span style={{ fontSize: 8, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.1em' }}>{label}</span>
-      <span style={{ fontSize: 10, fontWeight: 700, fontFamily: 'monospace' }}>{value}</span>
+      <span style={{ fontSize: compact ? 7 : 8, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.1em', whiteSpace: compact ? 'normal' : 'nowrap', lineHeight: 1.15 }}>{label}</span>
+      <span style={{ fontSize: compact ? 9 : 10, fontWeight: 700, fontFamily: 'monospace', whiteSpace: compact ? 'normal' : 'nowrap', overflowWrap: 'anywhere', lineHeight: 1.15 }}>{value}</span>
+    </div>
+  );
+}
+
+function DrawerSheet({
+  title,
+  eyebrow,
+  open,
+  onClose,
+  children,
+}: {
+  title: string;
+  eyebrow?: string;
+  open: boolean;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  if (!open) return null;
+
+  return (
+    <div style={{ position: 'absolute', inset: 0, zIndex: 24 }}>
+      <button
+        type="button"
+        aria-label={`Close ${title}`}
+        className="starmap-sheet-backdrop"
+        onClick={onClose}
+      />
+      <div className="starmap-sheet">
+        <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 8 }}>
+          <span className="starmap-sheet-handle" />
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '8px 14px 10px', borderBottom: '1px solid rgba(22,30,52,0.7)' }}>
+          <div style={{ minWidth: 0 }}>
+            {eyebrow && (
+              <div style={{ fontSize: 8, color: '#475569', letterSpacing: '0.14em', textTransform: 'uppercase', marginBottom: 3 }}>
+                {eyebrow}
+              </div>
+            )}
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#e2e8f0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {title}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            style={{
+              padding: '4px 8px',
+              borderRadius: 6,
+              border: '1px solid rgba(71,85,105,0.28)',
+              background: 'rgba(6,9,20,0.45)',
+              color: '#94a3b8',
+              fontSize: 9,
+              cursor: 'pointer',
+            }}
+          >
+            Close
+          </button>
+        </div>
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+          {children}
+        </div>
+      </div>
     </div>
   );
 }
@@ -1070,11 +1139,13 @@ function AnomalyCard({
   canLootData,
   canLootRelic,
   fleetIdInSystem,
+  compact = false,
 }: {
   anomaly: Anomaly;
   canLootData: boolean;
   canLootRelic: boolean;
   fleetIdInSystem: string | null;
+  compact?: boolean;
 }) {
   const lootSite        = useGameStore(s => s.lootSite);
   const activateOrePocket = useGameStore(s => s.activateOrePocket);
@@ -1139,12 +1210,12 @@ function AnomalyCard({
 
       {/* Action buttons — only when fleet is present */}
       {anomaly.revealed && !anomaly.depleted && fleetIdInSystem && (
-        <div style={{ display: 'flex', gap: 5, marginTop: 2 }}>
+        <div style={{ display: 'flex', gap: 5, marginTop: 2, flexDirection: compact ? 'column' : 'row' }}>
           {canActivate && (
             <button
               onClick={() => activateOrePocket(fleetIdInSystem, anomaly.id)}
               style={{
-                flex: 1, padding: '3px 0', borderRadius: 3, cursor: 'pointer', fontSize: 8,
+                flex: 1, padding: compact ? '7px 0' : '3px 0', borderRadius: 3, cursor: 'pointer', fontSize: compact ? 9 : 8,
                 border: '1px solid rgba(34,211,238,0.4)', color: '#22d3ee',
                 background: 'rgba(8,51,68,0.25)',
               }}
@@ -1157,7 +1228,7 @@ function AnomalyCard({
               onClick={() => canLoot ? lootSite(fleetIdInSystem, anomaly.id) : undefined}
               disabled={!canLoot}
               style={{
-                flex: 1, padding: '3px 0', borderRadius: 3, cursor: canLoot ? 'pointer' : 'default', fontSize: 8,
+                flex: 1, padding: compact ? '7px 0' : '3px 0', borderRadius: 3, cursor: canLoot ? 'pointer' : 'default', fontSize: compact ? 9 : 8,
                 border: canLoot ? '1px solid rgba(129,140,248,0.4)' : '1px solid rgba(55,65,81,0.5)',
                 color: canLoot ? '#818cf8' : '#374151',
                 background: canLoot ? 'rgba(29,30,80,0.25)' : 'transparent',
@@ -1172,7 +1243,7 @@ function AnomalyCard({
   );
 }
 
-function AnomaliesTab({ systemId }: { systemId: string }) {
+function AnomaliesTab({ systemId, compact = false }: { systemId: string; compact?: boolean }) {
   const state           = useGameStore(s => s.state);
   const setFleetScanning = useGameStore(s => s.setFleetScanning);
 
@@ -1193,7 +1264,7 @@ function AnomaliesTab({ systemId }: { systemId: string }) {
       {/* Fleet scanning controls */}
       {localFleets.length > 0 && (
         <div style={{
-          padding: '8px 12px',
+          padding: compact ? '10px 12px' : '8px 12px',
           borderBottom: '1px solid rgba(22,30,52,0.6)',
           flexShrink: 0,
         }}>
@@ -1204,7 +1275,7 @@ function AnomaliesTab({ systemId }: { systemId: string }) {
             {localFleets.map(fleet => (
               <div key={fleet.id} style={{
                 display: 'flex', alignItems: 'center', gap: 8,
-                padding: '5px 8px', borderRadius: 4,
+                padding: compact ? '8px 10px' : '5px 8px', borderRadius: 6,
                 border: fleet.isScanning ? '1px solid rgba(34,211,238,0.3)' : '1px solid rgba(22,30,52,0.5)',
                 background: fleet.isScanning ? 'rgba(8,51,68,0.2)' : 'rgba(6,9,20,0.3)',
                 cursor: 'pointer',
@@ -1232,7 +1303,7 @@ function AnomaliesTab({ systemId }: { systemId: string }) {
       )}
 
       {/* Anomaly list */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div style={{ flex: 1, overflowY: 'auto', padding: compact ? '12px' : '10px 12px', display: 'flex', flexDirection: 'column', gap: compact ? 8 : 6 }}>
         {!hasExploration ? (
           <div style={{
             padding: '16px 12px', fontSize: 9, color: '#334155',
@@ -1257,6 +1328,7 @@ function AnomaliesTab({ systemId }: { systemId: string }) {
               canLootData={canLootData}
               canLootRelic={canLootRelic}
               fleetIdInSystem={primaryFleetId}
+              compact={compact}
             />
           ))
         )}
@@ -1282,12 +1354,16 @@ function SystemPanelInner() {
   const clearFocus  = useUiStore(s => s.clearFocus);
   const savedPanelState = useUiStore(s => s.panelStates.system);
   const setPanelState = useUiStore(s => s.setPanelState);
+  const viewport = useResponsiveViewport();
+  const useDrawerPanels = viewport.systemUsesDrawerPanels;
 
   const [viewingSystemId, setViewingSystemId] = useState<string>(() => savedPanelState.viewingSystemId ?? galaxy.currentSystemId);
 
   // Fleet tooltip state (declared early so focusTarget effect can pin)
   const [pinnedFleetId, setPinnedFleetId] = useState<string | null>(null);
   const [sceneHover, setSceneHover] = useState<SystemSceneHoverTarget | null>(null);
+  const [showInspectorSheet, setShowInspectorSheet] = useState(false);
+  const previousDrawerModeRef = useRef(useDrawerPanels);
   const setFleetScanning = useGameStore(s => s.setFleetScanning);
 
   // Sync viewing system when player warps to a new system
@@ -1342,6 +1418,36 @@ function SystemPanelInner() {
   useEffect(() => {
     setPanelState('system', { viewingSystemId, selectedBodyId, activeTab });
   }, [viewingSystemId, selectedBodyId, activeTab, setPanelState]);
+
+  useEffect(() => {
+    if (!useDrawerPanels && !viewport.isCoarsePointer) return;
+    setSceneHover(null);
+  }, [useDrawerPanels, viewport.isCoarsePointer]);
+
+  useEffect(() => {
+    if (previousDrawerModeRef.current === useDrawerPanels) return;
+    previousDrawerModeRef.current = useDrawerPanels;
+
+    if (useDrawerPanels) {
+      setShowInspectorSheet(selectedBodyId !== null || pinnedFleetId !== null);
+      return;
+    }
+
+    setShowInspectorSheet(false);
+  }, [useDrawerPanels, selectedBodyId, pinnedFleetId]);
+
+  useEffect(() => {
+    if (!useDrawerPanels) return;
+
+    if (activeTab !== 'orrery') {
+      setShowInspectorSheet(false);
+      return;
+    }
+
+    if (selectedBodyId || pinnedFleetId) {
+      setShowInspectorSheet(true);
+    }
+  }, [useDrawerPanels, activeTab, selectedBodyId, pinnedFleetId]);
 
   const selectedBody = useMemo(
     () => system.bodies.find(b => b.id === selectedBodyId) ?? null,
@@ -1574,10 +1680,308 @@ function SystemPanelInner() {
       }),
     )
   ), [beltBodyIdByDepositId, localFleets, state.systems.fleet.ships, system.id]);
+  const sceneUsesHoverPreview = !useDrawerPanels && !viewport.isCoarsePointer;
+  const mobileInspectorTitle = selectedBody ? selectedBody.name : pinnedFleet ? pinnedFleet.name : system.name;
+  const mobileInspectorContent = (
+    <div style={{ padding: '12px 12px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{
+        padding: '10px 12px',
+        borderRadius: 8,
+        border: '1px solid rgba(22,30,52,0.7)',
+        background: 'linear-gradient(180deg, rgba(7,12,26,0.88), rgba(4,7,18,0.92))',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 5,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+          <div style={{ fontSize: 8, color: '#475569', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Adaptive Inspector</div>
+          <span style={{
+            fontSize: 8,
+            padding: '2px 6px',
+            borderRadius: 999,
+            color: selectedBody ? '#fbbf24' : pinnedFleet ? '#67e8f9' : '#94a3b8',
+            border: `1px solid ${selectedBody ? 'rgba(251,191,36,0.25)' : pinnedFleet ? 'rgba(34,211,238,0.22)' : 'rgba(71,85,105,0.26)'}`,
+            background: selectedBody ? 'rgba(120,70,0,0.16)' : pinnedFleet ? 'rgba(8,51,68,0.18)' : 'rgba(15,23,42,0.35)',
+            letterSpacing: '0.08em',
+            textTransform: 'uppercase',
+            fontWeight: 700,
+          }}>
+            {selectedBody ? 'Selected Body' : pinnedFleet ? 'Pinned Fleet' : 'System Summary'}
+          </span>
+        </div>
+        <div style={{ fontSize: 12, fontWeight: 700, color: selectedBody ? '#fbbf24' : pinnedFleet ? '#67e8f9' : '#e2e8f0' }}>
+          {mobileInspectorTitle}
+        </div>
+        <div style={{ fontSize: 9, color: '#64748b', lineHeight: 1.5 }}>
+          {selectedBody
+            ? selectedBodyLabel
+            : pinnedFleet
+              ? `${pinnedFleet.shipIds.length} ship${pinnedFleet.shipIds.length !== 1 ? 's' : ''} in local command orbit`
+              : `${system.starType}-type star · ${system.bodies.length} bodies · ${systemBeltIds.length} ore belts`}
+        </div>
+      </div>
+
+      {selectedBody ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}>
+            <CommandMetric
+              label="Orbit"
+              value={selectedBody.type === 'moon' ? 'Satellite' : `${selectedBody.orbitRadius.toFixed(0)} AU`}
+              meta={selectedBody.type === 'asteroid-belt' ? `${selectedBody.beltIds.length} deposits` : 'orbital track'}
+              tone={selectedBody.type === 'asteroid-belt' ? 'amber' : 'cyan'}
+            />
+            <CommandMetric
+              label="Class"
+              value={bodyTypeLabel(selectedBody.type)}
+              meta={selectedBody.type === 'asteroid-belt' ? 'resource field' : 'celestial profile'}
+              tone={selectedBody.type === 'asteroid-belt' ? 'amber' : 'slate'}
+            />
+          </div>
+          <div style={{ borderTop: '1px solid rgba(22,30,52,0.5)', paddingTop: 10 }}>
+            <BodyDetail body={selectedBody} inWarp={inWarp} maxOrbit={maxOrbit} systemId={system.id} />
+          </div>
+        </div>
+      ) : pinnedFleet ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}>
+            <CommandMetric
+              label="Status"
+              value={pinnedFleet.isScanning ? 'Scanning' : 'Holding'}
+              meta="local task posture"
+              tone={pinnedFleet.isScanning ? 'violet' : 'cyan'}
+            />
+            <CommandMetric
+              label="Ships"
+              value={`${pinnedFleet.shipIds.length}`}
+              meta="assigned hulls"
+              tone={pinnedFleet.shipIds.length > 0 ? 'cyan' : 'slate'}
+            />
+          </div>
+          <div style={{
+            padding: '10px 12px',
+            borderRadius: 8,
+            border: '1px solid rgba(22,30,52,0.6)',
+            background: 'rgba(6,9,20,0.48)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 7,
+          }}>
+            <div style={{ fontSize: 8, color: '#475569', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Fleet Detail</div>
+            {pinnedFleet.shipIds.map(shipId => {
+              const ship = state.systems.fleet.ships[shipId];
+              if (!ship) return null;
+              const hull = HULL_DEFINITIONS[ship.shipDefinitionId];
+              return (
+                <div key={ship.id} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{
+                    width: 6,
+                    height: 6,
+                    borderRadius: '50%',
+                    flexShrink: 0,
+                    background: ship.hullDamage > 50 ? '#f87171' : ship.hullDamage > 20 ? '#fbbf24' : '#4ade80',
+                  }} />
+                  <span style={{ flex: 1, minWidth: 0, fontSize: 9, color: '#cbd5e1', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {ship.customName ?? hull?.name ?? ship.shipDefinitionId}
+                  </span>
+                  <span style={{ fontSize: 8, color: '#64748b', fontFamily: 'monospace' }}>
+                    {ship.hullDamage > 0 ? `${ship.hullDamage.toFixed(0)}% dmg` : 'ready'}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+          <div style={{ display: 'flex', gap: 6, flexDirection: 'column' }}>
+            <button
+              onClick={() => setFleetScanning(pinnedFleet.id, !pinnedFleet.isScanning)}
+              style={{
+                padding: '8px 0',
+                borderRadius: 6,
+                cursor: 'pointer',
+                fontSize: 9,
+                fontWeight: 700,
+                border: pinnedFleet.isScanning ? '1px solid rgba(248,113,113,0.4)' : '1px solid rgba(34,211,238,0.3)',
+                color: pinnedFleet.isScanning ? '#f87171' : '#22d3ee',
+                background: pinnedFleet.isScanning ? 'rgba(127,29,29,0.18)' : 'rgba(8,51,68,0.2)',
+              }}
+            >
+              {pinnedFleet.isScanning ? 'Stop Scan' : 'Begin Scan'}
+            </button>
+            <div style={{ display: 'flex', alignItems: 'center' }}>
+              <NavTag entityType="fleet" entityId={pinnedFleet.id} label="Open Fleet" />
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div style={{
+          padding: '10px 12px',
+          borderRadius: 8,
+          border: '1px solid rgba(22,30,52,0.6)',
+          background: 'rgba(6,9,20,0.48)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 8,
+        }}>
+          <div style={{ fontSize: 8, color: '#475569', letterSpacing: '0.1em', textTransform: 'uppercase' }}>System Brief</div>
+          <div style={{ fontSize: 10, color: '#cbd5e1', lineHeight: 1.5 }}>
+            Tap planets, belts, fleets, or structures to inspect them. Drag to orbit the scene and reopen this drawer anytime for mining, fleet, and directory detail.
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}>
+            <CommandMetric label="Security" value={secLabel(system.security)} meta="regional posture" tone={system.security === 'highsec' ? 'emerald' : system.security === 'lowsec' ? 'amber' : 'violet'} />
+            <CommandMetric label="Services" value={outpostDef ? 'Outpost' : stationDef ? 'Station' : 'Field'} meta={isDocked ? 'docked' : stationDef ? 'dockable' : 'remote ops'} tone={outpostDef || stationDef ? 'cyan' : 'slate'} />
+          </div>
+        </div>
+      )}
+
+      <div style={{
+        padding: '10px 12px',
+        borderRadius: 8,
+        border: '1px solid rgba(22,30,52,0.6)',
+        background: 'rgba(6,9,20,0.48)',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 6,
+      }}>
+        <div style={{ fontSize: 8, color: '#475569', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Celestial Directory</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+          {(() => {
+            const moonParent = new Map<string, string>();
+            system.bodies.forEach(body => {
+              const match = body.id.match(/^(body-\d+)-moon$/);
+              if (match) moonParent.set(body.id, match[1]);
+            });
+            const topLevel = system.bodies.filter(body => !moonParent.has(body.id));
+
+            const renderBodyRow = (body: CelestialBody, indent: boolean) => {
+              const isSel = body.id === selectedBodyId;
+              const isBelt = body.type === 'asteroid-belt';
+              const hasActiveBelts = isBelt && body.beltIds.some(id =>
+                localFleets.some(fleet =>
+                  (fleet.wings ?? []).some(wing =>
+                    wing.shipIds.some(shipId => {
+                      const ship = state.systems.fleet.ships[shipId];
+                      return ship?.activity === 'mining' && ship.assignedBeltId === id;
+                    }),
+                  ),
+                ),
+              );
+
+              return (
+                <div
+                  key={body.id}
+                  onClick={() => {
+                    setSelectedBodyId(prev => prev === body.id ? null : body.id);
+                    setPinnedFleetId(null);
+                  }}
+                  style={{
+                    paddingLeft: indent ? 18 : 8,
+                    paddingRight: 8,
+                    paddingTop: 6,
+                    paddingBottom: 6,
+                    borderRadius: 6,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 7,
+                    border: isSel ? '1px solid rgba(251,191,36,0.28)' : '1px solid transparent',
+                    background: isSel ? 'rgba(120,80,0,0.14)' : 'rgba(2,6,23,0.35)',
+                  }}
+                >
+                  {indent && <span style={{ fontSize: 8, color: '#334155', flexShrink: 0, marginRight: -3 }}>↳</span>}
+                  <span style={{
+                    width: indent ? 5 : 7,
+                    height: indent ? 5 : 7,
+                    borderRadius: isBelt ? 0 : '50%',
+                    background: body.color,
+                    border: isBelt ? `2px solid ${body.color}` : 'none',
+                    flexShrink: 0,
+                  }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: indent ? 8 : 9, color: isSel ? '#fbbf24' : '#cbd5e1', fontWeight: isSel ? 700 : 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {body.name}
+                    </div>
+                    <div style={{ fontSize: 8, color: '#475569' }}>{bodyTypeLabel(body.type)}</div>
+                  </div>
+                  {hasActiveBelts && <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#22d3ee', flexShrink: 0 }} />}
+                </div>
+              );
+            };
+
+            return topLevel.map(body => {
+              const moon = system.bodies.find(candidate => candidate.id === `${body.id}-moon`);
+              return (
+                <div key={body.id} style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                  {renderBodyRow(body, false)}
+                  {moon && renderBodyRow(moon, true)}
+                </div>
+              );
+            });
+          })()}
+        </div>
+      </div>
+
+      {localFleets.length > 0 && (
+        <div style={{
+          padding: '10px 12px',
+          borderRadius: 8,
+          border: '1px solid rgba(22,30,52,0.6)',
+          background: 'rgba(6,9,20,0.48)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 6,
+        }}>
+          <div style={{ fontSize: 8, color: '#475569', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Local Fleet Directory</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {localFleets.map(fleet => (
+              <button
+                key={fleet.id}
+                type="button"
+                onClick={() => {
+                  setPinnedFleetId(prev => prev === fleet.id ? null : fleet.id);
+                  setSelectedBodyId(null);
+                }}
+                style={{
+                  padding: '8px 10px',
+                  borderRadius: 6,
+                  border: pinnedFleetId === fleet.id ? '1px solid rgba(34,211,238,0.28)' : '1px solid rgba(22,30,52,0.6)',
+                  background: pinnedFleetId === fleet.id ? 'rgba(8,51,68,0.22)' : 'rgba(2,6,23,0.35)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  cursor: 'pointer',
+                  color: pinnedFleetId === fleet.id ? '#67e8f9' : '#cbd5e1',
+                }}
+              >
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: fleet.isScanning ? '#a78bfa' : '#22d3ee', flexShrink: 0 }} />
+                <span style={{ flex: 1, minWidth: 0, fontSize: 10, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{fleet.name}</span>
+                <span style={{ fontSize: 8, color: fleet.isScanning ? '#c4b5fd' : '#64748b', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                  {fleet.isScanning ? 'Scanning' : 'Holding'}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {systemBeltIds.length === 0 && (
+        <div style={{
+          padding: '8px 10px',
+          borderRadius: 6,
+          border: '1px solid rgba(239,68,68,0.18)',
+          background: 'rgba(127,29,29,0.08)',
+          fontSize: 9,
+          color: '#7f1d1d',
+          lineHeight: 1.45,
+        }}>
+          No asteroid belts detected in this system. Use the star map to browse for a richer extraction target.
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <div style={{
-      display: 'flex', flexDirection: 'column', height: '100%', minHeight: 480,
+      position: 'relative',
+      display: 'flex', flexDirection: 'column', height: '100%', minHeight: useDrawerPanels ? 0 : 480,
       background: 'rgba(2, 4, 14, 0.97)',
       // browsing banner injects at top
       border: '1px solid rgba(22,30,52,0.8)',
@@ -1588,7 +1992,9 @@ function SystemPanelInner() {
       {isBrowsing && (
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: '5px 16px', flexShrink: 0,
+          flexWrap: useDrawerPanels ? 'wrap' : 'nowrap',
+          gap: 8,
+          padding: useDrawerPanels ? '8px 12px' : '5px 16px', flexShrink: 0,
           background: 'rgba(251,191,36,0.08)', borderBottom: '1px solid rgba(251,191,36,0.2)',
         }}>
           <span style={{ fontSize: 10, color: '#fbbf24' }}>
@@ -1608,8 +2014,9 @@ function SystemPanelInner() {
       )}
       {/* ── Header ── */}
       <div style={{
-        padding: '10px 16px', borderBottom: '1px solid rgba(22,30,52,0.8)',
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0,
+        padding: useDrawerPanels ? '12px 12px 10px' : '10px 16px', borderBottom: '1px solid rgba(22,30,52,0.8)',
+        display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexShrink: 0,
+        flexWrap: useDrawerPanels ? 'wrap' : 'nowrap', gap: 10,
       }}>
         <div>
           <span style={{ fontSize: 13, fontWeight: 700, color: '#ffe47a', letterSpacing: '0.1em' }}>
@@ -1625,7 +2032,7 @@ function SystemPanelInner() {
             {secLabel(system.security)}
           </span>
         </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: useDrawerPanels ? 'flex-start' : 'flex-end' }}>
           <span style={{ fontSize: 9, color: '#334155' }}>
             {system.starType}-type · {system.bodies.length} bodies · {systemBeltIds.length} ore belts
           </span>
@@ -1760,7 +2167,8 @@ function SystemPanelInner() {
       {!hasHomeHq && (
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
-          padding: '6px 16px', flexShrink: 0,
+          flexWrap: useDrawerPanels ? 'wrap' : 'nowrap',
+          padding: useDrawerPanels ? '8px 12px' : '6px 16px', flexShrink: 0,
           background: 'rgba(120,70,0,0.12)', borderBottom: '1px solid rgba(251,191,36,0.18)',
         }}>
           <span style={{ fontSize: 10, color: '#fbbf24' }}>
@@ -1774,9 +2182,10 @@ function SystemPanelInner() {
 
       {outpostDef && (
         <div style={{
-          padding: '6px 16px', flexShrink: 0,
+          padding: useDrawerPanels ? '8px 12px' : '6px 16px', flexShrink: 0,
           background: 'rgba(8,51,68,0.12)', borderBottom: '1px solid rgba(34,211,238,0.14)',
           display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+          flexWrap: useDrawerPanels ? 'wrap' : 'nowrap',
         }}>
           <span style={{ fontSize: 10, color: '#67e8f9' }}>
             ⬢ {outpostDef.name} · Level {outpostDef.level} · +{Math.round(outpostDef.storageBonus * 100)}% local storage
@@ -1793,8 +2202,9 @@ function SystemPanelInner() {
         background: 'rgba(3,5,16,0.5)',
         justifyContent: 'space-between',
         alignItems: 'center',
+        flexWrap: useDrawerPanels ? 'wrap' : 'nowrap',
       }}>
-        <div style={{ display: 'flex' }}>
+        <div style={{ display: 'flex', flexWrap: useDrawerPanels ? 'wrap' : 'nowrap' }}>
           {(['orrery', 'anomalies'] as const).map(tab => {
             const isActive = activeTab === tab;
             return (
@@ -1826,7 +2236,7 @@ function SystemPanelInner() {
           })}
         </div>
         {activeTab === 'orrery' && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingRight: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: useDrawerPanels ? '0 12px 8px' : '0 12px 0 0', width: useDrawerPanels ? '100%' : undefined, flexWrap: 'wrap' }}>
             <span style={{ fontSize: 8, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Local Intel</span>
             <span style={{ fontSize: 9, color: activeFleetCount > 0 ? '#67e8f9' : '#64748b', fontFamily: 'monospace' }}>
               Fleets {activeFleetCount}
@@ -1844,9 +2254,10 @@ function SystemPanelInner() {
       {/* ── Warp banner ── */}
       {inWarp && warp && (
         <div style={{
-          padding: '7px 16px', background: 'rgba(30,10,60,0.6)',
+          padding: useDrawerPanels ? '8px 12px' : '7px 16px', background: 'rgba(30,10,60,0.6)',
           borderBottom: '1px solid rgba(168,85,247,0.25)',
           display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0,
+          flexWrap: useDrawerPanels ? 'wrap' : 'nowrap',
         }}>
           <span style={{ fontSize: 10, color: '#a855f7', fontWeight: 700 }}>⊛ In Warp</span>
           <div style={{ flex: 1, background: 'rgba(15,5,30,0.8)', borderRadius: 3, height: 4, overflow: 'hidden' }}>
@@ -1865,13 +2276,13 @@ function SystemPanelInner() {
 
       {/* ── Anomalies tab ── */}
       {activeTab === 'anomalies' && (
-        <AnomaliesTab systemId={system.id} />
+        <AnomaliesTab systemId={system.id} compact={useDrawerPanels} />
       )}
 
       {/* ── Orrery tab: orrery + detail ── */}
       {activeTab === 'orrery' && (
-      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-        <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+      <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+        <div style={{ flex: 1, minHeight: 0, position: 'relative', overflow: 'hidden' }}>
           <SystemSceneCanvas
             system={system}
             selectedBodyId={selectedBodyId}
@@ -1884,43 +2295,59 @@ function SystemPanelInner() {
             onSelectBody={id => {
               setSelectedBodyId(prev => (id === null || prev === id) ? null : id);
               setPinnedFleetId(null);
+              if (useDrawerPanels && id !== null) {
+                setShowInspectorSheet(true);
+              }
             }}
             onFleetClick={fleetId => {
               setPinnedFleetId(prev => prev === fleetId ? null : fleetId);
               setSelectedBodyId(null);
+              if (useDrawerPanels) {
+                setShowInspectorSheet(true);
+              }
             }}
-            onHoverChange={target => setSceneHover(target)}
+            onHoverChange={target => {
+              if (!sceneUsesHoverPreview) return;
+              setSceneHover(target);
+            }}
           />
 
           <div style={{
             position: 'absolute',
-            right: 14,
+            left: undefined,
+            right: useDrawerPanels ? 12 : 14,
             top: 14,
             display: 'flex',
-            flexWrap: 'wrap',
+            flexDirection: useDrawerPanels ? 'column' : 'row',
+            flexWrap: useDrawerPanels ? 'nowrap' : 'wrap',
             justifyContent: 'flex-end',
-            gap: 8,
-            maxWidth: 'min(46vw, 460px)',
+            alignItems: useDrawerPanels ? 'flex-end' : 'flex-end',
+            gap: useDrawerPanels ? 6 : 8,
+            width: useDrawerPanels ? 'min(132px, calc(45vw - 12px))' : undefined,
+            maxWidth: useDrawerPanels ? 'min(132px, calc(45vw - 12px))' : 'min(46vw, 460px)',
             pointerEvents: 'none',
           }}>
             <SceneIntelPill
               label="Fleet Presence"
               value={scanningFleetCount > 0 ? `${activeFleetCount} · ${scanningFleetCount} scanning` : `${activeFleetCount} local`}
               tone={activeFleetCount > 0 ? 'cyan' : 'slate'}
+              compact={useDrawerPanels}
             />
             <SceneIntelPill
               label="Belts"
               value={systemBeltIds.length > 0 ? `${activeBeltCount}/${systemBeltIds.length} active` : 'No belts'}
               tone={activeBeltCount > 0 ? 'amber' : 'slate'}
+              compact={useDrawerPanels}
             />
             <SceneIntelPill
               label="Corp Presence"
               value={isOutpostHq ? 'Outpost HQ' : isHqSystem ? 'Station HQ' : outpostDef ? 'Outpost' : stationDef ? 'Station' : 'Field Ops'}
               tone={isOutpostHq || isHqSystem ? 'emerald' : stationDef || outpostDef ? 'cyan' : 'slate'}
+              compact={useDrawerPanels}
             />
           </div>
 
-          {localFleets.length > 0 && (
+          {!useDrawerPanels && localFleets.length > 0 && (
             <div style={{
               position: 'absolute',
               left: 14,
@@ -1948,7 +2375,7 @@ function SystemPanelInner() {
             </div>
           )}
 
-          {sceneHover && !pinnedFleetId && (
+          {sceneUsesHoverPreview && sceneHover && !pinnedFleetId && (
             <div style={{
               position: 'absolute',
               left: sceneHover.x + 18,
@@ -2006,8 +2433,45 @@ function SystemPanelInner() {
               )}
             </div>
           )}
+
+          {useDrawerPanels && (
+            <div style={{
+              position: 'absolute',
+              left: 12,
+              right: 12,
+              bottom: 12,
+              display: 'flex',
+              justifyContent: 'center',
+            }}>
+              <button
+                type="button"
+                onClick={() => setShowInspectorSheet(true)}
+                style={{
+                  minWidth: 'min(100%, 280px)',
+                  padding: '10px 14px',
+                  borderRadius: 999,
+                  border: '1px solid rgba(34,211,238,0.26)',
+                  background: 'rgba(2,6,23,0.72)',
+                  color: selectedBody ? '#fbbf24' : pinnedFleet ? '#67e8f9' : '#e2e8f0',
+                  backdropFilter: 'blur(10px)',
+                  boxShadow: '0 16px 26px rgba(2,6,23,0.28)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 10,
+                  cursor: 'pointer',
+                }}
+              >
+                <span style={{ fontSize: 8, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Inspector</span>
+                <span style={{ fontSize: 10, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {selectedBody ? selectedBody.name : pinnedFleet ? pinnedFleet.name : 'Open System Intel'}
+                </span>
+              </button>
+            </div>
+          )}
         </div>
 
+        {!useDrawerPanels && (
         <div style={{
           width: 292,
           borderLeft: '1px solid rgba(22,30,52,0.8)',
@@ -2319,7 +2783,19 @@ function SystemPanelInner() {
             </div>
           )}
         </div>
+        )}
       </div>
+      )}
+
+      {useDrawerPanels && activeTab === 'orrery' && (
+        <DrawerSheet
+          open={showInspectorSheet}
+          onClose={() => setShowInspectorSheet(false)}
+          eyebrow="System Intel"
+          title={mobileInspectorTitle}
+        >
+          {mobileInspectorContent}
+        </DrawerSheet>
       )}
     </div>
   );

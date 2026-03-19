@@ -115,6 +115,10 @@ function lerp(a: number, b: number, t: number) {
   return a + (b - a) * t;
 }
 
+function getProjectedVisualScale(pointScale: number, min: number, max: number) {
+  return clamp(pointScale / 12, min, max);
+}
+
 function colorToRgba(hex: string, alpha: number) {
   const normalized = hex.replace('#', '');
   const value = normalized.length === 3
@@ -395,6 +399,7 @@ function drawNebulaRingBelt(
   seedKey: string,
   color: string,
   intensity: number,
+  scale: number,
 ) {
   if (points.length < 3) return;
 
@@ -420,9 +425,9 @@ function drawNebulaRingBelt(
     const normalY = tangentUnitX;
 
     const sizeRoll = rand();
-    const majorSize = (sizeRoll > 0.86 ? 24 : sizeRoll > 0.58 ? 17 : 11) * (0.88 + rand() * 0.32) * intensity;
-    const offsetAcross = (rand() - 0.5) * 14;
-    const offsetAlong = (rand() - 0.5) * 14;
+    const majorSize = (sizeRoll > 0.86 ? 24 : sizeRoll > 0.58 ? 17 : 11) * (0.88 + rand() * 0.32) * intensity * scale;
+    const offsetAcross = (rand() - 0.5) * 14 * scale;
+    const offsetAlong = (rand() - 0.5) * 14 * scale;
     const majorX = baseX + normalX * offsetAcross + tangentUnitX * offsetAlong;
     const majorY = baseY + normalY * offsetAcross + tangentUnitY * offsetAlong;
     drawNebulaBlob(ctx, majorX, majorY, majorSize, color, 0.048 * intensity);
@@ -447,6 +452,7 @@ function drawBeltAsteroids(
   seedKey: string,
   color: string,
   intensity: number,
+  scale: number,
   hitCache: HitEntry[],
   beltId: string,
 ) {
@@ -468,11 +474,11 @@ function drawBeltAsteroids(
     const normalX = -tangentUnitY;
     const normalY = tangentUnitX;
 
-    const alongOffset = (rand() - 0.5) * 18;
-    const acrossOffset = (rand() - 0.5) * 15;
+    const alongOffset = (rand() - 0.5) * 18 * scale;
+    const acrossOffset = (rand() - 0.5) * 15 * scale;
     const asteroidX = point.sx + tangentUnitX * alongOffset + normalX * acrossOffset;
     const asteroidY = point.sy + tangentUnitY * alongOffset + normalY * acrossOffset;
-    const radius = (rand() > 0.9 ? 1.7 : rand() > 0.55 ? 1.2 : 0.82) * (0.86 + intensity * 0.1);
+    const radius = (rand() > 0.9 ? 1.7 : rand() > 0.55 ? 1.2 : 0.82) * (0.86 + intensity * 0.1) * scale;
 
     ctx.globalAlpha = 0.08 + rand() * 0.1;
     ctx.fillStyle = colorToRgba(color, 0.45);
@@ -518,6 +524,19 @@ export function SystemSceneCanvas({
   const hitCacheRef = useRef<HitEntry[]>([]);
   const camRef = useRef<CamState>({ ...SYSTEM_CAM_DEFAULT });
   const dragRef = useRef({ active: false, mode: 'orbit' as 'orbit' | 'pan', startX: 0, startY: 0 });
+  const pointerGesture = useRef<{
+    pointers: Map<number, { x: number; y: number }>;
+    lastCenter: { x: number; y: number } | null;
+    lastDistance: number | null;
+    moved: boolean;
+    lastTapPointerId: number | null;
+  }>({
+    pointers: new Map(),
+    lastCenter: null,
+    lastDistance: null,
+    moved: false,
+    lastTapPointerId: null,
+  });
   const camAnimRef = useRef<{ from: CamState; to: CamState; startTime: number; duration: number } | null>(null);
   const propsRef = useRef({ system, selectedBodyId, pinnedFleetId, fleets, fleetColorIndexById, convoyContacts, miningLinks, structures });
   propsRef.current = { system, selectedBodyId, pinnedFleetId, fleets, fleetColorIndexById, convoyContacts, miningLinks, structures };
@@ -619,6 +638,7 @@ export function SystemSceneCanvas({
         if (entry.isBelt) {
           const isActiveBelt = hoverKey === `body:${entry.body.id}` || selectedBodyId === entry.body.id;
           const projectedRibbon: Array<{ sx: number; sy: number }> = [];
+          let beltScale = 0.7;
           for (let sampleIndex = 0; sampleIndex < 72; sampleIndex += 1) {
             const angle = (sampleIndex / 72) * Math.PI * 2;
             const projected = project(
@@ -629,6 +649,7 @@ export function SystemSceneCanvas({
             if (!projected) continue;
             projectedRibbon.push({ sx: projected.sx, sy: projected.sy });
             newHitCache.push({ kind: 'body', id: entry.body.id, sx: projected.sx, sy: projected.sy, r: 12 });
+            beltScale = Math.max(beltScale, getProjectedVisualScale(projected.scale, 0.28, 1.22));
           }
 
           beltEntryById.set(entry.body.id, entry);
@@ -639,6 +660,7 @@ export function SystemSceneCanvas({
             `${system.id}-${entry.body.id}-nebula-ring`,
             entry.body.color,
             isActiveBelt ? 1.02 : 0.72,
+            beltScale,
           );
           drawBeltAsteroids(
             ctx,
@@ -646,6 +668,7 @@ export function SystemSceneCanvas({
             `${system.id}-${entry.body.id}-asteroids`,
             entry.body.color,
             isActiveBelt ? 1 : 0.9,
+            beltScale,
             newHitCache,
             entry.body.id,
           );
@@ -653,7 +676,7 @@ export function SystemSceneCanvas({
             ctx,
             projectedRibbon,
             colorToRgba(entry.body.color, isActiveBelt ? 0.2 : 0.1),
-            isActiveBelt ? 0.8 : 0.45,
+            (isActiveBelt ? 0.8 : 0.45) * beltScale,
             isActiveBelt ? 0.075 : 0.035,
           );
 
@@ -855,17 +878,20 @@ export function SystemSceneCanvas({
 
     const starPoint = project(0, 0, 0);
     if (starPoint) {
-      const starGlow = ctx.createRadialGradient(starPoint.sx, starPoint.sy, 0, starPoint.sx, starPoint.sy, 60);
+      const starScale = getProjectedVisualScale(starPoint.scale, 0.42, 1.35);
+      const starGlowRadius = Math.max(24, 60 * starScale);
+      const starCoreRadius = Math.max(5.5, (system.starSize / 1.6) * starScale);
+      const starGlow = ctx.createRadialGradient(starPoint.sx, starPoint.sy, 0, starPoint.sx, starPoint.sy, starGlowRadius);
       starGlow.addColorStop(0, `${system.starColor}dd`);
       starGlow.addColorStop(0.35, `${system.starColor}55`);
       starGlow.addColorStop(1, `${system.starColor}00`);
       ctx.fillStyle = starGlow;
       ctx.beginPath();
-      ctx.arc(starPoint.sx, starPoint.sy, 60, 0, Math.PI * 2);
+      ctx.arc(starPoint.sx, starPoint.sy, starGlowRadius, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = system.starColor;
       ctx.beginPath();
-      ctx.arc(starPoint.sx, starPoint.sy, Math.max(10, system.starSize / 1.6), 0, Math.PI * 2);
+      ctx.arc(starPoint.sx, starPoint.sy, starCoreRadius, 0, Math.PI * 2);
       ctx.fill();
     }
 
@@ -882,7 +908,7 @@ export function SystemSceneCanvas({
     projectedBodies.forEach(({ entry, point }) => {
       const isHovered = hoverKey === `body:${entry.body.id}`;
       const isSelected = selectedBodyId === entry.body.id;
-      const radius = entry.radius * clamp(point.scale / 12, 0.9, 1.35);
+      const radius = Math.max(2.2, entry.radius * getProjectedVisualScale(point.scale, 0.35, 1.55));
       const bodyGlow = ctx.createRadialGradient(point.sx, point.sy, 0, point.sx, point.sy, radius * 3.8);
       bodyGlow.addColorStop(0, `${entry.body.color}66`);
       bodyGlow.addColorStop(1, `${entry.body.color}00`);
@@ -927,15 +953,18 @@ export function SystemSceneCanvas({
       const point = project(Math.cos(angle) * 28, 8 + index * 3, Math.sin(angle) * 28);
       if (!point) return;
       const isHovered = hoverKey === `${structure.kind}:${structure.id}`;
+      const structureScale = getProjectedVisualScale(point.scale, 0.45, 1.2);
+      const structureSize = 5 * structureScale;
+      const structureRing = 7 * structureScale;
       ctx.save();
       ctx.translate(point.sx, point.sy);
       ctx.rotate(Math.PI / 4);
       ctx.fillStyle = `${structure.color}${isHovered ? '' : ''}`;
       ctx.globalAlpha = isHovered ? 0.95 : 0.7;
-      ctx.fillRect(-5, -5, 10, 10);
+      ctx.fillRect(-structureSize, -structureSize, structureSize * 2, structureSize * 2);
       ctx.strokeStyle = structure.color;
       ctx.lineWidth = 1.1;
-      ctx.strokeRect(-7, -7, 14, 14);
+      ctx.strokeRect(-structureRing, -structureRing, structureRing * 2, structureRing * 2);
       ctx.restore();
       if (isHovered) {
         ctx.font = '10px monospace';
@@ -950,15 +979,19 @@ export function SystemSceneCanvas({
     renderedFleetEntries.forEach((entry, index) => {
       const { fleet, sx, sy, fleetColor, markerAlpha, isPinned, isHovered, motion, trailPoint, interactive } = entry;
       const pulse = Math.sin(now / 320 + index) * 0.22 + 0.78;
+      const fleetScale = getProjectedVisualScale(project(Math.cos(hashId(fleet.id) + (fleetColorIndexById[fleet.id] ?? index) * 0.82) * SYSTEM_FLEET_ORBIT_RADIUS, 14 + ((fleetColorIndexById[fleet.id] ?? index) % 3) * 2.5, Math.sin(hashId(fleet.id) + (fleetColorIndexById[fleet.id] ?? index) * 0.82) * SYSTEM_FLEET_ORBIT_RADIUS)?.scale ?? 12, 0.45, 1.18);
+      const fleetGlowRadius = 18 * fleetScale;
+      const fleetScanRadius = (10 + Math.sin(now / 220 + index) * 1.4) * fleetScale;
+      const fleetPinRadius = 12 * fleetScale;
 
       ctx.save();
       ctx.globalAlpha = pulse * markerAlpha * (isPinned ? 1 : 0.88);
-      const glow = ctx.createRadialGradient(sx, sy, 0, sx, sy, 18);
+      const glow = ctx.createRadialGradient(sx, sy, 0, sx, sy, fleetGlowRadius);
       glow.addColorStop(0, colorToRgba(fleetColor, fleet.isScanning ? 0.54 : 0.34));
       glow.addColorStop(1, colorToRgba(fleetColor, 0));
       ctx.fillStyle = glow;
       ctx.beginPath();
-      ctx.arc(sx, sy, 18, 0, Math.PI * 2);
+      ctx.arc(sx, sy, fleetGlowRadius, 0, Math.PI * 2);
       ctx.fill();
 
       if (trailPoint && motion !== 'holding') {
@@ -979,7 +1012,7 @@ export function SystemSceneCanvas({
         ctx.strokeStyle = 'rgba(196,181,253,0.66)';
         ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.arc(sx, sy, 10 + Math.sin(now / 220 + index) * 1.4, 0, Math.PI * 2);
+        ctx.arc(sx, sy, fleetScanRadius, 0, Math.PI * 2);
         ctx.stroke();
       }
 
@@ -987,13 +1020,13 @@ export function SystemSceneCanvas({
         ctx.strokeStyle = '#fbbf24';
         ctx.lineWidth = 1.4;
         ctx.beginPath();
-        ctx.arc(sx, sy, 12, 0, Math.PI * 2);
+        ctx.arc(sx, sy, fleetPinRadius, 0, Math.PI * 2);
         ctx.stroke();
       }
 
       ctx.translate(sx, sy);
       ctx.rotate(Math.PI / 4);
-      const size = isPinned || isHovered ? 5.5 : 4.5;
+      const size = (isPinned || isHovered ? 5.5 : 4.5) * fleetScale;
       ctx.fillStyle = colorToRgba(fleetColor, (motion === 'arriving' ? 0.72 : 0.88) * markerAlpha);
       ctx.strokeStyle = motion === 'departing' || motion === 'arriving'
         ? colorToRgba(fleetColor, markerAlpha >= 0.95 ? 1 : Math.max(0.62, markerAlpha))
@@ -1033,6 +1066,7 @@ export function SystemSceneCanvas({
         Math.sin(warpAngle) * (SYSTEM_FLEET_WARP_RADIUS + 8),
       );
       if (!warpPoint) return;
+      const convoyScale = getProjectedVisualScale(Math.max(orbitPoint.scale, warpPoint.scale), 0.42, 1.12);
 
       let drawPoint = { sx: orbitPoint.sx, sy: orbitPoint.sy };
       let trailPoint: { sx: number; sy: number } | null = null;
@@ -1100,12 +1134,12 @@ export function SystemSceneCanvas({
 
       ctx.save();
       ctx.globalAlpha = alpha * (0.82 + Math.sin(now / 260 + index) * 0.08);
-      const glow = ctx.createRadialGradient(drawPoint.sx, drawPoint.sy, 0, drawPoint.sx, drawPoint.sy, offloading ? 16 : 14);
+      const glow = ctx.createRadialGradient(drawPoint.sx, drawPoint.sy, 0, drawPoint.sx, drawPoint.sy, (offloading ? 16 : 14) * convoyScale);
       glow.addColorStop(0, colorToRgba(convoyColor, offloading ? 0.58 : 0.36));
       glow.addColorStop(1, colorToRgba(convoyColor, 0));
       ctx.fillStyle = glow;
       ctx.beginPath();
-      ctx.arc(drawPoint.sx, drawPoint.sy, offloading ? 16 : 14, 0, Math.PI * 2);
+      ctx.arc(drawPoint.sx, drawPoint.sy, (offloading ? 16 : 14) * convoyScale, 0, Math.PI * 2);
       ctx.fill();
 
       if (trailPoint) {
@@ -1127,14 +1161,14 @@ export function SystemSceneCanvas({
         ctx.lineWidth = 1;
         ctx.setLineDash([2, 3]);
         ctx.beginPath();
-        ctx.arc(drawPoint.sx, drawPoint.sy, 10 + Math.sin(now / 180 + index) * 1.6, 0, Math.PI * 2);
+        ctx.arc(drawPoint.sx, drawPoint.sy, (10 + Math.sin(now / 180 + index) * 1.6) * convoyScale, 0, Math.PI * 2);
         ctx.stroke();
         ctx.setLineDash([]);
       }
 
       ctx.translate(drawPoint.sx, drawPoint.sy);
       ctx.rotate(Math.PI / 4);
-      const size = offloading ? 4.2 : 3.8;
+      const size = (offloading ? 4.2 : 3.8) * convoyScale;
       ctx.fillStyle = colorToRgba(convoyColor, offloading ? 0.64 : 0.84);
       ctx.strokeStyle = colorToRgba(convoyColor, 0.96);
       ctx.lineWidth = 0.9;
@@ -1179,6 +1213,39 @@ export function SystemSceneCanvas({
     return () => canvas.removeEventListener('wheel', handleWheel);
   }, []);
 
+  const applyPanDelta = useCallback((dx: number, dy: number) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const dpr = window.devicePixelRatio || 1;
+    const width = canvas.width / dpr;
+    const height = canvas.height / dpr;
+    const { rX, rZ, uX, uY, uZ, focalLen } = buildCam3(camRef.current, width, height);
+    const worldPerPixel = camRef.current.dist / focalLen;
+    camRef.current.tx -= (dx * rX - dy * uX) * worldPerPixel;
+    camRef.current.ty -= (-dy * uY) * worldPerPixel;
+    camRef.current.tz -= (dx * rZ - dy * uZ) * worldPerPixel;
+  }, []);
+
+  const applyOrbitDelta = useCallback((dx: number, dy: number) => {
+    camRef.current.theta += dx * 0.008;
+    camRef.current.phi = clamp(camRef.current.phi - dy * 0.006, 0.55, 1.45);
+  }, []);
+
+  const applyZoomFactor = useCallback((factor: number) => {
+    camRef.current.dist = clamp(camRef.current.dist * factor, 72, 280);
+  }, []);
+
+  const hitTest = useCallback((x: number, y: number) => {
+    for (const hit of hitCacheRef.current) {
+      const dx = x - hit.sx;
+      const dy = y - hit.sy;
+      if (dx * dx + dy * dy <= hit.r * hit.r) {
+        return hit;
+      }
+    }
+    return null;
+  }, []);
+
   const handleMouseDown = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     dragRef.current = {
       active: true,
@@ -1213,17 +1280,9 @@ export function SystemSceneCanvas({
       dragRef.current.startY = event.clientY;
 
       if (dragRef.current.mode === 'pan') {
-        const dpr = window.devicePixelRatio || 1;
-        const width = canvas.width / dpr;
-        const height = canvas.height / dpr;
-        const { rX, rZ, uX, uY, uZ, focalLen } = buildCam3(camRef.current, width, height);
-        const worldPerPixel = camRef.current.dist / focalLen;
-        camRef.current.tx -= (dx * rX - dy * uX) * worldPerPixel;
-        camRef.current.ty -= (-dy * uY) * worldPerPixel;
-        camRef.current.tz -= (dx * rZ - dy * uZ) * worldPerPixel;
+        applyPanDelta(dx, dy);
       } else {
-        camRef.current.theta += dx * 0.008;
-        camRef.current.phi = clamp(camRef.current.phi - dy * 0.006, 0.55, 1.45);
+        applyOrbitDelta(dx, dy);
       }
 
       hoverRef.current = null;
@@ -1231,22 +1290,14 @@ export function SystemSceneCanvas({
       return;
     }
 
-    let nextHit: HitEntry | null = null;
-    for (const hit of hitCacheRef.current) {
-      const dx = mouseX - hit.sx;
-      const dy = mouseY - hit.sy;
-      if (dx * dx + dy * dy <= hit.r * hit.r) {
-        nextHit = hit;
-        break;
-      }
-    }
+    const nextHit = hitTest(mouseX, mouseY);
 
     hoverRef.current = nextHit ? `${nextHit.kind}:${nextHit.id}` : null;
     onHoverChange(nextHit ? { kind: nextHit.kind, id: nextHit.id, x: mouseX, y: mouseY } : null);
     if (wrapRef.current) {
       wrapRef.current.style.cursor = nextHit ? 'pointer' : 'grab';
     }
-  }, [onHoverChange]);
+  }, [applyOrbitDelta, applyPanDelta, hitTest, onHoverChange]);
 
   const handleClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     const canvas = canvasRef.current;
@@ -1255,10 +1306,8 @@ export function SystemSceneCanvas({
     const mouseX = event.clientX - rect.left;
     const mouseY = event.clientY - rect.top;
 
-    for (const hit of hitCacheRef.current) {
-      const dx = mouseX - hit.sx;
-      const dy = mouseY - hit.sy;
-      if (dx * dx + dy * dy > hit.r * hit.r) continue;
+    const hit = hitTest(mouseX, mouseY);
+    if (hit) {
       if (hit.kind === 'fleet') {
         onFleetClick(hit.id);
         return;
@@ -1271,7 +1320,124 @@ export function SystemSceneCanvas({
     }
 
     onSelectBody(null);
-  }, [onFleetClick, onSelectBody]);
+  }, [hitTest, onFleetClick, onSelectBody]);
+
+  const onPointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.pointerType !== 'touch') return;
+
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    event.preventDefault();
+    const rect = canvas.getBoundingClientRect();
+    event.currentTarget.setPointerCapture(event.pointerId);
+
+    pointerGesture.current.pointers.set(event.pointerId, {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top,
+    });
+    pointerGesture.current.lastTapPointerId = event.pointerId;
+    pointerGesture.current.moved = false;
+    hoverRef.current = null;
+    onHoverChange(null);
+
+    if (pointerGesture.current.pointers.size >= 2) {
+      const points = Array.from(pointerGesture.current.pointers.values());
+      const dx = points[1].x - points[0].x;
+      const dy = points[1].y - points[0].y;
+      pointerGesture.current.lastDistance = Math.hypot(dx, dy);
+      pointerGesture.current.lastCenter = {
+        x: (points[0].x + points[1].x) / 2,
+        y: (points[0].y + points[1].y) / 2,
+      };
+    }
+  }, [onHoverChange]);
+
+  const onPointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.pointerType !== 'touch') return;
+
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const gesture = pointerGesture.current;
+    if (!gesture.pointers.has(event.pointerId)) return;
+
+    const nextPoint = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    const previousPoint = gesture.pointers.get(event.pointerId);
+    if (!previousPoint) return;
+    gesture.pointers.set(event.pointerId, nextPoint);
+
+    const moveDx = nextPoint.x - previousPoint.x;
+    const moveDy = nextPoint.y - previousPoint.y;
+    if (Math.abs(moveDx) > 2 || Math.abs(moveDy) > 2) {
+      gesture.moved = true;
+    }
+
+    if (gesture.pointers.size >= 2) {
+      const points = Array.from(gesture.pointers.values());
+      const center = {
+        x: (points[0].x + points[1].x) / 2,
+        y: (points[0].y + points[1].y) / 2,
+      };
+      const dx = points[1].x - points[0].x;
+      const dy = points[1].y - points[0].y;
+      const distance = Math.hypot(dx, dy);
+
+      if (gesture.lastCenter) {
+        applyPanDelta(center.x - gesture.lastCenter.x, center.y - gesture.lastCenter.y);
+      }
+
+      if (gesture.lastDistance && distance > 0 && gesture.lastDistance > 0) {
+        const zoomFactor = clamp(gesture.lastDistance / distance, 0.9, 1.1);
+        applyZoomFactor(zoomFactor);
+      }
+
+      gesture.lastCenter = center;
+      gesture.lastDistance = distance;
+      return;
+    }
+
+    applyOrbitDelta(moveDx, moveDy);
+  }, [applyOrbitDelta, applyPanDelta, applyZoomFactor]);
+
+  const onPointerEnd = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.pointerType !== 'touch') return;
+
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const gesture = pointerGesture.current;
+    const releasedPoint = gesture.pointers.get(event.pointerId) ?? {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top,
+    };
+    const wasTap = !gesture.moved && gesture.lastTapPointerId === event.pointerId && gesture.pointers.size === 1;
+
+    gesture.pointers.delete(event.pointerId);
+    if (gesture.pointers.size < 2) {
+      gesture.lastCenter = null;
+      gesture.lastDistance = null;
+    }
+
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+
+    if (!wasTap) return;
+
+    const hit = hitTest(releasedPoint.x, releasedPoint.y);
+    if (hit?.kind === 'fleet') {
+      onFleetClick(hit.id);
+      return;
+    }
+    if (hit?.kind === 'body') {
+      onSelectBody(hit.id);
+      return;
+    }
+    onSelectBody(null);
+  }, [hitTest, onFleetClick, onSelectBody]);
 
   const handleReset = useCallback(() => {
     camAnimRef.current = {
@@ -1291,7 +1457,11 @@ export function SystemSceneCanvas({
       onMouseMove={handleMouseMove}
       onClick={handleClick}
       onDoubleClick={handleReset}
-      style={{ position: 'relative', flex: 1, overflow: 'hidden', cursor: 'grab', userSelect: 'none' }}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerEnd}
+      onPointerCancel={onPointerEnd}
+      style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', minHeight: 0, overflow: 'hidden', cursor: 'grab', userSelect: 'none', touchAction: 'none' }}
     >
       <canvas ref={canvasRef} style={{ display: 'block', width: '100%', height: '100%' }} />
 

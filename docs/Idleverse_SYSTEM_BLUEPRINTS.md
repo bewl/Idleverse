@@ -1133,11 +1133,11 @@ TutorialState {
 }
 ```
 
-Durable tutorial progress lives in save-backed `GameState.tutorial`. Runtime overlay visibility lives in `useUiStore.tutorialOverlayOpen`, but `GameLayout` now forces the shell back open while a tutorial save is still active so onboarding remains hard-gated unless skipped. Once a save completes the guided tour, the top-bar replay affordance is removed for that save.
+Durable tutorial progress lives in save-backed `GameState.tutorial`. Runtime overlay visibility lives in `useUiStore.tutorialOverlayOpen`, but the onboarding shell is now behind a temporary feature flag in `src/game/progression/tutorialSequence.ts`. While that flag is off, new or restarted saves initialize into a skipped tutorial state and `GameLayout` suppresses the resume affordance instead of showing a dormant tour. Once the flag is restored, active tutorial saves again force the shell open until skipped or completed, and completed saves still do not expose replay.
 
 ## Mechanics
 
-- New saves start with the tutorial active; legacy saves that predate the system migrate into a skipped state so existing players are not forced into onboarding retroactively.
+- The guided tutorial is temporarily disabled by feature flag. New or restarted saves now begin in a skipped tutorial state, while the underlying step registry and overlay implementation remain in the codebase for later re-enable.
 - `tutorialSequence.ts` defines the ordered first-pass step registry and the distinction between acknowledge-only briefing steps and automatic completion steps.
 - `gameStore` owns tutorial mutations: explicit step completion for briefing steps, skip, restart, and evaluation of automatic completion against live state.
 - Automatic steps now resolve from real progression signals such as Trade I being queued, Trade I actually completing, the first market sale being recorded, a fleet receiving a live movement order, fleet arrival in a destination system, and a mining wing being assigned to a target belt.

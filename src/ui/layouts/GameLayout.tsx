@@ -27,6 +27,7 @@ import {
   getTutorialStepPresentation,
   getTutorialStepDefinition,
   isTutorialActive,
+  TUTORIAL_ENABLED,
   TUTORIAL_STEP_ORDER,
 } from '@/game/progression/tutorialSequence';
 
@@ -586,6 +587,11 @@ export function GameLayout() {
   };
 
   const handleTutorialButton = () => {
+    if (!TUTORIAL_ENABLED) {
+      setSettingsOpen(false);
+      return;
+    }
+
     if (tutorialActive) {
       skipTutorial();
       closeTutorialOverlay();
@@ -702,18 +708,20 @@ export function GameLayout() {
                     <div>
                       <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500">Tutorial</div>
                       <div className="mt-1 text-[11px] text-slate-300">
-                        {tutorialCompleted
+                        {!TUTORIAL_ENABLED
+                          ? 'The guided tour is temporarily disabled while onboarding is being revised.'
+                          : tutorialCompleted
                           ? 'Tour completed for this save.'
                           : tutorialActive
                             ? 'The guided tour is currently active.'
                             : 'Resume the guided tour for this save.'}
                       </div>
                     </div>
-                    <span className={`rounded-full px-2 py-1 text-[9px] font-mono ${tutorialCompleted ? 'bg-emerald-500/15 text-emerald-200' : tutorialActive ? 'bg-amber-500/15 text-amber-200' : 'bg-slate-900/70 text-slate-400'}`}>
-                      {tutorialCompleted ? `${tutorialSummary.totalCount}/${tutorialSummary.totalCount}` : `${tutorialSummary.completedCount}/${tutorialSummary.totalCount}`}
+                    <span className={`rounded-full px-2 py-1 text-[9px] font-mono ${!TUTORIAL_ENABLED ? 'bg-slate-900/70 text-slate-400' : tutorialCompleted ? 'bg-emerald-500/15 text-emerald-200' : tutorialActive ? 'bg-amber-500/15 text-amber-200' : 'bg-slate-900/70 text-slate-400'}`}>
+                      {!TUTORIAL_ENABLED ? 'OFF' : tutorialCompleted ? `${tutorialSummary.totalCount}/${tutorialSummary.totalCount}` : `${tutorialSummary.completedCount}/${tutorialSummary.totalCount}`}
                     </span>
                   </div>
-                  {!tutorialCompleted && (
+                  {TUTORIAL_ENABLED && !tutorialCompleted && (
                     <button
                       className={`mt-3 flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left text-[11px] font-semibold transition-colors ${tutorialActive ? 'border-amber-500/35 bg-amber-950/25 text-amber-100 hover:border-amber-400/50' : 'border-cyan-500/25 bg-cyan-950/20 text-cyan-100 hover:border-cyan-400/45'}`}
                       onClick={handleTutorialButton}

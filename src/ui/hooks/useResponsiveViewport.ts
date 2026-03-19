@@ -13,6 +13,7 @@ type ResponsiveViewportSnapshot = {
   isCompact: boolean;
   isCoarsePointer: boolean;
   starmapUsesDrawerPanels: boolean;
+  systemUsesDrawerPanels: boolean;
 };
 
 function readSnapshot(): ResponsiveViewportSnapshot {
@@ -26,6 +27,7 @@ function readSnapshot(): ResponsiveViewportSnapshot {
       isCompact: false,
       isCoarsePointer: false,
       starmapUsesDrawerPanels: false,
+      systemUsesDrawerPanels: false,
     };
   }
 
@@ -37,6 +39,7 @@ function readSnapshot(): ResponsiveViewportSnapshot {
   const isCoarsePointer = window.matchMedia(COARSE_POINTER_QUERY).matches;
   const isCompact = !isDesktop || height < 760;
   const starmapUsesDrawerPanels = width < 1180 || (isCoarsePointer && width < 1360);
+  const systemUsesDrawerPanels = width < 1100 || (isCoarsePointer && width < 1280);
 
   return {
     width,
@@ -47,6 +50,7 @@ function readSnapshot(): ResponsiveViewportSnapshot {
     isCompact,
     isCoarsePointer,
     starmapUsesDrawerPanels,
+    systemUsesDrawerPanels,
   };
 }
 
@@ -68,6 +72,7 @@ export function useResponsiveViewport() {
           && previous.isCompact === next.isCompact
           && previous.isCoarsePointer === next.isCoarsePointer
           && previous.starmapUsesDrawerPanels === next.starmapUsesDrawerPanels
+          && previous.systemUsesDrawerPanels === next.systemUsesDrawerPanels
         ) {
           return previous;
         }
