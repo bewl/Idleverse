@@ -112,6 +112,7 @@ Shift the application toward a mobile-first layout model without throwing away t
 - Galaxy Map stays map-first on compact layouts.
 - Filters and intel/route move into slide-up drawers on touch-oriented or narrow viewports.
 - Tap-to-peek replaces hover-only intel on touch-oriented layouts.
+- Touch layouts must retain direct map manipulation: one-finger drag orbits the map and two-finger pinch/pan handles zoom plus camera translation.
 - Desktop visuals should remain close to the current implementation.
 
 ## Files Likely Affected

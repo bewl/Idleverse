@@ -156,6 +156,10 @@ function clamp01(value: number) {
   return Math.max(0, Math.min(1, value));
 }
 
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
+}
+
 function boundsOverlap(
   a: { left: number; top: number; right: number; bottom: number },
   b: { left: number; top: number; right: number; bottom: number },
@@ -426,6 +430,19 @@ const GalaxyGridView = forwardRef<GalaxyGridHandle, {
   const cam        = useRef({ ...CAM3_DEFAULT });
   const camAnim    = useRef<{ from: typeof CAM3_DEFAULT; to: typeof CAM3_DEFAULT; startTime: number; duration: number } | null>(null);
   const drag       = useRef({ active: false, btn: 0, sx: 0, sy: 0, moved: false });
+  const pointerGesture = useRef<{
+    pointers: Map<number, { x: number; y: number }>;
+    moved: boolean;
+    lastTapPointerId: number | null;
+    lastCenter: { x: number; y: number } | null;
+    lastDistance: number | null;
+  }>({
+    pointers: new Map(),
+    moved: false,
+    lastTapPointerId: null,
+    lastCenter: null,
+    lastDistance: null,
+  });
   const hovId      = useRef<string | null>(null);
   const mousePos   = useRef<{ x: number; y: number } | null>(null);
   const rafId      = useRef(0);
@@ -1173,6 +1190,42 @@ const GalaxyGridView = forwardRef<GalaxyGridHandle, {
 
   // ── Pointer handlers ──────────────────────────────────────────────────────
 
+  const applyPanDelta = useCallback((dx: number, dy: number) => {
+    const cv = canvasRef.current;
+    const cW = cv ? cv.width / (window.devicePixelRatio || 1) : 600;
+    const cH = cv ? cv.height / (window.devicePixelRatio || 1) : 400;
+    const c = cam.current;
+    const { rX, rZ, uX, uY, uZ, focalLen } = buildCam3(c.theta, c.phi, c.dist, c.tx, c.ty, c.tz, cW, cH);
+    const panScale = c.dist / focalLen;
+    c.tx -= rX * dx * panScale;
+    c.tz -= rZ * dx * panScale;
+    c.tx += uX * dy * panScale;
+    c.ty += uY * dy * panScale;
+    c.tz += uZ * dy * panScale;
+  }, []);
+
+  const applyOrbitDelta = useCallback((dx: number, dy: number) => {
+    cam.current.theta += dx * 0.008;
+    cam.current.phi = clamp(cam.current.phi - dy * 0.006, 0.06, Math.PI - 0.06);
+  }, []);
+
+  const applyZoomFactor = useCallback((factor: number) => {
+    cam.current.dist = clamp(cam.current.dist * factor, 25, 1500);
+  }, []);
+
+  const hitTestProjectedSystem = useCallback((mx: number, my: number) => {
+    let bestId: string | null = null;
+    let bestD2 = 20 * 20;
+    for (const p of projCache.current) {
+      const d2 = (p.sx - mx) ** 2 + (p.sy - my) ** 2;
+      if (d2 < bestD2) {
+        bestD2 = d2;
+        bestId = p.id;
+      }
+    }
+    return bestId;
+  }, []);
+
   const onMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     drag.current = { active: true, btn: e.button, sx: e.clientX, sy: e.clientY, moved: false };
     e.currentTarget.style.cursor = 'grabbing';
@@ -1185,19 +1238,9 @@ const GalaxyGridView = forwardRef<GalaxyGridHandle, {
       if (Math.abs(dx) + Math.abs(dy) > 2) d.moved = true;
       d.sx = e.clientX; d.sy = e.clientY;
       if (d.btn === 1 || e.shiftKey) {
-        // Pan: translate target laterally in camera space
-        const cv = canvasRef.current;
-        const cW = cv ? cv.width  / (window.devicePixelRatio || 1) : 600;
-        const cH = cv ? cv.height / (window.devicePixelRatio || 1) : 400;
-        const c  = cam.current;
-        const { rX, rZ, uX, uY, uZ, focalLen } = buildCam3(c.theta, c.phi, c.dist, c.tx, c.ty, c.tz, cW, cH);
-        const ps = c.dist / focalLen;
-        c.tx -= rX * dx * ps; c.tz -= rZ * dx * ps;
-        c.tx += uX * dy * ps; c.ty += uY * dy * ps; c.tz += uZ * dy * ps;
+        applyPanDelta(dx, dy);
       } else {
-        // Orbit: change azimuth + polar angle
-        cam.current.theta += dx * 0.008;
-        cam.current.phi    = Math.max(0.06, Math.min(Math.PI - 0.06, cam.current.phi - dy * 0.006));
+        applyOrbitDelta(dx, dy);
       }
       scheduleRedraw();
     } else {
@@ -1205,18 +1248,13 @@ const GalaxyGridView = forwardRef<GalaxyGridHandle, {
       const rect = e.currentTarget.getBoundingClientRect();
       const mx = e.clientX - rect.left, my = e.clientY - rect.top;
       mousePos.current = { x: mx, y: my };
-      let bestId: string | null = null;
-      let bestD2 = 20 * 20;
-      for (const p of projCache.current) {
-        const d2 = (p.sx - mx) ** 2 + (p.sy - my) ** 2;
-        if (d2 < bestD2) { bestD2 = d2; bestId = p.id; }
-      }
+      const bestId = hitTestProjectedSystem(mx, my);
       if (bestId !== hovId.current) {
         hovId.current = bestId;
         scheduleRedraw();
       }
     }
-  }, [scheduleRedraw]);
+  }, [applyOrbitDelta, applyPanDelta, hitTestProjectedSystem, scheduleRedraw]);
 
   const onMouseUp = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const wasDrag = drag.current.moved;
@@ -1280,16 +1318,143 @@ const GalaxyGridView = forwardRef<GalaxyGridHandle, {
     scheduleRedraw();
   }, [scheduleRedraw]);
 
+  const onPointerDown = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (e.pointerType === 'mouse') return;
+
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const rect = e.currentTarget.getBoundingClientRect();
+    pointerGesture.current.pointers.set(e.pointerId, { x: e.clientX - rect.left, y: e.clientY - rect.top });
+    pointerGesture.current.lastTapPointerId = e.pointerId;
+    pointerGesture.current.moved = false;
+
+    if (pointerGesture.current.pointers.size >= 2) {
+      const points = Array.from(pointerGesture.current.pointers.values());
+      const dx = points[1].x - points[0].x;
+      const dy = points[1].y - points[0].y;
+      pointerGesture.current.lastDistance = Math.hypot(dx, dy);
+      pointerGesture.current.lastCenter = {
+        x: (points[0].x + points[1].x) * 0.5,
+        y: (points[0].y + points[1].y) * 0.5,
+      };
+    }
+  }, []);
+
+  const onPointerMove = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (e.pointerType === 'mouse') return;
+
+    const gesture = pointerGesture.current;
+    if (!gesture.pointers.has(e.pointerId)) return;
+
+    e.preventDefault();
+    const rect = e.currentTarget.getBoundingClientRect();
+    const nextPoint = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    const previousPoint = gesture.pointers.get(e.pointerId)!;
+    gesture.pointers.set(e.pointerId, nextPoint);
+
+    if (gesture.pointers.size >= 2) {
+      const points = Array.from(gesture.pointers.values());
+      const center = {
+        x: (points[0].x + points[1].x) * 0.5,
+        y: (points[0].y + points[1].y) * 0.5,
+      };
+      const dx = points[1].x - points[0].x;
+      const dy = points[1].y - points[0].y;
+      const distance = Math.hypot(dx, dy);
+
+      if (gesture.lastCenter) {
+        const centerDx = center.x - gesture.lastCenter.x;
+        const centerDy = center.y - gesture.lastCenter.y;
+        if (Math.abs(centerDx) + Math.abs(centerDy) > 1) {
+          applyPanDelta(centerDx, centerDy);
+          gesture.moved = true;
+        }
+      }
+
+      if (gesture.lastDistance && distance > 0) {
+        const zoomFactor = clamp(gesture.lastDistance / distance, 0.85, 1.18);
+        if (Math.abs(zoomFactor - 1) > 0.01) {
+          applyZoomFactor(zoomFactor);
+          gesture.moved = true;
+        }
+      }
+
+      gesture.lastCenter = center;
+      gesture.lastDistance = distance;
+      scheduleRedraw();
+      return;
+    }
+
+    const moveDx = nextPoint.x - previousPoint.x;
+    const moveDy = nextPoint.y - previousPoint.y;
+    if (Math.abs(moveDx) + Math.abs(moveDy) > 2) {
+      gesture.moved = true;
+    }
+    applyOrbitDelta(moveDx, moveDy);
+    scheduleRedraw();
+  }, [applyOrbitDelta, applyPanDelta, applyZoomFactor, scheduleRedraw]);
+
+  const onPointerUp = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (e.pointerType === 'mouse') return;
+
+    const gesture = pointerGesture.current;
+    if (!gesture.pointers.has(e.pointerId)) return;
+
+    e.preventDefault();
+    const rect = e.currentTarget.getBoundingClientRect();
+    const upPoint = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    const shouldSelect = gesture.pointers.size === 1 && !gesture.moved && gesture.lastTapPointerId === e.pointerId;
+
+    gesture.pointers.delete(e.pointerId);
+
+    if (gesture.pointers.size < 2) {
+      gesture.lastCenter = null;
+      gesture.lastDistance = null;
+    }
+
+    if (!shouldSelect) return;
+
+    const hitId = hitTestProjectedSystem(upPoint.x, upPoint.y);
+    if (!hitId) return;
+    hovId.current = hitId;
+    onSystemClick(hitId);
+    const sys = propsRef.current.systemById.get(hitId);
+    if (!sys) return;
+    const [wx, wy, wz] = sysToWorld(sys);
+    const c = cam.current;
+    camAnim.current = {
+      from: { ...c },
+      to: { theta: c.theta, phi: c.phi, dist: c.dist, tx: wx, ty: wy, tz: wz },
+      startTime: performance.now(),
+      duration: 600,
+    };
+    scheduleRedraw();
+  }, [hitTestProjectedSystem, onSystemClick, scheduleRedraw]);
+
+  const onPointerCancel = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (e.pointerType === 'mouse') return;
+
+    pointerGesture.current.pointers.delete(e.pointerId);
+    if (pointerGesture.current.pointers.size < 2) {
+      pointerGesture.current.lastCenter = null;
+      pointerGesture.current.lastDistance = null;
+    }
+  }, []);
+
   return (
     <div ref={wrapperRef} style={{ width: '100%', height: '100%', overflow: 'hidden' }}>
       <canvas
         ref={canvasRef}
-        style={{ display: 'block', cursor: 'crosshair' }}
+        style={{ display: 'block', cursor: 'crosshair', touchAction: 'none' }}
         onMouseDown={onMouseDown}
         onMouseMove={onMouseMove}
         onMouseUp={onMouseUp}
         onMouseLeave={onMouseLeave}
         onDoubleClick={onDblClick}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerCancel}
       />
     </div>
   );
