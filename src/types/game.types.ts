@@ -277,6 +277,8 @@ export interface MarketState {
   autoSell: Record<string, { enabled: boolean; threshold: number }>;
   /** Lifetime ISK earned per resource from manual and auto sells. */
   lifetimeSold: Record<string, number>;
+  /** Lifetime Credits spent per resource from direct market purchases. */
+  lifetimeBought: Record<string, number>;
 }
 
 // ─── Notifications / Inbox ───────────────────────────────────────────────

@@ -145,7 +145,7 @@ queues for combat/mining specialisation.
 ## Role
 
 NPC buy/sell orders for all resources and ships. Provides the primary ISK income loop.
-Prices are dynamic per system, driven by seeded demand and a live pressure model.
+Prices are dynamic per system, driven by seeded demand and a live pressure model. The first living-market slice now also supports galaxy-aware remote buying from visible station markets, with immediate delivery into player inventory and a route-aware delivery-service surcharge.
 
 ## State
 
@@ -160,6 +160,7 @@ Prices are dynamic per system, driven by seeded demand and a live pressure model
 - Auto-sell: per-resource toggle with configurable keep-threshold
 - Trade skill improves effective sell price via `market-sell-price` modifier
 - Lifetime ISK tracking per resource
+- Lifetime buy spend tracking per resource
 
 ### Dynamic Per-System Pricing (Phase 1)
 
@@ -173,6 +174,16 @@ localPrice(resource, system) = basePrice × demandMultiplier × systemPressure
 - **`systemDemandVolume`** = `max(5, round(500_000 / basePrice))` — ~500k ISK saturates any market
 
 Functions: `getDemandMultiplier`, `getSystemPressure`, `getLocalPrice`, `tickPricePressure`
+
+### Remote Buying (Living Market Slice 1)
+
+- Search scope is visibility-bounded rather than omniscient: the Market panel searches visited systems with station-backed market access.
+- Remote purchases resolve immediately into inventory to preserve idle-game pacing.
+- Non-local purchases pay a delivery-service surcharge derived from the route between the player's current system and the seller system.
+- Delivery cost scales with both distance and danger, using route length plus lowsec and nullsec exposure from the existing route-planning model.
+- Remote buys raise price pressure in the seller system for the purchased resource, so repeated sourcing from the same market pushes later quotes upward.
+
+Functions: `getRemotePurchaseQuote`, `calculateDeliverySurcharge`, `buyResourceFromSystem`
 
 ### Trade Routes (Phase 1)
 
@@ -196,7 +207,9 @@ Function: `tickTradeRoutes` (called in tick step 8b)
 
 ## UI
 
-- **MarketPanel** — tab bar: "Market Listings" (original view) | "Trade Routes"
+- **MarketPanel** — tab bar: "Market Listings" | "Trade Routes"
+- **Listings tab** — compact command deck, remote buy browser, sell inventory sections, regional price tape, spread board, and auto-sell watch
+- **Remote buy browser** — resource search, route-preference filter, region and faction filters, security posture filter, delivered-price comparison, and direct purchase action
 - **Trade Routes tab** — quota display, route cards (status/profit/run count), create-route form
 - **StarMapPanel Intel panel** — "Trade Opportunity" block showing top-3 minerals by buy-here/sell-there ratio (only if ratio > 1.05)
 - Locked-state UX now uses the shared unlock-preview card to explain the Trade I requirement, ETA, immediate sale-value payoff, and the later Trade III automation branch

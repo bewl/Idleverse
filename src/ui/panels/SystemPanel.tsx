@@ -22,6 +22,7 @@ import { NavTag } from '@/ui/components/NavTag';
 import { HULL_DEFINITIONS } from '@/game/systems/fleet/fleet.config';
 import { GameTooltip } from '@/ui/components/GameTooltip';
 import { GameDropdown, type DropdownOption } from '@/ui/components/GameDropdown';
+import { CompactMetricCard as CommandMetric } from '@/ui/components/CompactMetricCard';
 import { SKILL_DEFINITIONS } from '@/game/systems/skills/skills.config';
 import { useResponsiveViewport } from '@/ui/hooks/useResponsiveViewport';
 import { SystemSceneCanvas, type SystemSceneHoverTarget } from '@/ui/panels/SystemSceneCanvas';
@@ -658,37 +659,6 @@ function temperatureInfo(orbitFrac: number): { label: string; color: string } {
   if (orbitFrac < 0.45) return { label: 'Warm',      color: '#f59e0b' };
   if (orbitFrac < 0.65) return { label: 'Temperate', color: '#4ade80' };
   return                        { label: 'Frozen',    color: '#67e8f9' };
-}
-
-function CommandMetric({
-  label,
-  value,
-  meta,
-  tone = 'slate',
-}: {
-  label: string;
-  value: string;
-  meta?: string;
-  tone?: 'cyan' | 'violet' | 'amber' | 'emerald' | 'slate';
-}) {
-  const toneStyles =
-    tone === 'cyan'
-      ? { color: '#67e8f9', border: '1px solid rgba(34,211,238,0.22)', background: 'rgba(8,51,68,0.18)' }
-      : tone === 'violet'
-        ? { color: '#c4b5fd', border: '1px solid rgba(167,139,250,0.22)', background: 'rgba(49,46,129,0.16)' }
-        : tone === 'amber'
-          ? { color: '#fcd34d', border: '1px solid rgba(251,191,36,0.22)', background: 'rgba(120,70,0,0.14)' }
-          : tone === 'emerald'
-            ? { color: '#86efac', border: '1px solid rgba(74,222,128,0.22)', background: 'rgba(20,83,45,0.16)' }
-            : { color: '#cbd5e1', border: '1px solid rgba(51,65,85,0.35)', background: 'rgba(15,23,42,0.35)' };
-
-  return (
-    <div style={{ padding: '8px 10px', borderRadius: 6, ...toneStyles }}>
-      <div style={{ fontSize: 8, textTransform: 'uppercase', letterSpacing: '0.12em', color: '#475569' }}>{label}</div>
-      <div style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 700, marginTop: 4 }}>{value}</div>
-      {meta && <div style={{ fontSize: 9, color: '#64748b', marginTop: 2 }}>{meta}</div>}
-    </div>
-  );
 }
 
 function SceneIntelPill({

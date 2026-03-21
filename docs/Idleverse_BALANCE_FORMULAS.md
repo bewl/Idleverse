@@ -180,6 +180,51 @@ Example:
 
 ---
 
+# Living Market Formulas
+
+The first-pass living market keeps simulation intentionally light. Prices remain deterministic per system with pressure feedback, and remote buying adds a delivery-service surcharge instead of spawning a full logistics fulfillment queue.
+
+## Local Market Price
+
+```
+LocalPrice(resource, system) = clamp(BasePrice × DemandMultiplier × SystemPressure,
+                                    BasePrice × 0.6,
+                                    BasePrice × 1.4)
+```
+
+Where:
+- `DemandMultiplier` is seeded per `galaxySeed + systemId + resourceId` in the range `[0.5, 2.0]`
+- `SystemPressure` starts at `1.0`, rises when that system is used as a buy source, falls when it is sold into, and decays toward neutral over time
+
+## Effective Local Sell Price
+
+```
+EffectiveSellPrice = floor(LocalPrice × (1 + SellBonus + BrokerReduction + TaxReduction + HQSellBonus))
+```
+
+This keeps player-facing sell value tied to the current market while still rewarding Trade progression and HQ specialization.
+
+## Delivery-Service Surcharge
+
+Remote purchases add a surcharge based on route distance and route danger.
+
+```
+DeliveryRate = clamp(0.04 + (TotalLy × 0.003) + (LowsecHops × 0.025) + (NullsecHops × 0.06),
+                     0.04,
+                     1.25)
+
+DeliverySurcharge = round(BasePurchaseCost × DeliveryRate)
+```
+
+Where:
+- `BasePurchaseCost = SellerPricePerUnit × Quantity`
+- `TotalLy`, `LowsecHops`, and `NullsecHops` come from the solved route between the player’s current system and the seller system
+- local same-system purchases use `DeliverySurcharge = 0`
+
+This keeps remote buying strategic without blocking idle-game flow behind a deferred hauling simulation.
+
+---
+
 # Automation Unlock Curve
 
 Automation should unlock in stages.

@@ -1,6 +1,9 @@
 import type { GameState, TradeRoute } from '@/types/game.types';
 import type { GalaxyState } from '@/types/galaxy.types';
-import { issueFleetGroupOrder } from '@/game/systems/fleet/fleet.orders';
+import type { RouteSecurityFilter } from '@/types/faction.types';
+import { generateGalaxy } from '@/game/galaxy/galaxy.gen';
+import { findRoute, type RouteResult } from '@/game/galaxy/route.logic';
+import { FLEET_ORDER_JUMP_RANGE_LY, issueFleetGroupOrder } from '@/game/systems/fleet/fleet.orders';
 import { getCorpHqBonusFromState } from '@/game/systems/factions/faction.logic';
 
 // ─── Result type ────────────────────────────────────────────────────────────
@@ -14,6 +17,15 @@ export interface MarketTickResult {
   newLifetimeSold: Record<string, number>;
 }
 
+export interface RemotePurchaseQuote {
+  unitPrice: number;
+  baseCost: number;
+  deliveryRate: number;
+  deliverySurcharge: number;
+  totalCost: number;
+  route: RouteResult | null;
+}
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 /**
@@ -22,7 +34,15 @@ export interface MarketTickResult {
  * All three trade skills contribute additively to the "total price multiplier."
  */
 export function getEffectiveSellPrice(state: GameState, resourceId: string): number {
-  const base = state.systems.market.prices[resourceId] ?? 0;
+  return getEffectiveSellPriceAtSystem(state, resourceId, state.galaxy.currentSystemId);
+}
+
+export function getEffectiveSellPriceAtSystem(
+  state: GameState,
+  resourceId: string,
+  systemId: string,
+): number {
+  const base = getLocalPrice(state, resourceId, systemId);
   if (base === 0) return 0;
 
   const tradeBonus =
@@ -36,8 +56,13 @@ export function getEffectiveSellPrice(state: GameState, resourceId: string): num
 }
 
 /** Total ISK gained from selling `amount` units of `resourceId`. */
-export function calculateSellValue(state: GameState, resourceId: string, amount: number): number {
-  return Math.floor(getEffectiveSellPrice(state, resourceId) * amount);
+export function calculateSellValue(
+  state: GameState,
+  resourceId: string,
+  amount: number,
+  systemId = state.galaxy.currentSystemId,
+): number {
+  return Math.floor(getEffectiveSellPriceAtSystem(state, resourceId, systemId) * amount);
 }
 
 /** Returns the combined trade modifier multiplier for display (the ×N factor on top of base price). */
@@ -143,7 +168,7 @@ export function getLocalPrice(
  * Apply a buy or sell pressure delta to a system's resource price.
  * Selling depresses pressure; buying raises it.
  */
-function applyPricePressure(
+export function applyPricePressure(
   galaxy:     GalaxyState,
   resourceId: string,
   systemId:   string,
@@ -168,6 +193,60 @@ function applyPricePressure(
         [resourceId]: newPressure,
       },
     },
+  };
+}
+
+export function calculateDeliverySurcharge(basePurchaseCost: number, route: RouteResult | null): {
+  deliveryRate: number;
+  deliverySurcharge: number;
+} {
+  if (!route || route.hops === 0) {
+    return { deliveryRate: 0, deliverySurcharge: 0 };
+  }
+
+  const lowsecHops = route.legSecurity.filter(security => security === 'lowsec').length;
+  const nullsecHops = route.legSecurity.filter(security => security === 'nullsec').length;
+  const deliveryRate = Math.max(
+    0.04,
+    Math.min(1.25, 0.04 + route.totalLy * 0.003 + lowsecHops * 0.025 + nullsecHops * 0.06),
+  );
+
+  return {
+    deliveryRate,
+    deliverySurcharge: Math.round(basePurchaseCost * deliveryRate),
+  };
+}
+
+export function getRemotePurchaseQuote(
+  state: GameState,
+  resourceId: string,
+  sellerSystemId: string,
+  amount: number,
+  securityFilter: RouteSecurityFilter = 'shortest',
+): RemotePurchaseQuote | null {
+  if (amount <= 0) return null;
+
+  const unitPrice = getLocalPrice(state, resourceId, sellerSystemId);
+  if (unitPrice <= 0) return null;
+
+  const baseCost = unitPrice * amount;
+  const galaxySystems = generateGalaxy(state.galaxy.seed);
+  const route = findRoute(
+    galaxySystems,
+    sellerSystemId,
+    state.galaxy.currentSystemId,
+    FLEET_ORDER_JUMP_RANGE_LY,
+    securityFilter,
+  );
+  const { deliveryRate, deliverySurcharge } = calculateDeliverySurcharge(baseCost, route);
+
+  return {
+    unitPrice,
+    baseCost,
+    deliveryRate,
+    deliverySurcharge,
+    totalCost: baseCost + deliverySurcharge,
+    route,
   };
 }
 

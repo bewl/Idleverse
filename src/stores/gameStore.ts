@@ -28,7 +28,11 @@ import {
   tutorialStatesEqual,
 } from '@/game/progression/tutorialSequence';
 import { appendNotificationEntries, buildTickNotifications } from '@/game/notifications/notification.logic';
-import { calculateSellValue } from '@/game/systems/market/market.logic';
+import {
+  applyPricePressure,
+  calculateSellValue,
+  getRemotePurchaseQuote,
+} from '@/game/systems/market/market.logic';
 import type { TradeRoute } from '@/types/game.types';
 import { BATCH_SIZE_BASE } from '@/game/systems/reprocessing/reprocessing.config';
 import { getSystemById, getSystemBeltIds, generateGalaxy, systemDistance } from '@/game/galaxy/galaxy.gen';
@@ -109,6 +113,7 @@ interface GameStore {
 
   // Market
   sellResource: (resourceId: string, amount: number) => boolean;
+  buyResourceFromSystem: (resourceId: string, systemId: string, amount: number, securityFilter?: RouteSecurityFilter) => boolean;
   sellAll: (resourceId: string) => boolean;
   toggleAutoSell: (resourceId: string) => void;
   setAutoSellThreshold: (resourceId: string, amount: number) => void;
@@ -810,8 +815,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const sell = Math.min(Math.floor(amount), have);
     if (sell <= 0) return false;
 
-    const isk = calculateSellValue(state, resourceId, sell);
+    const currentSystemId = state.galaxy.currentSystemId;
+    const isk = calculateSellValue(state, resourceId, sell, currentSystemId);
     if (isk === 0) return false;
+
+    const basePrice = state.systems.market.prices[resourceId] ?? 0;
 
     const newLifetime = {
       ...(state.systems.market.lifetimeSold ?? {}),
@@ -829,6 +837,65 @@ export const useGameStore = create<GameStore>((set, get) => ({
         ...state.systems,
         market: { ...state.systems.market, lifetimeSold: newLifetime },
       },
+      galaxy: basePrice > 0
+        ? applyPricePressure(state.galaxy, resourceId, currentSystemId, sell, 'sell', basePrice)
+        : state.galaxy,
+    };
+
+    set({
+      state: {
+        ...updatedState,
+        tutorial: evaluateTutorialState(updatedState),
+      },
+    });
+    return true;
+  },
+
+  buyResourceFromSystem: (resourceId, systemId, amount, securityFilter = 'shortest') => {
+    const { state } = get();
+    if (!state.unlocks['system-market']) return false;
+
+    const buyAmount = Math.floor(amount);
+    if (buyAmount <= 0) return false;
+
+    const currentSystemId = state.galaxy.currentSystemId;
+    if (systemId !== currentSystemId && !state.galaxy.visitedSystems?.[systemId]) return false;
+
+    const galaxySystems = generateGalaxy(state.galaxy.seed);
+    const targetSystem = galaxySystems.find(system => system.id === systemId);
+    if (!targetSystem) return false;
+
+    const systemIndex = Math.max(0, galaxySystems.findIndex(system => system.id === systemId));
+    const station = getStationInSystem(targetSystem, state.galaxy.seed, systemIndex);
+    if (!station || !station.services.includes('market')) return false;
+
+    const quote = getRemotePurchaseQuote(state, resourceId, systemId, buyAmount, securityFilter);
+    if (!quote) return false;
+
+    const credits = state.resources['credits'] ?? 0;
+    if (credits < quote.totalCost) return false;
+
+    const basePrice = state.systems.market.prices[resourceId] ?? quote.unitPrice;
+    const newLifetimeBought = {
+      ...(state.systems.market.lifetimeBought ?? {}),
+      [resourceId]: ((state.systems.market.lifetimeBought ?? {})[resourceId] ?? 0) + quote.totalCost,
+    };
+
+    const updatedState = {
+      ...state,
+      resources: {
+        ...state.resources,
+        credits: credits - quote.totalCost,
+        [resourceId]: (state.resources[resourceId] ?? 0) + buyAmount,
+      },
+      systems: {
+        ...state.systems,
+        market: {
+          ...state.systems.market,
+          lifetimeBought: newLifetimeBought,
+        },
+      },
+      galaxy: applyPricePressure(state.galaxy, resourceId, systemId, buyAmount, 'buy', basePrice),
     };
 
     set({

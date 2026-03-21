@@ -180,6 +180,51 @@ Retire the `ActivityBar` component so operational panels emphasize concrete numb
 
 ---
 
+# Initiative — Compact Metric Density Pass
+> **Status:** Active
+> **Last updated:** March 2026
+> **Depends on:** Existing command-deck KPI rows, panel-local `CommandMetric` patterns, responsive grid shells
+
+## Goal
+
+Reduce the visual bulk of the recurring KPI boxes used across major panels without stripping out information. The intent is to keep Idleverse data rich but materially tighter by standardizing on one compact shared metric-card primitive and trimming the repeated padded wrapper bands that currently make Market, Mining, Manufacturing, Reprocessing, Overview, and parts of System feel overbuilt.
+
+## Scope
+
+- Extract a shared compact metric-card primitive from the duplicated panel-local `CommandMetric` implementations.
+- Use Fleet's tighter KPI sizing as the baseline density target for the shared component.
+- Preserve whole-card click targets for interactive metric cards.
+- Tighten the repeated command-deck wrapper padding around stacked KPI rows.
+- Apply the first implementation sweep to Market, Mining, Reprocessing, Manufacturing, Overview, and System panels.
+- Explicitly out of scope: a broader typography redesign, non-metric card redesign, or a general content-reduction pass.
+
+## Implementation Outline
+
+1. Document the shared compact-metrics direction in the architecture and design docs before changing panel code.
+2. Add a shared compact metric-card primitive under `src/ui/components/` that supports both static and clickable whole-card variants.
+3. Replace duplicated `CommandMetric` implementations in the most visibly inflated panels and tighten their outer wrapper bands at the same time.
+4. Review stacked KPI rows, especially in Market, and merge or remove obvious duplicate decks only where compactness still suffers after the shared component lands.
+
+## Risks / Open Questions
+
+- Over-tightening cards can make dense panels feel cramped if grid breakpoints and truncation rules are not reviewed alongside padding.
+- Panels with interactive metric cards must keep whole-area click behavior rather than regressing to tiny button targets.
+- System still carries some inline-style surfaces, so the shared primitive may not absorb every deck in the first pass.
+
+## Files Likely Affected
+
+- `src/ui/components/CompactMetricCard.tsx`
+- `src/ui/panels/MarketPanel.tsx`
+- `src/ui/panels/MiningPanel.tsx`
+- `src/ui/panels/ReprocessingPanel.tsx`
+- `src/ui/panels/ManufacturingPanel.tsx`
+- `src/ui/panels/OverviewPanel.tsx`
+- `src/ui/panels/SystemPanel.tsx`
+- `docs/Idleverse_AI_Architecture.md`
+- `docs/Idleverse_DESIGN_PLAN.md`
+
+---
+
 # Initiative — Reward Spikes Framework
 > **Status:** Active
 > **Last updated:** March 2026
@@ -390,32 +435,43 @@ Tighten the Overview operations mode so it behaves like a real command deck: den
 
 ## Goal
 
-Refresh the market panel so it reads like an economic operations surface instead of a flat listings table plus route form. The focus is denser telemetry, clearer route posture, and better scan speed while keeping the existing market and trade-route mechanics intact.
+Turn the Market into a living economic operations surface instead of a flat sell table plus route form. The first slice should stay lightweight rather than becoming a full order-book simulator: reuse per-system local prices, live price pressure, and routing to support galaxy-wide remote buying with delivery-service tax, while rebuilding the panel so comparison and action are faster on both desktop and compact layouts.
 
 ## Scope
 
-- Add a compact command deck with price bonus, lifetime sales, auto-sell posture, and route activity.
-- Tighten listings rows so auto-sell surplus, keep thresholds, and stock state are easier to scan.
-- Replace flat trade-route cards with expandable compact operational rows.
-- Keep the market panel interactive, but do not change pricing or route automation logic.
-- Explicitly out of scope: economy rebalance, trade-route simulation changes, or new market mechanics.
+- Add galaxy-aware buy browsing for visible systems with compact filters for resource, region, faction, security posture, and route preference.
+- Add immediate remote purchasing with delivery-service tax that varies with route distance and danger.
+- Make manual selling and market analytics feel local and alive by grounding them in per-system prices instead of static-only presentation.
+- Rebuild the Listings tab into a compact command deck that supports both selling and buying without losing dense telemetry.
+- Rework route analytics and creation flow so they share the same vocabulary as the living market: spread, route friction, realized profit, and safety posture.
+- Explicitly out of scope: player-created market orders, deferred hauling fulfillment for player purchases, deep NPC order books, and a heavy economy rewrite.
 
 ## Implementation Outline
 
-1. Add a top-level market command deck and per-tab activity summaries.
-2. Enrich listings rows with stronger stock, surplus, and auto-sell state treatment.
-3. Convert trade routes into denser expandable rows with clearer live status and profit telemetry.
+1. Extend market simulation helpers so the panel can derive remote listings, delivered-price quotes, and route-aware delivery tax from the existing local-price and route systems.
+2. Add store actions for remote purchasing and update manual market selling to respect the current system's live market price.
+3. Rebuild Listings into a compact buy-and-sell command surface with progressive disclosure, stronger scanning aids, and high-value analytics.
+4. Rework the Trade Routes tab so route creation and route performance read as extensions of the living market instead of a separate logistics sub-tool.
 
 ## Risks / Open Questions
 
-- Listings density can become noisy because the market spans many resources; telemetry has to stay compact.
-- Trade routes need stronger operational context without turning the market panel into a second fleet panel.
-- If route count grows substantially later, the tab may need stronger filtering or grouping.
+- The market spans many resources and locations, so data density can become unreadable if the buy browser and sell inventory compete for the same visual hierarchy.
+- Delivery tax has to feel legible and fair. If the surcharge is opaque, remote buying will feel arbitrary rather than strategic.
+- A lightweight first slice still needs strong market identity; otherwise the panel risks becoming a search form bolted onto the old sell table.
 
 ## Files Likely Affected
 
 - `src/ui/panels/MarketPanel.tsx`
-- `src/ui/effects/ActivityBar.tsx`
+- `src/game/systems/market/market.logic.ts`
+- `src/stores/gameStore.ts`
+- `src/stores/initialState.ts`
+- `src/types/game.types.ts`
+- `src/game/persistence/saveLoad.ts`
+- `src/game/galaxy/route.logic.ts`
+- `src/ui/components/PanelInfoSection.tsx`
+- `docs/Idleverse_AI_Architecture.md`
+- `docs/Idleverse_SYSTEM_BLUEPRINTS.md`
+- `docs/Idleverse_BALANCE_FORMULAS.md`
 - `docs/Idleverse_DESIGN_PLAN.md`
 
 ---

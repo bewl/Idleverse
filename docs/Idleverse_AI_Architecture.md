@@ -108,7 +108,7 @@ src/
       |               fleet.orders.ts, fleet.gen.ts, pilot.logic.ts,
       |               exploration.logic.ts, wings.logic.ts
       manufacturing/ — manufacturing.config.ts, manufacturing.logic.ts (T1 + T2 + research)
-      market/       — market.config.ts, market.logic.ts (dynamic pricing + trade routes)
+      market/       — market.config.ts, market.logic.ts (dynamic pricing, remote buy quotes, trade routes)
       mining/       — mining.config.ts, mining.logic.ts, mining.tick.ts
       project/      — stub
       reprocessing/ — reprocessing.logic.ts
@@ -150,6 +150,8 @@ src/
     Shared interaction affordances now live partially in `src/index.css` as a safety net: plain buttons, role-button targets, and Star Map filter rows all receive a baseline hover response even when a local component does not define a custom hover treatment. Dense collapsible headers should still declare their own hover surface locally, but generic interactive feedback is no longer optional.
 
     Older inline-styled controls in `StarMapPanel` and `DevPanel` are now being normalized onto shared `legacy-panel-btn` styling in `src/index.css` so hover and focus behavior stays consistent even before those panels receive a fuller visual refactor.
+
+    Dense command-deck KPI rows are now expected to converge on a shared compact metric primitive in `ui/components` instead of panel-local `CommandMetric` copies. The architectural goal is data density, not reduced fidelity: labels, values, and one line of support meta remain available, but padding, vertical rhythm, and deck wrapper spacing should stay closer to the tighter Fleet panel baseline than to the older padded Market and Industry card style. Interactive KPI cards must remain whole-surface buttons rather than shrinking into small nested controls.
 
     `GameLayout` now uses the horizontal bottom navigation bar as the primary navigation shell at all screen sizes. The old large-screen left sidebar path is no longer the default shell, so panel content should assume a persistent bottom navigation reserve instead of relying on a desktop-only side rail. Responsive layout branching should happen from shared viewport hooks in `ui/hooks`, not by reintroducing panel-local shell assumptions.
 
@@ -517,6 +519,8 @@ The notification UI intentionally stays summary-first. `NotificationCenter.tsx` 
 Notification noise is tuned centrally rather than in UI code. `src/game/notifications/notification.logic.ts` suppresses whole-fleet mining auto-haul arrival updates by checking `miningOriginSystemId`, preserving manually issued fleet-travel arrivals while keeping automation loops from spamming the durable command log.
 
 `tutorial` is a small save-backed onboarding progress model. `src/game/progression/tutorialSequence.ts` owns both the ordered step registry and the derived presentation payload for the overlay, plus the temporary `TUTORIAL_ENABLED` gate that currently keeps the onboarding shell dormant for fresh saves while preserving the implementation for later re-enable. The registry still derives a deterministic first remote mining destination from the generated galaxy so Fleet, Star Map, System, and Mining onboarding can target real reachable content without adding tutorial-only save state. `gameStore` owns save-backed mutations such as skip, restart, explicit step completion, and immediate reevaluation after actions like fleet dispatch or mining-wing assignment. `GameLayout.tsx` mounts the visual tutorial shell, routes step CTAs back through existing panel navigation and panel-state restoration, and, when the feature flag is on, enforces the guided interaction lock by floating only the current tutorial target above a fixed blocker layer.
+
+`systems.market` now carries a two-sided lightweight economy model instead of a sell-only panel wrapper. Local prices still come from deterministic per-system demand plus live pressure, but manual sells now resolve against the player's current local market and remote buys derive delivered quotes from visible station markets plus a route-aware delivery surcharge. The save-backed market state still stays intentionally small: base prices, auto-sell posture, lifetime sale totals, and lifetime buy spend live in `GameState`, while search filters and browser emphasis remain panel-local presentation state inside `MarketPanel.tsx`. `market.logic.ts` owns the quote math and pressure effects, `gameStore.ts` owns immediate buy and sell mutations, and the rebuilt `MarketPanel` uses compact collapsible sections rather than a single always-open dense table.
 
 `systems.rewards` now carries the first-pass premium reward model. Commodity rewards still land in `resources` or fleet cargo as before, while premium drops are written into a save-backed inventory list plus a rolling reward-history feed. The shared resolver in `src/game/systems/rewards/rewardEngine.ts` keeps source definitions, RNG resolution, inventory stacking, and discovery tracking out of combat/mining-specific logic so later systems can plug into the same pattern.
 

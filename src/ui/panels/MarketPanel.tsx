@@ -10,14 +10,23 @@ import {
   formatCredits,
   formatResourceAmount,
 } from '@/game/resources/resourceRegistry';
-import { getEffectiveSellPrice, getLocalPrice, getSystemPressure, getTradeBonusMultiplier } from '@/game/systems/market/market.logic';
+import {
+  getEffectiveSellPrice,
+  getLocalPrice,
+  getRemotePurchaseQuote,
+  getSystemPressure,
+  getTradeBonusMultiplier,
+} from '@/game/systems/market/market.logic';
 import { StatTooltip } from '@/ui/tooltip/StatTooltip';
 import { generateGalaxy } from '@/game/galaxy/galaxy.gen';
+import { CompactMetricCard as CommandMetric } from '@/ui/components/CompactMetricCard';
 import { NavTag } from '@/ui/components/NavTag';
 import { GameDropdown, type DropdownOption } from '@/ui/components/GameDropdown';
 import { SystemUnlockCard } from '@/ui/components/SystemUnlockCard';
 import { useUiStore } from '@/stores/uiStore';
 import { isTutorialStepCurrent } from '@/game/progression/tutorialSequence';
+import type { FactionId, RouteSecurityFilter } from '@/types/faction.types';
+import { getStationInSystem } from '@/game/systems/factions/faction.logic';
 
 // ─── Resource categories to display in market ─────────────────────────────
 
@@ -43,37 +52,6 @@ const MARKET_CATEGORIES: Array<{ label: string; ids: string[] }> = [
     ids:   SHIP_RESOURCE_IDS,
   },
 ];
-
-function CommandMetric({
-  label,
-  value,
-  meta,
-  tone = 'slate',
-}: {
-  label: string;
-  value: string;
-  meta?: string;
-  tone?: 'cyan' | 'violet' | 'amber' | 'emerald' | 'slate';
-}) {
-  const toneClass =
-    tone === 'cyan'
-      ? 'text-cyan-300 border-cyan-700/30 bg-cyan-950/15'
-      : tone === 'violet'
-        ? 'text-violet-300 border-violet-700/30 bg-violet-950/15'
-        : tone === 'amber'
-          ? 'text-amber-300 border-amber-700/30 bg-amber-950/15'
-          : tone === 'emerald'
-            ? 'text-emerald-300 border-emerald-700/30 bg-emerald-950/15'
-            : 'text-slate-300 border-slate-700/30 bg-slate-900/50';
-
-  return (
-    <div className={`rounded-lg border px-2.5 py-2 ${toneClass}`}>
-      <div className="text-[8px] uppercase tracking-widest text-slate-500">{label}</div>
-      <div className="text-[12px] font-semibold font-mono mt-1">{value}</div>
-      {meta && <div className="text-[9px] text-slate-500 mt-0.5">{meta}</div>}
-    </div>
-  );
-}
 
 type RegionalPriceEntry = {
   systemId: string;
@@ -106,6 +84,23 @@ type AutoSellWatchEntry = {
   threshold: number;
   surplus: number;
   liquidationValue: number;
+};
+
+type BuyListingEntry = {
+  resourceId: string;
+  resourceName: string;
+  systemId: string;
+  systemName: string;
+  regionName: string;
+  factionId: FactionId | null;
+  security: 'highsec' | 'lowsec' | 'nullsec';
+  unitPrice: number;
+  totalCost: number;
+  deliverySurcharge: number;
+  deliveryRate: number;
+  hops: number;
+  totalLy: number;
+  isCurrentSystem: boolean;
 };
 
 type RouteAnalyticsEntry = {
@@ -484,6 +479,222 @@ function TradeRouteAnalyticsRail({
           </div>
         )}
       </MarketAnalyticsCard>
+    </div>
+  );
+}
+
+function LivingMarketBuyBoard({
+  state,
+  systems,
+  visitedSystems,
+  listedResourceIds,
+  currentSystemId,
+}: {
+  state: ReturnType<typeof useGameStore.getState>['state'];
+  systems: ReturnType<typeof generateGalaxy>;
+  visitedSystems: ReturnType<typeof generateGalaxy>;
+  listedResourceIds: string[];
+  currentSystemId: string;
+}) {
+  const buyResourceFromSystem = useGameStore(s => s.buyResourceFromSystem);
+  const credits = state.resources['credits'] ?? 0;
+  const [search, setSearch] = useState('');
+  const [resourceFilter, setResourceFilter] = useState<string>('all');
+  const [regionFilter, setRegionFilter] = useState<string>('all');
+  const [factionFilter, setFactionFilter] = useState<string>('all');
+  const [securityFilter, setSecurityFilter] = useState<'all' | 'highsec' | 'lowsec' | 'nullsec'>('all');
+  const [routePreference, setRoutePreference] = useState<RouteSecurityFilter>('shortest');
+  const [buyAmount, setBuyAmount] = useState(25);
+
+  const regionOptions = useMemo(
+    () => ['all', ...Array.from(new Set(visitedSystems.map(system => system.regionName))).sort((left, right) => left.localeCompare(right))],
+    [visitedSystems],
+  );
+  const factionOptions = useMemo(
+    () => ['all', ...Array.from(new Set(visitedSystems.map(system => system.factionId).filter((value): value is FactionId => value !== null))).sort()],
+    [visitedSystems],
+  );
+
+  const listings = useMemo<BuyListingEntry[]>(() => {
+    const normalizedSearch = search.trim().toLowerCase();
+    const amount = Math.max(1, Math.floor(buyAmount));
+
+    return visitedSystems
+      .filter(system => {
+        const systemIndex = Math.max(0, systems.findIndex(entry => entry.id === system.id));
+        const station = getStationInSystem(system, state.galaxy.seed, systemIndex);
+        if (!station || !station.services.includes('market')) return false;
+        if (regionFilter !== 'all' && system.regionName !== regionFilter) return false;
+        if (factionFilter !== 'all' && system.factionId !== factionFilter) return false;
+        if (securityFilter !== 'all' && system.security !== securityFilter) return false;
+        return true;
+      })
+      .flatMap(system => listedResourceIds.map(resourceId => {
+        if (resourceFilter !== 'all' && resourceId !== resourceFilter) return null;
+        const quote = getRemotePurchaseQuote(state, resourceId, system.id, Math.max(1, Math.floor(buyAmount)), routePreference);
+        if (!quote) return null;
+
+        const resourceName = RESOURCE_REGISTRY[resourceId]?.name ?? resourceId;
+        if (normalizedSearch) {
+          const searchHaystack = `${resourceName} ${system.name} ${system.regionName} ${system.factionId ?? 'neutral'} ${system.security}`.toLowerCase();
+          if (!searchHaystack.includes(normalizedSearch)) return null;
+        }
+
+        return {
+          resourceId,
+          resourceName,
+          systemId: system.id,
+          systemName: system.name,
+          regionName: system.regionName,
+          factionId: system.factionId,
+          security: system.security,
+          unitPrice: quote.unitPrice,
+          totalCost: quote.totalCost,
+          deliverySurcharge: quote.deliverySurcharge,
+          deliveryRate: quote.deliveryRate,
+          hops: quote.route?.hops ?? 0,
+          totalLy: quote.route?.totalLy ?? 0,
+          isCurrentSystem: system.id === currentSystemId,
+        };
+      }))
+      .filter((entry): entry is BuyListingEntry => entry !== null)
+      .sort((left, right) => left.totalCost - right.totalCost || left.unitPrice - right.unitPrice)
+      .slice(0, 18);
+  }, [buyAmount, currentSystemId, factionFilter, listedResourceIds, regionFilter, resourceFilter, routePreference, search, securityFilter, state, systems, visitedSystems]);
+
+  const cheapestListing = listings[0] ?? null;
+  const remoteListingCount = listings.filter(entry => !entry.isCurrentSystem).length;
+  const resourceOptions = listedResourceIds.map(resourceId => ({ value: resourceId, label: RESOURCE_REGISTRY[resourceId]?.name ?? resourceId }));
+
+  return (
+    <div className="rounded-xl border border-cyan-800/20 bg-slate-900/45 p-4 space-y-4">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <div className="text-[10px] text-cyan-400 uppercase tracking-widest font-bold">Regional Buy Browser</div>
+          <div className="text-xs text-slate-500 mt-1 max-w-2xl">
+            Search visited markets by commodity, region, faction, and security. Remote orders settle immediately and include a delivery-service surcharge based on route distance and danger.
+          </div>
+        </div>
+        <div className="grid gap-2 sm:grid-cols-3 min-w-[260px]">
+          <CommandMetric label="Credits" value={formatCredits(credits)} meta="liquid buying power" tone="amber" />
+          <CommandMetric label="Visible Listings" value={`${listings.length}`} meta={remoteListingCount > 0 ? `${remoteListingCount} remote offers` : 'local market only'} tone={listings.length > 0 ? 'cyan' : 'slate'} />
+          <CommandMetric label="Cheapest Lot" value={cheapestListing ? formatCredits(cheapestListing.totalCost) : 'N/A'} meta={cheapestListing ? `${cheapestListing.resourceName} · ${cheapestListing.systemName}` : 'no visible offers'} tone={cheapestListing ? 'emerald' : 'slate'} />
+        </div>
+      </div>
+
+      <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-[minmax(0,1.2fr)_repeat(4,minmax(0,0.8fr))]">
+        <input
+          type="text"
+          value={search}
+          onChange={event => setSearch(event.target.value)}
+          placeholder="Search resource, system, region, faction..."
+          className="w-full text-[10px] font-mono bg-slate-800/60 border border-slate-700/40 rounded px-2.5 py-2 text-slate-300 focus:outline-none focus:border-cyan-700/50"
+        />
+        <select value={resourceFilter} onChange={event => setResourceFilter(event.target.value)} className="text-[10px] font-mono bg-slate-800/60 border border-slate-700/40 rounded px-2 py-2 text-slate-300 focus:outline-none focus:border-cyan-700/50">
+          <option value="all">All commodities</option>
+          {resourceOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+        </select>
+        <select value={regionFilter} onChange={event => setRegionFilter(event.target.value)} className="text-[10px] font-mono bg-slate-800/60 border border-slate-700/40 rounded px-2 py-2 text-slate-300 focus:outline-none focus:border-cyan-700/50">
+          {regionOptions.map(option => <option key={option} value={option}>{option === 'all' ? 'All regions' : option}</option>)}
+        </select>
+        <select value={factionFilter} onChange={event => setFactionFilter(event.target.value)} className="text-[10px] font-mono bg-slate-800/60 border border-slate-700/40 rounded px-2 py-2 text-slate-300 focus:outline-none focus:border-cyan-700/50">
+          {factionOptions.map(option => <option key={option} value={option}>{option === 'all' ? 'All factions' : option}</option>)}
+        </select>
+        <select value={securityFilter} onChange={event => setSecurityFilter(event.target.value as 'all' | 'highsec' | 'lowsec' | 'nullsec')} className="text-[10px] font-mono bg-slate-800/60 border border-slate-700/40 rounded px-2 py-2 text-slate-300 focus:outline-none focus:border-cyan-700/50">
+          <option value="all">All security</option>
+          <option value="highsec">Highsec</option>
+          <option value="lowsec">Lowsec</option>
+          <option value="nullsec">Nullsec</option>
+        </select>
+        <div className="flex items-center gap-2 rounded border border-slate-700/30 bg-slate-950/25 px-2.5 py-2">
+          <span className="text-[9px] uppercase tracking-widest text-slate-500 shrink-0">Lot</span>
+          <input
+            type="number"
+            min={1}
+            value={buyAmount}
+            onChange={event => setBuyAmount(Math.max(1, Number(event.target.value) || 1))}
+            className="w-full text-[10px] font-mono bg-transparent text-slate-300 focus:outline-none"
+          />
+        </div>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        {(['shortest', 'safest', 'avoid-null', 'avoid-low'] as RouteSecurityFilter[]).map(mode => {
+          const active = routePreference === mode;
+          return (
+            <button
+              key={mode}
+              onClick={() => setRoutePreference(mode)}
+              className={`px-2.5 py-1 rounded-md border text-[9px] font-mono uppercase tracking-widest transition-all ${
+                active
+                  ? 'border-cyan-700/40 bg-cyan-950/25 text-cyan-300'
+                  : 'border-slate-700/30 bg-slate-950/25 text-slate-500 hover:border-slate-600/40 hover:text-slate-300'
+              }`}
+            >
+              {mode}
+            </button>
+          );
+        })}
+      </div>
+
+      {listings.length === 0 ? (
+        <div className="rounded-lg border border-slate-700/20 bg-slate-950/20 px-3 py-5 text-[10px] text-slate-600">
+          No market offers match the current filters. Broaden the search or visit more systems with market stations.
+        </div>
+      ) : (
+        <div className="grid gap-2 xl:grid-cols-2">
+          {listings.map(entry => {
+            const affordable = credits >= entry.totalCost;
+            return (
+              <button
+                key={`${entry.resourceId}-${entry.systemId}`}
+                type="button"
+                onClick={() => buyResourceFromSystem(entry.resourceId, entry.systemId, Math.max(1, Math.floor(buyAmount)), routePreference)}
+                disabled={!affordable}
+                className={`rounded-lg border px-3 py-3 text-left transition-all ${
+                  affordable
+                    ? 'border-slate-700/30 bg-slate-950/20 hover:border-cyan-700/35 hover:bg-cyan-950/10'
+                    : 'border-slate-800/30 bg-slate-950/10 opacity-60 cursor-not-allowed'
+                }`}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${entry.isCurrentSystem ? 'bg-emerald-400' : entry.security === 'highsec' ? 'bg-cyan-400' : entry.security === 'lowsec' ? 'bg-amber-400/80' : 'bg-red-400/80'}`} />
+                      <div className="text-[11px] font-semibold text-slate-100 truncate">{entry.resourceName}</div>
+                      <span className={`text-[8px] px-1.5 py-0.5 rounded border font-mono uppercase tracking-widest shrink-0 ${entry.isCurrentSystem ? 'border-emerald-700/30 bg-emerald-950/15 text-emerald-300' : 'border-violet-700/30 bg-violet-950/15 text-violet-300'}`}>
+                        {entry.isCurrentSystem ? 'local' : 'remote'}
+                      </span>
+                    </div>
+                    <div className="mt-1 text-[10px] text-slate-400 truncate">{entry.systemName} · {entry.regionName}{entry.factionId ? ` · ${entry.factionId}` : ''}</div>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <div className="text-[11px] font-mono text-cyan-300">{formatCredits(entry.totalCost)}</div>
+                    <div className="text-[8px] text-slate-500">{formatResourceAmount(entry.unitPrice, 0)} ea</div>
+                  </div>
+                </div>
+                <div className="mt-2 grid gap-2 sm:grid-cols-3 text-[9px] font-mono text-slate-500">
+                  <div className="rounded border border-slate-700/20 bg-slate-950/25 px-2 py-1.5">
+                    <div className="text-[8px] uppercase tracking-widest text-slate-600">Delivery</div>
+                    <div className="mt-1 text-slate-300">{entry.deliverySurcharge > 0 ? formatCredits(entry.deliverySurcharge) : 'Instant local'}</div>
+                    <div className="text-slate-600">{(entry.deliveryRate * 100).toFixed(1)}%</div>
+                  </div>
+                  <div className="rounded border border-slate-700/20 bg-slate-950/25 px-2 py-1.5">
+                    <div className="text-[8px] uppercase tracking-widest text-slate-600">Route</div>
+                    <div className="mt-1 text-slate-300">{entry.hops} jumps</div>
+                    <div className="text-slate-600">{entry.totalLy.toFixed(1)} LY</div>
+                  </div>
+                  <div className="rounded border border-slate-700/20 bg-slate-950/25 px-2 py-1.5">
+                    <div className="text-[8px] uppercase tracking-widest text-slate-600">Execution</div>
+                    <div className={`mt-1 ${affordable ? 'text-emerald-300' : 'text-red-400'}`}>{affordable ? 'Receive instantly' : 'Insufficient credits'}</div>
+                    <div className="text-slate-600">lot {formatResourceAmount(Math.max(1, Math.floor(buyAmount)), 0)}</div>
+                  </div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -932,7 +1143,7 @@ function TradeRoutesTab({
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1.62fr)_minmax(340px,1fr)] 2xl:grid-cols-[minmax(0,1.7fr)_minmax(380px,1fr)] items-start">
       <div className="space-y-4 min-w-0">
-        <div className="rounded-xl border border-slate-700/30 bg-slate-900/35 px-3 py-2.5">
+        <div className="rounded-xl border border-slate-700/30 bg-slate-900/35 px-2.5 py-2">
           <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4 mb-3">
             <CommandMetric label="Active Routes" value={`${activeRoutes}`} meta={`${routes.length}/${maxRoutes} configured`} tone={activeRoutes > 0 ? 'emerald' : 'slate'} />
             <CommandMetric label="Transit" value={`${transitRoutes}`} meta={transitRoutes > 0 ? 'cargo in motion' : 'no active haul'} tone={transitRoutes > 0 ? 'cyan' : 'slate'} />
@@ -1131,7 +1342,9 @@ export function MarketPanel() {
 
   const tradeMultiplier = getTradeBonusMultiplier(state);
   const lifetimeSold    = state.systems.market.lifetimeSold ?? {};
+  const lifetimeBought  = state.systems.market.lifetimeBought ?? {};
   const lifetimeTotal   = Object.values(lifetimeSold).reduce((s, v) => s + v, 0);
+  const lifetimeBoughtTotal = Object.values(lifetimeBought).reduce((sum, value) => sum + value, 0);
   const autoSellEntries = Object.entries(state.systems.market.autoSell ?? {});
   const autoEnabledCount = autoSellEntries.filter(([, settings]) => settings.enabled).length;
   const autoReadyCount = autoSellEntries.filter(([resourceId, settings]) => settings.enabled && (state.resources[resourceId] ?? 0) > (settings.threshold ?? 0)).length;
@@ -1263,7 +1476,7 @@ export function MarketPanel() {
           <div>
             <h2 className="text-lg font-bold text-slate-100 tracking-tight">Market</h2>
             <p className="text-xs text-slate-500 mt-0.5">
-              Sell to NPC buyers. Effective sell price scales with{' '}
+              Sell into local demand or source remote lots from visited stations. Effective sale value still scales with{' '}
               <StatTooltip modifierKey="sell-price-bonus">
                 <span className="text-emerald-500 border-b border-dotted border-emerald-800 cursor-help">
                   Trade skills
@@ -1287,15 +1500,21 @@ export function MarketPanel() {
                 {formatCredits(lifetimeTotal)}
               </div>
             </div>
+            <div>
+              <div className="text-[9px] text-slate-600 uppercase tracking-widest">Lifetime bought</div>
+              <div className="text-sm font-bold text-cyan-400">
+                {formatCredits(lifetimeBoughtTotal)}
+              </div>
+            </div>
           </div>
         </div>
 
-        <div className="rounded-xl border border-slate-700/30 bg-slate-900/35 px-3 py-2.5">
+        <div className="rounded-xl border border-slate-700/30 bg-slate-900/35 px-2.5 py-2">
           <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4 mb-3">
             <CommandMetric label="Price Bonus" value={`x${tradeMultiplier.toFixed(3)}`} meta="skill-scaled sell value" tone="emerald" />
             <CommandMetric label="Lifetime Sales" value={formatCredits(lifetimeTotal)} meta="all completed market value" tone="amber" />
-            <CommandMetric label="Auto-Sell" value={`${autoEnabledCount}`} meta={autoReadyCount > 0 ? `${autoReadyCount} ready to liquidate` : 'no armed surplus'} tone={autoReadyCount > 0 ? 'emerald' : autoEnabledCount > 0 ? 'amber' : 'slate'} />
-            <CommandMetric label="Trade Routes" value={`${activeRoutes}`} meta={transitRoutes > 0 ? `${transitRoutes} hauling now` : routes.length > 0 ? `${routes.length} configured` : 'no logistics lines'} tone={transitRoutes > 0 ? 'cyan' : activeRoutes > 0 ? 'violet' : 'slate'} />
+            <CommandMetric label="Lifetime Buy" value={formatCredits(lifetimeBoughtTotal)} meta="direct market acquisitions" tone="cyan" />
+            <CommandMetric label="Trade Routes" value={`${activeRoutes}`} meta={transitRoutes > 0 ? `${transitRoutes} hauling now` : routes.length > 0 ? `${routes.length} configured` : 'no logistics lines'} tone={transitRoutes > 0 ? 'violet' : activeRoutes > 0 ? 'cyan' : 'slate'} />
           </div>
         </div>
       </div>
@@ -1321,14 +1540,22 @@ export function MarketPanel() {
       {activeTab === 'listings' && (
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1.6fr)_minmax(340px,0.96fr)] 2xl:grid-cols-[minmax(0,1.72fr)_minmax(380px,1fr)] items-start">
           <div className="space-y-4 min-w-0">
-            <div className="rounded-xl border border-slate-700/30 bg-slate-900/35 px-3 py-2.5">
+            <div className="rounded-xl border border-slate-700/30 bg-slate-900/35 px-2.5 py-2">
               <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4 mb-3">
                 <CommandMetric label="Listed Goods" value={`${listedResourceIds.length}`} meta="resources with market prices" tone="slate" />
                 <CommandMetric label="Stocked" value={`${listedResourceIds.filter(id => (state.resources[id] ?? 0) > 0).length}`} meta="resources ready for sale" tone="amber" />
                 <CommandMetric label="Auto Ready" value={`${autoReadyCount}`} meta={autoEnabledCount > 0 ? `${autoEnabledCount} auto lines armed` : 'no automation armed'} tone={autoReadyCount > 0 ? 'emerald' : 'slate'} />
-                <CommandMetric label="Routes Online" value={`${activeRoutes}`} meta={transitRoutes > 0 ? `${transitRoutes} in motion` : 'listings only'} tone={activeRoutes > 0 ? 'cyan' : 'slate'} />
+                <CommandMetric label="Remote Access" value={`${visitedSystems.length}`} meta="visited market regions" tone={visitedSystems.length > 1 ? 'cyan' : 'slate'} />
               </div>
             </div>
+
+            <LivingMarketBuyBoard
+              state={state}
+              systems={systems}
+              visitedSystems={visitedSystems}
+              listedResourceIds={listedResourceIds}
+              currentSystemId={currentSystemId}
+            />
 
             <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-3 px-4">
               <div className="text-[9px] text-slate-700 uppercase tracking-widest">Resource</div>

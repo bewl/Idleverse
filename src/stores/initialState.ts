@@ -153,6 +153,7 @@ export function createInitialState(): GameState {
         lastTickAt:    Date.now(),
         autoSell:      {},
         lifetimeSold:  {},
+        lifetimeBought: {},
       },
 
       fleet: {

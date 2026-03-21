@@ -20,6 +20,7 @@ import { computeFleetCargoCapacity } from '@/game/systems/fleet/fleet.logic';
 import { getFleetStoredCargo, getFleetStorageCapacity, getHaulingWings, getOperationalFleetShipIds, getWingCurrentSystemId, hasActiveEscortWing } from '@/game/systems/fleet/wings.logic';
 import { describeFleetActivity } from '@/ui/utils/fleetActivity';
 import { ThemedIcon } from '@/ui/components/ThemedIcon';
+import { CompactMetricCard as CommandMetric } from '@/ui/components/CompactMetricCard';
 
 import type { AnomalyType, GameState, WingType } from '@/types/game.types';
 
@@ -799,52 +800,6 @@ function promptToneStyles(tone: ProgressPrompt['tone']): { border: string; backg
     title: '#fcd34d',
     action: '#fde68a',
   };
-}
-
-function CommandMetric({
-  label,
-  value,
-  meta,
-  tone = 'slate',
-  onClick,
-}: {
-  label: string;
-  value: string;
-  meta?: string;
-  tone?: 'cyan' | 'violet' | 'amber' | 'emerald' | 'slate';
-  onClick?: () => void;
-}) {
-  const toneClass =
-    tone === 'cyan'
-      ? 'text-cyan-300 border-cyan-700/30 bg-cyan-950/15'
-      : tone === 'violet'
-        ? 'text-violet-300 border-violet-700/30 bg-violet-950/15'
-        : tone === 'amber'
-          ? 'text-amber-300 border-amber-700/30 bg-amber-950/15'
-          : tone === 'emerald'
-            ? 'text-emerald-300 border-emerald-700/30 bg-emerald-950/15'
-            : 'text-slate-300 border-slate-700/30 bg-slate-900/50';
-
-  const content = (
-    <>
-      <div className="text-[8px] uppercase tracking-widest text-slate-500">{label}</div>
-      <div className="text-[12px] font-semibold font-mono mt-1">{value}</div>
-      {meta && <div className="text-[9px] text-slate-500 mt-0.5">{meta}</div>}
-    </>
-  );
-
-  if (onClick) {
-    return (
-      <button
-        onClick={onClick}
-        className={`rounded-lg border px-2.5 py-2 text-left transition-colors hover:bg-white/[0.04] ${toneClass}`}
-      >
-        {content}
-      </button>
-    );
-  }
-
-  return <div className={`rounded-lg border px-2.5 py-2 ${toneClass}`}>{content}</div>;
 }
 
 function OperationsCommandDeck() {

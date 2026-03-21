@@ -9,6 +9,7 @@ import { getFleetStorageCapacity, getFleetStoredCargo, getHaulingWings, getOpera
 import { useUiStore } from '@/stores/uiStore';
 import { describeFleetActivity, describeWingActivity } from '@/ui/utils/fleetActivity';
 import { ThemedIcon } from '@/ui/components/ThemedIcon';
+import { CompactMetricCard as CommandMetric } from '@/ui/components/CompactMetricCard';
 import { isTutorialStepCurrent } from '@/game/progression/tutorialSequence';
 
 // ─── Tier color helper ───────────────────────────────────────────────────────
@@ -42,37 +43,6 @@ function getStorageTargetCopy(haulingWingCount: number) {
     label: 'Hauling Network',
     detail: `This mining wing is routing ore across ${haulingWingCount} hauling wings in the fleet storage network.`,
   };
-}
-
-function CommandMetric({
-  label,
-  value,
-  meta,
-  tone = 'slate',
-}: {
-  label: string;
-  value: string;
-  meta?: string;
-  tone?: 'cyan' | 'violet' | 'amber' | 'emerald' | 'slate';
-}) {
-  const toneClass =
-    tone === 'cyan'
-      ? 'text-cyan-300 border-cyan-700/30 bg-cyan-950/15'
-      : tone === 'violet'
-        ? 'text-violet-300 border-violet-700/30 bg-violet-950/15'
-        : tone === 'amber'
-          ? 'text-amber-300 border-amber-700/30 bg-amber-950/15'
-          : tone === 'emerald'
-            ? 'text-emerald-300 border-emerald-700/30 bg-emerald-950/15'
-            : 'text-slate-300 border-slate-700/30 bg-slate-900/50';
-
-  return (
-    <div className={`rounded-lg border px-2.5 py-2 ${toneClass}`}>
-      <div className="text-[8px] uppercase tracking-widest text-slate-500">{label}</div>
-      <div className="text-[12px] font-semibold font-mono mt-1">{value}</div>
-      {meta && <div className="text-[9px] text-slate-500 mt-0.5">{meta}</div>}
-    </div>
-  );
 }
 
 // ─── Fleet Mining Card ───────────────────────────────────────────────────────
@@ -387,7 +357,7 @@ export function MiningPanel() {
       </div>
 
       {miningFleets.length > 0 && (
-        <div className="rounded-xl border border-slate-700/30 bg-slate-900/35 px-3 py-2.5">
+        <div className="rounded-xl border border-slate-700/30 bg-slate-900/35 px-2.5 py-2">
           <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4 mb-3">
             <div>
               <CommandMetric label="Mining Fleets" value={`${miningFleets.length}`} meta={`${totalMiningWings} wings extracting`} tone="cyan" />

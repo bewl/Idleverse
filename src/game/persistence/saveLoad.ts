@@ -77,6 +77,31 @@ export function loadGame(): SaveFile | null {
     if (!save.state.notifications || !Array.isArray(save.state.notifications.entries)) {
       save.state.notifications = { entries: [] };
     }
+    if (!save.state.systems?.market || typeof save.state.systems.market !== 'object') {
+      save.state.systems.market = {
+        prices: {},
+        lastTickAt: save.savedAt ?? Date.now(),
+        autoSell: {},
+        lifetimeSold: {},
+        lifetimeBought: {},
+      };
+    } else {
+      if (!save.state.systems.market.prices || typeof save.state.systems.market.prices !== 'object') {
+        save.state.systems.market.prices = {};
+      }
+      if (typeof save.state.systems.market.lastTickAt !== 'number') {
+        save.state.systems.market.lastTickAt = save.savedAt ?? Date.now();
+      }
+      if (!save.state.systems.market.autoSell || typeof save.state.systems.market.autoSell !== 'object') {
+        save.state.systems.market.autoSell = {};
+      }
+      if (!save.state.systems.market.lifetimeSold || typeof save.state.systems.market.lifetimeSold !== 'object') {
+        save.state.systems.market.lifetimeSold = {};
+      }
+      if (!save.state.systems.market.lifetimeBought || typeof save.state.systems.market.lifetimeBought !== 'object') {
+        save.state.systems.market.lifetimeBought = {};
+      }
+    }
     if (!save.state.systems?.rewards || typeof save.state.systems.rewards !== 'object') {
       save.state.systems.rewards = {
         inventory: [],

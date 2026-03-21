@@ -3568,7 +3568,7 @@ function OperationsTab({ state }: { state: ReturnType<typeof useGameStore.getSta
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="rounded-xl border border-slate-700/30 bg-slate-900/35 px-3 py-2.5">
+      <div className="rounded-xl border border-slate-700/30 bg-slate-900/35 px-2.5 py-2">
         <div className="flex items-center justify-between gap-3 mb-3">
           <div>
             <div className="text-[9px] text-cyan-400 uppercase tracking-widest font-bold">Fleet Operations Deck</div>
@@ -3849,7 +3849,7 @@ export function FleetPanel() {
 
         {activeTab === 'pilots' && (
           <>
-            <div className="rounded-xl border border-slate-700/30 bg-slate-900/35 px-3 py-2.5 mb-1">
+            <div className="rounded-xl border border-slate-700/30 bg-slate-900/35 px-2.5 py-2 mb-1">
               <div className="flex items-center justify-between gap-3 mb-3">
                 <div>
                   <div className="text-[9px] text-cyan-400 uppercase tracking-widest font-bold">Pilot Roster Deck</div>
@@ -3883,7 +3883,7 @@ export function FleetPanel() {
 
         {activeTab === 'ships' && (
           <>
-            <div className="rounded-xl border border-slate-700/30 bg-slate-900/35 px-3 py-2.5 mb-1">
+            <div className="rounded-xl border border-slate-700/30 bg-slate-900/35 px-2.5 py-2 mb-1">
               <div className="flex items-center justify-between gap-3 mb-3">
                 <div>
                   <div className="text-[9px] text-cyan-400 uppercase tracking-widest font-bold">Ship Readiness Deck</div>
